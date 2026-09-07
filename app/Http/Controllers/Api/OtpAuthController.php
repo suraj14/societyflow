@@ -36,9 +36,12 @@ class OtpAuthController extends Controller
         }
         RateLimiter::hit($rateLimitKey, 600); // 10 min window
 
-        // Check if user exists with this phone
-        $user = User::where('phone', $phone)
-            ->orWhere('phone', $request->phone)
+        // Check if user exists with this phone.
+        // Phone match wrapped in a closure: the previous chained orWhere let
+        // inactive/disabled users bypass the status check via SQL precedence.
+        $user = User::where(function ($q) use ($phone, $request) {
+                $q->where('phone', $phone)->orWhere('phone', $request->phone);
+            })
             ->where('status', 'active')
             ->first();
 
@@ -68,13 +71,19 @@ class OtpAuthController extends Controller
 
         $responseData = ['success' => true, 'message' => 'OTP sent successfully to ' . $this->maskPhone($phone)];
 
-        // DEV ONLY — show OTP in response when SMS not configured
-        if ($smsResult['message'] === 'dev_mode' || config('app.env') !== 'production') {
+        // DEV ONLY — OTP is exposed in the response strictly in local/development.
+        // Never in production or staging, even when the SMS provider is
+        // unconfigured or fails ('dev_mode' fallback previously leaked it).
+        $isDevEnv = app()->environment(['local', 'development']);
+
+        if ($isDevEnv) {
             $responseData['otp'] = $otp;
         }
 
         if (!$smsResult['success']) {
-            $responseData['message'] = 'Could not send SMS. ' . (config('app.env') !== 'production' ? 'Dev OTP: ' . $otp : 'Please try again.');
+            $responseData['message'] = $isDevEnv
+                ? 'Could not send SMS. Dev OTP: ' . $otp
+                : 'Could not send SMS. Please try again.';
         }
 
         return response()->json($responseData);
@@ -134,9 +143,10 @@ class OtpAuthController extends Controller
         RateLimiter::clear($rateLimitKey);
         RateLimiter::clear('otp-send:' . $phone);
 
-        // Find user
-        $user = User::where('phone', $phone)
-            ->orWhere('phone', $request->phone)
+        // Find user (phone match grouped so the status check always applies)
+        $user = User::where(function ($q) use ($phone, $request) {
+                $q->where('phone', $phone)->orWhere('phone', $request->phone);
+            })
             ->where('status', 'active')
             ->first();
 
@@ -154,6 +164,133 @@ class OtpAuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Login successful',
+            'token'   => $token,
+            'user'    => $this->formatUser($user),
+        ]);
+    }
+
+    /**
+     * Forgot password — step 1.
+     * Sends an OTP to the registered mobile number of the account matching
+     * this email. Response is identical whether or not the account exists,
+     * so emails cannot be enumerated.
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $rateLimitKey = 'forgot-password:' . $request->ip();
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            $seconds = RateLimiter::availableIn($rateLimitKey);
+            return response()->json([
+                'success' => false,
+                'message' => "Too many attempts. Try again in {$seconds} seconds.",
+            ], 429);
+        }
+        RateLimiter::hit($rateLimitKey, 900);
+
+        $generic = [
+            'success' => true,
+            'message' => 'If an account exists with this email, an OTP has been sent to its registered mobile number.',
+        ];
+
+        $user = User::where('email', $request->email)
+            ->where('status', 'active')
+            ->first();
+
+        if (!$user || empty($user->phone)) {
+            return response()->json($generic);
+        }
+
+        $phone = $this->normalizePhone($user->phone);
+
+        MobileOtp::where('phone', $phone)->where('is_used', false)->update(['is_used' => true]);
+
+        $otp = str_pad(random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
+
+        MobileOtp::create([
+            'phone'      => $phone,
+            'otp'        => $otp,
+            'attempts'   => 0,
+            'is_used'    => false,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+
+        SmsService::sendOtp($phone, $otp, $user->society_id ?? null);
+
+        $responseData = $generic;
+        if (app()->environment(['local', 'development'])) {
+            $responseData['otp'] = $otp;
+        }
+
+        return response()->json($responseData);
+    }
+
+    /**
+     * Forgot password — step 2.
+     * Verifies the OTP sent to the account's phone, sets the new password,
+     * revokes all existing tokens, and logs the user in.
+     */
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email'    => 'required|email',
+            'otp'      => 'required|string|size:4',
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        $rateLimitKey = 'reset-password:' . $request->ip();
+        if (RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            $seconds = RateLimiter::availableIn($rateLimitKey);
+            return response()->json([
+                'success' => false,
+                'message' => "Too many attempts. Try again in {$seconds} seconds.",
+            ], 429);
+        }
+        RateLimiter::hit($rateLimitKey, 900);
+
+        $user = User::where('email', $request->email)
+            ->where('status', 'active')
+            ->first();
+
+        if (!$user || empty($user->phone)) {
+            return response()->json(['success' => false, 'message' => 'Invalid or expired OTP.'], 422);
+        }
+
+        $phone = $this->normalizePhone($user->phone);
+
+        $otpRecord = MobileOtp::where('phone', $phone)
+            ->where('is_used', false)
+            ->latest()
+            ->first();
+
+        if (!$otpRecord || $otpRecord->isExpired() || $otpRecord->attempts >= 5) {
+            return response()->json(['success' => false, 'message' => 'Invalid or expired OTP. Please request a new one.'], 422);
+        }
+
+        if ($otpRecord->otp !== $request->otp) {
+            $otpRecord->incrementAttempts();
+            return response()->json(['success' => false, 'message' => 'Invalid OTP.'], 422);
+        }
+
+        $otpRecord->markUsed();
+        RateLimiter::clear($rateLimitKey);
+
+        $user->update([
+            'password'      => \Illuminate\Support\Facades\Hash::make($request->password),
+            'last_login_at' => now(),
+        ]);
+
+        // Password changed: every existing session/token is revoked.
+        $user->tokens()->delete();
+
+        $token = $user->createToken('mobile-app')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password reset successful',
             'token'   => $token,
             'user'    => $this->formatUser($user),
         ]);

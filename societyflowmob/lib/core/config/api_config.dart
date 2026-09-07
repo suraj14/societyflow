@@ -23,6 +23,7 @@ class ApiConfig {
   static const String register       = '/auth/register';
   static const String logout         = '/auth/logout';
   static const String forgotPassword = '/auth/forgot-password';
+  static const String resetPassword  = '/auth/reset-password';
   static const String checkAccount   = '/auth/check-account';
   static const String me             = '/auth/me';
   static const String sendOtp        = '/auth/send-otp';

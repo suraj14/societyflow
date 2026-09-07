@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\ResolvesUserFlats;
 use App\Models\MaintenanceBill;
 use App\Models\Visitor;
 use App\Models\Complaint;
@@ -13,16 +14,17 @@ use Illuminate\Http\JsonResponse;
 
 class DashboardApiController extends Controller
 {
+    use ResolvesUserFlats;
+
     public function index(Request $request): JsonResponse
     {
         $user      = $request->user();
         $societyId = $user->society_id;
-        $resident  = $user->resident()->with('flat')->first();
-        $flatId    = $resident?->flat_id;
+        $flatIds   = $this->userFlatIds($user);
 
-        // Pending bills for this flat
-        $pendingBills = $flatId
-            ? MaintenanceBill::where('flat_id', $flatId)
+        // Pending bills across all units the user resides in or owns
+        $pendingBills = $flatIds
+            ? MaintenanceBill::whereIn('flat_id', $flatIds)
                 ->whereIn('status', ['pending', 'overdue', 'partial'])
                 ->count()
             : 0;
@@ -55,7 +57,7 @@ class DashboardApiController extends Controller
             ]);
 
         // Recent activities
-        $recentActivities = $this->getRecentActivities($user, $flatId, $societyId);
+        $recentActivities = $this->getRecentActivities($user, $flatIds, $societyId);
 
         return response()->json([
             'success' => true,
@@ -70,7 +72,7 @@ class DashboardApiController extends Controller
         ]);
     }
 
-    private function getRecentActivities($user, $flatId, $societyId): array
+    private function getRecentActivities($user, $flatIds, $societyId): array
     {
         $activities = [];
 

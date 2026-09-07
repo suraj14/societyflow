@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\ApiImageHelper;
+use App\Http\Controllers\Api\Concerns\ResolvesUserFlats;
 use App\Models\Facility;
 use App\Models\FacilityBooking;
 use Illuminate\Http\Request;
@@ -11,6 +12,8 @@ use Illuminate\Http\JsonResponse;
 
 class FacilityApiController extends Controller
 {
+    use ResolvesUserFlats;
+
     public function index(Request $request): JsonResponse
     {
         $facilities = Facility::where('society_id', $request->user()->society_id)
@@ -38,47 +41,67 @@ class FacilityApiController extends Controller
     public function book(Request $request): JsonResponse
     {
         $request->validate([
-            'facility_id' => 'required|exists:facilities,id',
-            'booking_date' => 'required|date',
-            'start_time'  => 'required|string',
-            'end_time'    => 'required|string',
-            'purpose'     => 'nullable|string|max:500',
+            'facility_id'  => 'required|integer',
+            'booking_date' => 'required|date|after_or_equal:today',
+            'start_time'   => 'required|date_format:H:i,H:i:s',
+            'end_time'     => 'required|date_format:H:i,H:i:s|after:start_time',
+            'purpose'      => 'nullable|string|max:500',
         ]);
 
         $user = $request->user();
 
-        // Get user's flat_id from their resident record
-        $flatId = $user->resident()->value('flat_id');
+        // Attach the user's unit (residency or ownership) to the booking
+        $flatId = $this->userFlatIds($user)[0] ?? null;
 
-        // Check for conflicts (use string comparison for time)
-        $conflict = FacilityBooking::where('facility_id', $request->facility_id)
-            ->whereDate('booking_date', $request->booking_date)
-            ->whereNotIn('status', ['cancelled', 'rejected'])
-            ->where(function ($q) use ($request) {
-                $q->where(function ($inner) use ($request) {
-                    $inner->where('start_time', '<', $request->end_time)
-                          ->where('end_time', '>', $request->start_time);
-                });
-            })->exists();
+        $booking = \Illuminate\Support\Facades\DB::transaction(function () use ($request, $user, $flatId) {
+            // Lock the facility row: serializes concurrent booking attempts on
+            // the same facility so the conflict check below cannot race.
+            // Also enforces society ownership — a facility_id from another
+            // society is a 404, never bookable.
+            $facility = Facility::where('id', $request->facility_id)
+                ->where('society_id', $user->society_id)
+                ->where('status', 'active')
+                ->lockForUpdate()
+                ->first();
 
-        if ($conflict) {
-            return response()->json(['success' => false, 'message' => 'This time slot is already booked.'], 422);
+            if (!$facility) {
+                return null;
+            }
+
+            $conflict = FacilityBooking::where('facility_id', $facility->id)
+                ->whereDate('booking_date', $request->booking_date)
+                ->whereNotIn('status', ['cancelled', 'rejected'])
+                ->where('start_time', '<', $request->end_time)
+                ->where('end_time', '>', $request->start_time)
+                ->exists();
+
+            if ($conflict) {
+                return false;
+            }
+
+            return FacilityBooking::create([
+                'society_id'    => $user->society_id,
+                'facility_id'   => $facility->id,
+                'user_id'       => $user->id,
+                'flat_id'       => $flatId,
+                'booking_date'  => $request->booking_date,
+                'start_time'    => $request->start_time,
+                'end_time'      => $request->end_time,
+                'purpose'       => $request->purpose,
+                'status'        => 'pending',
+                'booking_amount'=> 0,
+                'security_deposit' => 0,
+                'payment_status'=> 'pending',
+            ]);
+        });
+
+        if ($booking === null) {
+            return response()->json(['success' => false, 'message' => 'Facility not found.'], 404);
         }
 
-        $booking = FacilityBooking::create([
-            'society_id'    => $user->society_id,
-            'facility_id'   => $request->facility_id,
-            'user_id'       => $user->id,
-            'flat_id'       => $flatId,
-            'booking_date'  => $request->booking_date,
-            'start_time'    => $request->start_time,
-            'end_time'      => $request->end_time,
-            'purpose'       => $request->purpose,
-            'status'        => 'pending',
-            'booking_amount'=> 0,
-            'security_deposit' => 0,
-            'payment_status'=> 'pending',
-        ]);
+        if ($booking === false) {
+            return response()->json(['success' => false, 'message' => 'This time slot is already booked.'], 422);
+        }
 
         $booking->load('facility');
 

@@ -9,13 +9,23 @@ use App\Models\User;
 
 return new class extends Migration
 {
+    /** Driver-aware FK toggle: PRAGMA is SQLite-only and broke MySQL. */
+    private function setForeignKeyChecks(bool $on): void
+    {
+        if (DB::getDriverName() === 'sqlite') {
+            DB::statement('PRAGMA foreign_keys=' . ($on ? 'ON' : 'OFF'));
+        } else {
+            DB::statement('SET FOREIGN_KEY_CHECKS=' . ($on ? '1' : '0'));
+        }
+    }
+
     /**
      * Run the migrations.
      */
     public function up(): void
     {
         // Disable foreign key checks temporarily
-        DB::statement('PRAGMA foreign_keys=OFF');
+        $this->setForeignKeyChecks(false);
 
         try {
             // Migrate Residents with type='owner' to Owner model
@@ -76,7 +86,7 @@ return new class extends Migration
             }
         } finally {
             // Re-enable foreign key checks
-            DB::statement('PRAGMA foreign_keys=ON');
+            $this->setForeignKeyChecks(true);
         }
     }
 
@@ -86,7 +96,7 @@ return new class extends Migration
     public function down(): void
     {
         // Disable foreign key checks temporarily
-        DB::statement('PRAGMA foreign_keys=OFF');
+        $this->setForeignKeyChecks(false);
 
         try {
             // Delete all Owner and Tenant records created during migration
@@ -98,7 +108,7 @@ return new class extends Migration
             User::whereNotNull('tenant_id')->update(['tenant_id' => null]);
         } finally {
             // Re-enable foreign key checks
-            DB::statement('PRAGMA foreign_keys=ON');
+            $this->setForeignKeyChecks(true);
         }
     }
 };

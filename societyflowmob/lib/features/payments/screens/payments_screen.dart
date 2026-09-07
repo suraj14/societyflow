@@ -153,7 +153,7 @@ class _PaymentHistory extends ConsumerWidget {
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(p.billType, style: AppTextStyles.label),
               const SizedBox(height: 2),
-              Text('${p.paymentDate.day}/${p.paymentDate.month}/${p.paymentDate.year} • ${p.paymentMethod.toUpperCase()}', style: AppTextStyles.caption),
+              Text('${p.paymentDate != null ? '${p.paymentDate!.day}/${p.paymentDate!.month}/${p.paymentDate!.year}' : 'Date pending'} • ${p.paymentMethod.toUpperCase()}', style: AppTextStyles.caption),
             ])),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text('₹${p.amount.toStringAsFixed(0)}', style: AppTextStyles.label.copyWith(color: AppColors.secondary)),

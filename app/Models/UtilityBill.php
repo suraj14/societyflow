@@ -24,15 +24,15 @@ class UtilityBill extends Model
         'notes',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'bill_amount' => 'decimal:2',
             'bill_date' => 'date',
             'due_date' => 'date',
             'payment_date' => 'date',
         ];
-    }
 
     // Relationships
     public function society(): BelongsTo

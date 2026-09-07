@@ -30,6 +30,12 @@ class ApiService {
   static ApiService? _instance;
   static ApiService get instance => _instance ??= ApiService._();
 
+  /// Registered by the app root. Called once when an authenticated request
+  /// returns 401 (token expired/revoked) so the app can reset auth state
+  /// and return to the login screen.
+  static void Function()? onSessionExpired;
+  static bool _handlingExpiry = false;
+
   Dio? _dio;
   String? _currentBaseUrl;
 
@@ -66,8 +72,22 @@ class ApiService {
           dev.log('← ${response.statusCode} ${response.requestOptions.uri}', name: 'API');
           handler.next(response);
         },
-        onError: (error, handler) {
+        onError: (error, handler) async {
           dev.log('✗ ${error.response?.statusCode} ${error.requestOptions.uri}', name: 'API');
+          // 401 on a request that carried a token = session expired/revoked.
+          // (Public auth endpoints never attach a token, so they can't trigger this.)
+          final hadToken = error.requestOptions.headers['Authorization'] != null;
+          if (error.response?.statusCode == 401 && hadToken && !_handlingExpiry) {
+            _handlingExpiry = true;
+            try {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('auth_token');
+              await prefs.remove('user_data');
+              onSessionExpired?.call();
+            } finally {
+              _handlingExpiry = false;
+            }
+          }
           handler.next(error);
         },
       ));

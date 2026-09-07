@@ -23,13 +23,13 @@ class StaffTask extends Model
         'completed_at',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'due_date' => 'date',
             'completed_at' => 'datetime',
         ];
-    }
 
     // Relationships
     public function society(): BelongsTo

@@ -111,6 +111,47 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  // ── Forgot / Reset Password ───────────────────────────────────────────────
+
+  /// Step 1: request an OTP to the account's registered mobile number.
+  Future<void> forgotPassword({required String email}) async {
+    final result = await HttpService.instance.post(
+      ApiConfig.forgotPassword,
+      body: {'email': email},
+    );
+    if (result.success) {
+      final devOtp = result.data?['otp']?.toString();
+      if (devOtp != null) state = state.copyWith(devOtp: devOtp);
+    } else {
+      throw Exception(result.message.isNotEmpty ? result.message : 'Could not send OTP');
+    }
+  }
+
+  /// Step 2: verify OTP and set the new password. Logs the user in on success.
+  Future<void> resetPassword({
+    required String email,
+    required String otp,
+    required String password,
+  }) async {
+    state = state.copyWith(isLoading: true, error: null);
+    final result = await HttpService.instance.post(
+      ApiConfig.resetPassword,
+      body: {
+        'email':                 email,
+        'otp':                   otp,
+        'password':              password,
+        'password_confirmation': password,
+      },
+    );
+    if (result.success && result.data != null) {
+      await _saveSession(result.data!);
+      state = state.copyWith(devOtp: null);
+    } else {
+      state = state.copyWith(isLoading: false, error: result.message);
+      throw Exception(result.message.isNotEmpty ? result.message : 'Password reset failed');
+    }
+  }
+
   // ── Profile ───────────────────────────────────────────────────────────────
 
   Future<void> refreshProfile() async {
@@ -131,6 +172,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     await HttpService.instance.post(ApiConfig.logout);
+    await StorageService.clearAll();
+    state = const AuthState();
+  }
+
+  /// Local reset only — used when the backend already rejected the token
+  /// (401). No logout API call: the token is dead.
+  Future<void> clearSession() async {
     await StorageService.clearAll();
     state = const AuthState();
   }

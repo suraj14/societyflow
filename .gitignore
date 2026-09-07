@@ -80,3 +80,11 @@ Thumbs.db
 *.p12
 *.jks
 *.keystore
+phpunit.result.cache
+
+# PHPUnit
+.phpunit.result.cache
+
+# Local dev database (contains real PII - never commit)
+/database/*.sqlite
+/database/*.sqlite-journal

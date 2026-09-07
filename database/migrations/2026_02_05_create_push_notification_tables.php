@@ -3,31 +3,46 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
     public function up(): void
     {
         // Push subscription tokens per user
-        Schema::create('push_subscriptions', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
-            $table->foreignId('society_id')->constrained('societies')->onDelete('cascade');
-            $table->text('endpoint');
-            $table->text('auth_key');
-            $table->text('p256dh_key');
-            $table->string('device_type')->default('web'); // web, mobile, etc
-            $table->string('browser')->nullable(); // Chrome, Firefox, Safari, etc
-            $table->boolean('is_active')->default(true);
-            $table->timestamp('last_used_at')->nullable();
-            $table->timestamps();
-            
-            $table->unique(['user_id', 'endpoint']);
-            $table->index(['society_id', 'is_active']);
-        });
+        if (!Schema::hasTable('push_subscriptions')) {
+            Schema::create('push_subscriptions', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
+                $table->foreignId('society_id')->constrained('societies')->onDelete('cascade');
+                $table->text('endpoint');
+                $table->text('auth_key');
+                $table->text('p256dh_key');
+                $table->string('device_type')->default('web'); // web, mobile, etc
+                $table->string('browser')->nullable(); // Chrome, Firefox, Safari, etc
+                $table->boolean('is_active')->default(true);
+                $table->timestamp('last_used_at')->nullable();
+                $table->timestamps();
+
+                $table->index(['society_id', 'is_active']);
+            });
+        }
+
+        // Unique on (user_id, endpoint): endpoint is TEXT, and MySQL refuses
+        // TEXT in an index without a key length — the blueprint unique()
+        // broke `php artisan migrate` and left this migration half-applied.
+        if (DB::getDriverName() === 'sqlite') {
+            DB::statement('CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_user_id_endpoint_unique ON push_subscriptions (user_id, endpoint)');
+        } else {
+            $exists = collect(DB::select("SHOW INDEX FROM push_subscriptions"))
+                ->pluck('Key_name')->contains('push_subscriptions_user_id_endpoint_unique');
+            if (!$exists) {
+                DB::statement('ALTER TABLE push_subscriptions ADD UNIQUE push_subscriptions_user_id_endpoint_unique (user_id, endpoint(191))');
+            }
+        }
 
         // Push notification logs
-        Schema::create('push_notification_logs', function (Blueprint $table) {
+        if (!Schema::hasTable('push_notification_logs')) Schema::create('push_notification_logs', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('society_id')->constrained('societies')->onDelete('cascade');
@@ -46,22 +61,22 @@ return new class extends Migration
         });
 
         // Push notification settings per society
-        Schema::create('push_notification_settings', function (Blueprint $table) {
+        if (!Schema::hasTable('push_notification_settings')) Schema::create('push_notification_settings', function (Blueprint $table) {
             $table->id();
             $table->foreignId('society_id')->constrained('societies')->onDelete('cascade');
             $table->boolean('enabled')->default(true);
             $table->text('fcm_server_key')->nullable(); // Encrypted
             $table->text('vapid_public_key')->nullable();
             $table->text('vapid_private_key')->nullable(); // Encrypted
-            $table->json('enabled_triggers')->default('[]'); // Array of enabled notification types
-            $table->json('role_permissions')->default('[]'); // Role-based delivery settings
+            $table->json('enabled_triggers')->nullable(); // MySQL: JSON cannot have a default // Array of enabled notification types
+            $table->json('role_permissions')->nullable(); // MySQL: JSON cannot have a default // Role-based delivery settings
             $table->timestamps();
             
             $table->unique('society_id');
         });
 
         // Push notification templates
-        Schema::create('push_notification_templates', function (Blueprint $table) {
+        if (!Schema::hasTable('push_notification_templates')) Schema::create('push_notification_templates', function (Blueprint $table) {
             $table->id();
             $table->foreignId('society_id')->nullable()->constrained('societies')->onDelete('cascade');
             $table->string('trigger_action')->unique();

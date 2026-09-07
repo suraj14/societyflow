@@ -39,6 +39,21 @@ return new class extends Migration
             $table->index('owner_id');
             $table->index('status');
         });
+
+        // users.tenant_id FK — deferred here because add_owner_tenant_to_users
+        // sorts before this migration, when tenants doesn't exist yet.
+        if (Schema::hasColumn('users', 'tenant_id')) {
+            $fks = collect(\Illuminate\Support\Facades\DB::select(
+                "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+                   AND REFERENCED_TABLE_NAME IS NOT NULL"
+            ))->pluck('CONSTRAINT_NAME');
+            if (!$fks->contains('users_tenant_id_foreign')) {
+                Schema::table('users', function (Blueprint $table) {
+                    $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('set null');
+                });
+            }
+        }
     }
 
     /**

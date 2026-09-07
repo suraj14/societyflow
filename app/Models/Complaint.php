@@ -27,13 +27,13 @@ class Complaint extends Model
         'resolved_at',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'attachments' => 'array',
             'resolved_at' => 'datetime',
         ];
-    }
 
     // Mutators
     public function setAttachmentsAttribute($value)

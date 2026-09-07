@@ -41,28 +41,6 @@ Route::get('/', [LandingController::class, 'index'])->name('landing');
 // API Routes (require authentication)
 Route::middleware('auth')->group(function () {
     Route::get('/api/flats', [FlatController::class, 'apiIndex'])->name('api.flats.all');
-    
-    // Debug route for visitor form
-    Route::get('/debug/visitor-flats', function() {
-        $user = auth()->user();
-        $societyId = $user->society_id;
-        
-        $flats = \App\Models\Flat::with(['building', 'villaArea'])
-            ->where('society_id', $societyId)
-            ->get();
-            
-        $villaFlats = $flats->filter(function($flat) {
-            return $flat->property_type === 'villa' && $flat->villaArea;
-        });
-        
-        return response()->json([
-            'user_society_id' => $societyId,
-            'total_flats' => $flats->count(),
-            'villa_flats_with_areas' => $villaFlats->count(),
-            'villa_areas' => $villaFlats->pluck('villaArea')->unique('id')->values(),
-            'sample_villa_flats' => $villaFlats->take(3)->values()
-        ]);
-    });
 });
 
 // Authentication Routes
@@ -324,11 +302,6 @@ Route::middleware(['auth'])->group(function () {
     Route::get('api/payments/flats', [PaymentController::class, 'getFlats'])->name('api.payments.flats');
     Route::get('api/payments/villa-areas', [PaymentController::class, 'getVillaAreas'])->name('api.payments.villa-areas');
     Route::get('api/payments/villas', [PaymentController::class, 'getVillas'])->name('api.payments.villas');
-});
-
-// Test route for utility bills
-Route::get('/test-utility-bills', function() {
-    return 'Utility Bills route is working!';
 });
 
 // Complaint Management Routes (All authenticated users)

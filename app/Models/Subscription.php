@@ -25,9 +25,10 @@ class Subscription extends Model
         'cancelled_at',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'amount' => 'decimal:2',
             'start_date' => 'date',
             'end_date' => 'date',
@@ -35,7 +36,6 @@ class Subscription extends Model
             'auto_renew' => 'boolean',
             'cancelled_at' => 'datetime',
         ];
-    }
 
     // Relationships
     public function society(): BelongsTo

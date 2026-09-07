@@ -27,9 +27,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/login',           [AuthApiController::class, 'login']);
         Route::post('/check-account',   [AuthApiController::class, 'checkAccount']);
         Route::post('/register',        [AuthApiController::class, 'register']);
-        Route::post('/forgot-password', function (Request $request) {
-            return response()->json(['success' => true, 'message' => 'If this email exists, a reset link has been sent.']);
-        });
+        Route::post('/forgot-password', [OtpAuthController::class, 'forgotPassword']);
+        Route::post('/reset-password',  [OtpAuthController::class, 'resetPassword']);
 
         // Mobile OTP login (does not affect web login)
         Route::post('/send-otp',   [OtpAuthController::class, 'sendOtp']);
@@ -56,8 +55,8 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/complaints',            [ComplaintApiController::class, 'index']);
         Route::post('/complaints',           [ComplaintApiController::class, 'store']);
-        Route::get('/complaints/{id}',       [ComplaintApiController::class, 'show']);
         Route::get('/complaints/categories', [ComplaintApiController::class, 'categories']);
+        Route::get('/complaints/{id}',       [ComplaintApiController::class, 'show'])->whereNumber('id');
 
         Route::get('/payments',         [PaymentApiController::class, 'index']);
         Route::get('/bills',            [PaymentApiController::class, 'bills']);

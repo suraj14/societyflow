@@ -11,19 +11,46 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('users', function (Blueprint $table) {
-            // Link user to owner (for owner role)
-            $table->unsignedBigInteger('owner_id')->nullable()->after('society_id');
-            $table->foreign('owner_id')->references('id')->on('owners')->onDelete('set null');
-            
-            // Link user to tenant (for tenant role)
-            $table->unsignedBigInteger('tenant_id')->nullable()->after('owner_id');
-            $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('set null');
-            
-            // Add indexes for performance
-            $table->index('owner_id');
-            $table->index('tenant_id');
+        // Idempotent + ordering-safe: this migration sorts BEFORE
+        // 2026_01_21_create_tenants_table, so the tenant_id foreign key used
+        // to fail (tenants table absent), leaving the columns half-applied
+        // and every re-run dying on "duplicate column". Columns/FK/indexes
+        // are now guarded; the tenants FK is added by create_tenants_table.
+        if (!Schema::hasColumn('users', 'owner_id')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->unsignedBigInteger('owner_id')->nullable()->after('society_id');
+            });
+        }
+        if (!Schema::hasColumn('users', 'tenant_id')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->unsignedBigInteger('tenant_id')->nullable()->after('owner_id');
+            });
+        }
+
+        $fks = collect(\Illuminate\Support\Facades\DB::select(
+            "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+               AND REFERENCED_TABLE_NAME IS NOT NULL"
+        ))->pluck('CONSTRAINT_NAME');
+
+        Schema::table('users', function (Blueprint $table) use ($fks) {
+            if (!$fks->contains('users_owner_id_foreign')) {
+                $table->foreign('owner_id')->references('id')->on('owners')->onDelete('set null');
+            }
+            if (Schema::hasTable('tenants') && !$fks->contains('users_tenant_id_foreign')) {
+                $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('set null');
+            }
         });
+
+        foreach (['owner_id', 'tenant_id'] as $col) {
+            try {
+                Schema::table('users', function (Blueprint $table) use ($col) {
+                    $table->index($col);
+                });
+            } catch (\Throwable $e) {
+                // index already exists — fine
+            }
+        }
     }
 
     /**

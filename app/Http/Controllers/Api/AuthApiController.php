@@ -56,14 +56,21 @@ class AuthApiController extends Controller
             'phone' => 'required|string|max:20',
         ]);
 
+        $rateLimitKey = 'check-account:' . $request->ip();
+        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($rateLimitKey, 10)) {
+            $seconds = \Illuminate\Support\Facades\RateLimiter::availableIn($rateLimitKey);
+            return response()->json([
+                'success' => false,
+                'message' => "Too many attempts. Try again in {$seconds} seconds.",
+            ], 429);
+        }
+        \Illuminate\Support\Facades\RateLimiter::hit($rateLimitKey, 900);
+
+        // Email AND phone must both match. The old phone-only fallback let
+        // anyone enumerate name/email/flat/society from a phone number.
         $user = User::where('email', $request->email)
             ->where('phone', $request->phone)
             ->first();
-
-        if (!$user) {
-            // Try phone only (some admins may enter different email format)
-            $user = User::where('phone', $request->phone)->first();
-        }
 
         if (!$user) {
             return response()->json([
@@ -104,19 +111,37 @@ class AuthApiController extends Controller
             'password' => 'required|string|min:6|confirmed',
         ]);
 
+        $rateLimitKey = 'register:' . $request->ip();
+        if (\Illuminate\Support\Facades\RateLimiter::tooManyAttempts($rateLimitKey, 5)) {
+            $seconds = \Illuminate\Support\Facades\RateLimiter::availableIn($rateLimitKey);
+            return response()->json([
+                'success' => false,
+                'message' => "Too many attempts. Try again in {$seconds} seconds.",
+            ], 429);
+        }
+        \Illuminate\Support\Facades\RateLimiter::hit($rateLimitKey, 900);
+
+        // Email AND phone must both match the pre-created account.
+        // No phone-only fallback: that allowed taking over any account
+        // knowing just a phone number.
         $user = User::where('email', $request->email)
             ->where('phone', $request->phone)
             ->first();
-
-        if (!$user) {
-            $user = User::where('phone', $request->phone)->first();
-        }
 
         if (!$user) {
             return response()->json([
                 'success' => false,
                 'message' => 'No account found. Please contact your society admin.',
             ], 404);
+        }
+
+        // An account that is already active with a password is registered.
+        // Never let this endpoint overwrite its password.
+        if (!empty($user->password) && $user->status === 'active') {
+            return response()->json([
+                'success' => false,
+                'message' => 'This account is already registered. Please login or use forgot password.',
+            ], 409);
         }
 
         $user->update([

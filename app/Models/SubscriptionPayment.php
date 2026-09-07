@@ -23,14 +23,14 @@ class SubscriptionPayment extends Model
         'notes',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'amount' => 'decimal:2',
             'gateway_response' => 'array',
             'payment_date' => 'date',
         ];
-    }
 
     protected static function boot()
     {

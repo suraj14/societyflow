@@ -7,8 +7,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Delete all services and recreate them fresh
-        DB::table('services')->truncate();
+        // Delete all services and recreate them fresh.
+        // delete() instead of truncate(): MySQL refuses to truncate a table
+        // referenced by a foreign key (service_providers.service_id), which
+        // broke `php artisan migrate` on fresh databases.
+        DB::table('services')->delete();
         
         // Recreate services with unique entries
         $services = [
@@ -41,6 +44,6 @@ return new class extends Migration
 
     public function down(): void
     {
-        DB::table('services')->truncate();
+        DB::table('services')->delete();
     }
 };

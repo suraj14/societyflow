@@ -29,9 +29,10 @@ class Resident extends Model
         'notes',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'move_in_date' => 'date',
             'move_out_date' => 'date',
             'security_deposit' => 'decimal:2',
@@ -41,7 +42,6 @@ class Resident extends Model
             'emergency_contact' => 'array',
             'notes' => 'array',
         ];
-    }
 
     // Relationships
     public function society(): BelongsTo

@@ -52,10 +52,10 @@ return new class extends Migration
             // Rename temp table to original name
             Schema::rename('visitors_temp', 'visitors');
         } else {
-            // For other databases, just update the enum
-            Schema::table('visitors', function (Blueprint $table) {
-                $table->enum('approval_status', ['pending', 'allowed', 'denied'])->default('pending')->change();
-            });
+            // For other databases, just update the enum.
+            // Raw ALTER: doctrine/dbal (used by ->change()) cannot handle
+            // enum columns and broke `php artisan migrate` on MySQL.
+            DB::statement("ALTER TABLE visitors MODIFY approval_status ENUM('pending','allowed','denied') NOT NULL DEFAULT 'pending'");
         }
     }
 
@@ -119,10 +119,8 @@ return new class extends Migration
                 ->where('approval_status', 'denied')
                 ->update(['approval_status' => 'rejected']);
 
-            // Then revert enum
-            Schema::table('visitors', function (Blueprint $table) {
-                $table->enum('approval_status', ['pending', 'approved', 'rejected'])->default('pending')->change();
-            });
+            // Then revert enum (raw ALTER — dbal cannot change enums)
+            DB::statement("ALTER TABLE visitors MODIFY approval_status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending'");
         }
     }
 };

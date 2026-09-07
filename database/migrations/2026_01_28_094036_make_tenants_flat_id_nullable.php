@@ -12,6 +12,20 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // MySQL/Postgres: alter in place. The drop-and-recreate pattern
+        // (kept below for SQLite) cannot drop tenants once users.tenant_id
+        // references it, and leaves tenants_temp behind on failure.
+        if (DB::getDriverName() !== 'sqlite') {
+            Schema::table('tenants', function (Blueprint $table) {
+                $table->dropForeign(['flat_id']);
+            });
+            DB::statement('ALTER TABLE tenants MODIFY flat_id BIGINT UNSIGNED NULL');
+            Schema::table('tenants', function (Blueprint $table) {
+                $table->foreign('flat_id')->references('id')->on('flats')->onDelete('cascade');
+            });
+            return;
+        }
+
         // For SQLite, we need to recreate the table to make flat_id nullable
         // This is similar to the complaints flat_id fix
         

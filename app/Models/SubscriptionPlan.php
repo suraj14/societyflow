@@ -27,16 +27,16 @@ class SubscriptionPlan extends Model
         'status',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'monthly_price' => 'decimal:2',
             'yearly_price' => 'decimal:2',
             'features' => 'array',
             'limitations' => 'array',
             'is_popular' => 'boolean',
         ];
-    }
 
     // Relationships
     public function subscriptions(): HasMany

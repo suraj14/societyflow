@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\ApiImageHelper;
+use App\Http\Controllers\Api\Concerns\ResolvesUserFlats;
 use App\Models\Visitor;
 use App\Models\User;
 use App\Services\PushNotificationService;
@@ -13,6 +14,8 @@ use Illuminate\Support\Facades\Log;
 
 class VisitorApiController extends Controller
 {
+    use ResolvesUserFlats;
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -89,13 +92,26 @@ class VisitorApiController extends Controller
         $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
         $flatId  = $request->flat_id;
 
-        // For residents, use their own flat
-        if (!$isStaff && !$flatId) {
-            $resident = $user->resident()->with('flat')->first();
-            if (!$resident) {
+        if ($isStaff) {
+            // Staff-supplied flat must belong to the same society.
+            if ($flatId && !\App\Models\Flat::where('id', $flatId)->where('society_id', $user->society_id)->exists()) {
+                return response()->json(['success' => false, 'message' => 'Invalid flat.'], 422);
+            }
+        } else {
+            // Residents/owners can only register visitors for their own units.
+            // (exists:flats,id alone allowed attaching a visitor to any flat
+            // in any society.)
+            $ownFlatIds = $this->userFlatIds($user);
+
+            if ($flatId && !in_array((int) $flatId, $ownFlatIds, true)) {
+                return response()->json(['success' => false, 'message' => 'You can only add visitors for your own flat.'], 403);
+            }
+            if (!$flatId) {
+                $flatId = $ownFlatIds[0] ?? null;
+            }
+            if (!$flatId) {
                 return response()->json(['success' => false, 'message' => 'No flat assigned to your account.'], 422);
             }
-            $flatId = $resident->flat_id;
         }
 
         // Find the resident (host) for this flat — notify them
@@ -182,6 +198,12 @@ class VisitorApiController extends Controller
         $user = $request->user();
         $visitor = Visitor::where('society_id', $user->society_id)->findOrFail($id);
 
+        // Only security/staff or the visitor's own host may record entry.
+        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
+        if (!$isStaff && $visitor->host_user_id !== $user->id) {
+            return response()->json(['success' => false, 'message' => 'You are not allowed to check in this visitor.'], 403);
+        }
+
         if (!$visitor->isAllowed()) {
             return response()->json(['success' => false, 'message' => 'Visitor must be approved before check-in.'], 422);
         }
@@ -198,6 +220,12 @@ class VisitorApiController extends Controller
     {
         $user = $request->user();
         $visitor = Visitor::where('society_id', $user->society_id)->findOrFail($id);
+
+        // Only security/staff or the visitor's own host may record exit.
+        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
+        if (!$isStaff && $visitor->host_user_id !== $user->id) {
+            return response()->json(['success' => false, 'message' => 'You are not allowed to check out this visitor.'], 403);
+        }
 
         if (!$visitor->hasEntered()) {
             return response()->json(['success' => false, 'message' => 'Visitor has not checked in yet.'], 422);

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Api\Concerns\ResolvesUserFlats;
 use App\Models\MaintenanceBill;
 use App\Models\Payment;
 use Illuminate\Http\Request;
@@ -10,14 +11,15 @@ use Illuminate\Http\JsonResponse;
 
 class PaymentApiController extends Controller
 {
+    use ResolvesUserFlats;
+
     public function index(Request $request): JsonResponse
     {
-        $user     = $request->user();
-        $resident = $user->resident()->with('flat')->first();
-        $flatId   = $resident?->flat_id;
+        $user    = $request->user();
+        $flatIds = $this->userFlatIds($user);
 
-        $bills = $flatId
-            ? MaintenanceBill::where('flat_id', $flatId)
+        $bills = $flatIds
+            ? MaintenanceBill::whereIn('flat_id', $flatIds)
                 ->latest('due_date')
                 ->take(12)
                 ->get()
@@ -42,15 +44,14 @@ class PaymentApiController extends Controller
 
     public function bills(Request $request): JsonResponse
     {
-        $user     = $request->user();
-        $resident = $user->resident()->with('flat')->first();
-        $flatId   = $resident?->flat_id;
+        $user    = $request->user();
+        $flatIds = $this->userFlatIds($user);
 
-        if (!$flatId) {
+        if (empty($flatIds)) {
             return response()->json(['success' => true, 'data' => []]);
         }
 
-        $bills = MaintenanceBill::where('flat_id', $flatId)
+        $bills = MaintenanceBill::whereIn('flat_id', $flatIds)
             ->latest('due_date')
             ->paginate(15);
 

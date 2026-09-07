@@ -20,15 +20,15 @@ class StaffAttendance extends Model
         'notes',
     ];
 
-    protected function casts(): array
-    {
-        return [
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied, so none of these casts
+    // were active (dates stayed strings -> 500s in API formatters).
+    protected $casts = [
             'attendance_date' => 'date',
             'check_in_time' => 'datetime:H:i:s',
             'check_out_time' => 'datetime:H:i:s',
             'hours_worked' => 'decimal:2',
         ];
-    }
 
     // Relationships
     public function staff(): BelongsTo

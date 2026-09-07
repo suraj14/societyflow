@@ -56,33 +56,23 @@ class MaintenanceBill extends Model
         return $fillable;
     }
 
-    protected function casts(): array
-    {
-        $casts = [
-            'bill_date' => 'date',
-            'due_date' => 'date',
-            'maintenance_amount' => 'decimal:2',
-            'water_charges' => 'decimal:2',
-            'electricity_charges' => 'decimal:2',
-            'parking_charges' => 'decimal:2',
-            'penalty_amount' => 'decimal:2',
-            'other_charges' => 'decimal:2',
-            'total_amount' => 'decimal:2',
-            'paid_amount' => 'decimal:2',
-            'balance_amount' => 'decimal:2',
-        ];
-        
-        try {
-            // Add paid_date cast only if column exists
-            if (\Illuminate\Support\Facades\Schema::hasColumn('maintenance_bills', 'paid_date')) {
-                $casts['paid_date'] = 'date';
-            }
-        } catch (\Exception $e) {
-            // If we can't check columns, just use the base casts
-        }
-        
-        return $casts;
-    }
+    // Converted from casts(): the casts() method is Laravel 11+;
+    // on Laravel 10 it was never applied. Casting a column that doesn't
+    // exist on a row is inert, so paid_date is listed unconditionally.
+    protected $casts = [
+        'bill_date' => 'date',
+        'due_date' => 'date',
+        'paid_date' => 'date',
+        'maintenance_amount' => 'decimal:2',
+        'water_charges' => 'decimal:2',
+        'electricity_charges' => 'decimal:2',
+        'parking_charges' => 'decimal:2',
+        'penalty_amount' => 'decimal:2',
+        'other_charges' => 'decimal:2',
+        'total_amount' => 'decimal:2',
+        'paid_amount' => 'decimal:2',
+        'balance_amount' => 'decimal:2',
+    ];
 
     protected static function boot()
     {

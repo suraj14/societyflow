@@ -12,6 +12,21 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // MySQL/Postgres: alter in place. The drop-and-recreate pattern
+        // (kept below for SQLite) fails on MySQL once other tables hold
+        // foreign keys to complaints, and leaves complaints_temp behind
+        // on failure.
+        if (DB::getDriverName() !== 'sqlite') {
+            Schema::table('complaints', function (Blueprint $table) {
+                $table->dropForeign(['flat_id']);
+            });
+            DB::statement('ALTER TABLE complaints MODIFY flat_id BIGINT UNSIGNED NULL');
+            Schema::table('complaints', function (Blueprint $table) {
+                $table->foreign('flat_id')->references('id')->on('flats')->onDelete('cascade');
+            });
+            return;
+        }
+
         // For SQLite, we need to recreate the table to make flat_id nullable
         // First, create a temporary table with the correct structure
         Schema::create('complaints_temp', function (Blueprint $table) {
