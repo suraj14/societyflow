@@ -1,0 +1,33 @@
+<?php
+
+return [
+    'mode'                  => env('DOMPDF_MODE', 'utf-8'),
+    'defines'               => [
+        'DOMPDF_TEMP_DIR'   => storage_path('app/dompdf'),
+        'DOMPDF_CHROOT'     => public_path(),
+        'DOMPDF_ENABLE_PHP' => false,
+        'DOMPDF_ENABLE_JAVASCRIPT' => false,
+        'DOMPDF_ENABLE_REMOTE' => true,
+        'DOMPDF_ENABLE_CSS_FLOAT' => false,
+        'DOMPDF_PDF_BACKEND' => 'CPDF',
+        'DOMPDF_DEFAULT_MEDIA_TYPE' => 'screen',
+        'DOMPDF_DEFAULT_PAPER_SIZE' => 'A4',
+        'DOMPDF_DEFAULT_FONT' => 'Helvetica',
+        'DOMPDF_DPI' => 96,
+        'DOMPDF_ENABLE_HTML5_PARSER' => true,
+    ],
+    'convert_entities'      => true,
+    'list_indent_first_level' => 0,
+    'show_warnings'         => false,
+    'orientation'           => 'portrait',
+    'enable_php'            => false,
+    'enable_javascript'     => false,
+    'enable_remote'         => true,
+    'margin_top'            => 0,
+    'margin_right'          => 0,
+    'margin_bottom'         => 0,
+    'margin_left'           => 0,
+    'margin_header'         => 0,
+    'margin_footer'         => 0,
+    'margin_gutter'         => 0,
+];

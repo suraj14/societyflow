@@ -1,0 +1,82 @@
+# ==========================================
+# SocietyFlow Git Ignore
+# ==========================================
+
+# Laravel dependencies
+/vendor/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+!.env.mysql.template
+
+# Laravel runtime / uploaded files
+/storage/*
+/storage/app/public/*
+/storage/framework/*
+/storage/logs/*
+/bootstrap/cache/*
+
+
+
+# Laravel generated files
+/public/hot
+/public/storage
+
+# Node
+/node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# ==========================================
+# Flutter
+# ==========================================
+
+/societyflowmob/.dart_tool/
+/societyflowmob/build/
+/societyflowmob/.flutter-plugins
+/societyflowmob/.flutter-plugins-dependencies
+/societyflowmob/.packages
+
+# Flutter generated files
+/societyflowmob/android/.gradle/
+/societyflowmob/android/local.properties
+/societyflowmob/android/key.properties
+
+/societyflowmob/ios/Pods/
+/societyflowmob/ios/.symlinks/
+/societyflowmob/ios/Flutter/ephemeral/
+
+# ==========================================
+# IDE
+# ==========================================
+
+.idea/
+.vscode/
+
+# ==========================================
+# OS
+# ==========================================
+
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# Logs / temporary
+# ==========================================
+
+*.log
+*.tmp
+*.temp
+
+# ==========================================
+# Certificates / private keys
+# ==========================================
+
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
