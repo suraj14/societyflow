@@ -136,33 +136,48 @@ class OwnerController extends BaseController
             $validated['family_members'] = $familyMembers;
         }
 
-        // Create the owner record
-        $owner = Owner::create($validated);
+        // The password is random and emailed to the owner by the UserCreated
+        // listener; it is never echoed back to the admin's screen.
+        $userPassword = \App\Helpers\TemporaryPassword::generate();
 
-        // Create corresponding user record for login
-        $userPassword = 'password'; // Default password
-        $ownerUser = \App\Models\User::create([
-            'society_id' => $validated['society_id'],
-            'owner_id' => $owner->id,
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'phone' => $validated['phone'] ?? null,
-            'password' => bcrypt($userPassword),
-            'status' => $validated['status'],
-        ]);
+        // Owner record, login account and role assignment are one unit of
+        // work. Without the transaction a failure at the role step (a missing
+        // role raises RoleDoesNotExist) left an orphaned Owner plus a User
+        // that could log in with no role and no permissions.
+        $ownerUser = \Illuminate\Support\Facades\DB::transaction(function () use ($validated, $userPassword) {
+            $owner = Owner::create($validated);
 
-        // Assign appropriate role based on property type
-        if ($validated['property_type'] === 'apartment') {
-            $ownerUser->assignRole('Apartment Owner');
-        } elseif ($validated['property_type'] === 'villa') {
-            $ownerUser->assignRole('Villa Owner');
-        } else {
-            // If no property type specified, assign both roles for flexibility
-            $ownerUser->assignRole(['Apartment Owner', 'Villa Owner']);
-        }
+            $ownerUser = \App\Models\User::create([
+                'society_id' => $validated['society_id'],
+                'owner_id' => $owner->id,
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'phone' => $validated['phone'] ?? null,
+                'password' => bcrypt($userPassword),
+                'status' => $validated['status'],
+            ]);
+
+            // Assign appropriate role based on property type
+            $propertyType = $validated['property_type'] ?? null;
+            if ($propertyType === 'apartment') {
+                $ownerUser->assignRole('Apartment Owner');
+            } elseif ($propertyType === 'villa') {
+                $ownerUser->assignRole('Villa Owner');
+            } else {
+                // If no property type specified, assign both roles for flexibility
+                $ownerUser->assignRole(['Apartment Owner', 'Villa Owner']);
+            }
+
+            return $ownerUser;
+        });
+
+        // Dispatched after commit: a rolled-back create must not send a
+        // welcome email carrying credentials for an account that no longer
+        // exists (the queue runs sync, so this listener fires inline).
+        \App\Events\UserCreated::dispatch($ownerUser, $userPassword);
 
         return redirect()->route('owners.index')
-            ->with('success', 'Owner created successfully! Login credentials - Email: ' . $validated['email'] . ', Password: ' . $userPassword);
+            ->with('success', 'Owner created successfully! ' . \App\Helpers\TemporaryPassword::noticeFor($validated['email']));
     }
 
     public function show(Owner $owner)

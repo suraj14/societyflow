@@ -4,12 +4,15 @@ namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\View;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\View\Composers\ThemeComposer;
 
 class AppServiceProvider extends ServiceProvider
 {
+    /** Queries slower than this (milliseconds) are logged as warnings. */
+    private const SLOW_QUERY_THRESHOLD_MS = 1000;
+
     /**
      * Register any application services.
      */
@@ -20,9 +23,15 @@ class AppServiceProvider extends ServiceProvider
 
     /**
      * Bootstrap any application services.
-     * 
-     * PRODUCTION-STABLE CONFIGURATION
-     * Ensures cache consistency, session stability, and database reliability
+     *
+     * This used to call Cache::flush() on every request "to ensure fresh
+     * data", which wiped the whole cache store - including Spatie's
+     * permission cache, so every hasRole()/can() check re-queried the
+     * database - on every single request. It also ran a cache write/read
+     * probe and opened a PDO connection per request. All removed: nothing
+     * can depend on a cache that is destroyed that often, so there is no
+     * behaviour to preserve. If stale data reappears, fix the write path
+     * that fails to invalidate rather than flushing globally.
      */
     public function boot(): void
     {
@@ -38,67 +47,42 @@ class AppServiceProvider extends ServiceProvider
                 ->header('Expires', 'Sat, 01 Jan 1990 00:00:00 GMT');
         });
         
-        // PHASE 1: AGGRESSIVE CACHE CLEARING
-        // Clear all caches on every boot to ensure fresh data
-        try {
-            Cache::flush();
-            \Log::info('Application cache flushed on boot');
-        } catch (\Exception $e) {
-            \Log::error('Cache flush error: ' . $e->getMessage());
-        }
-        
-        // PHASE 2: CACHE SYSTEM STABILITY
-        // Ensure cache is properly initialized
-        try {
-            // Test cache connectivity
-            Cache::put('_app_health_check', true, 60);
-            Cache::forget('_app_health_check');
-        } catch (\Exception $e) {
-            \Log::error('Cache system error: ' . $e->getMessage());
-        }
-        
-        // PHASE 3: DATABASE CONSISTENCY
-        // Ensure database connection is stable
-        try {
-            // Test database connectivity
-            DB::connection()->getPdo();
-        } catch (\Exception $e) {
-            \Log::error('Database connection error: ' . $e->getMessage());
-        }
-        
-        // PHASE 4: SESSION STABILITY
-        // Ensure sessions are properly configured
-        if (config('session.driver') === 'file') {
-            $sessionPath = storage_path('framework/sessions');
-            if (!is_dir($sessionPath)) {
-                @mkdir($sessionPath, 0775, true);
-            }
-        }
-        
-        // PHASE 5: CACHE DIRECTORY PERMISSIONS
-        // Ensure cache directories are writable
-        $cachePath = storage_path('framework/cache/data');
-        if (!is_dir($cachePath)) {
-            @mkdir($cachePath, 0775, true);
-        }
-        
-        // PHASE 6: DISABLE QUERY CACHING FOR CONSISTENCY
-        // Prevent stale data from query cache
-        if (config('app.env') === 'production') {
-            // Disable query caching in production for data consistency
-            DB::disableQueryLog();
-        }
-        
-        // PHASE 7: PREVENT ELOQUENT QUERY CACHING
-        // Ensure fresh data on every query
+        // Storage directories the file cache and session drivers need.
+        // is_dir-guarded, so this costs one stat() when they already exist.
+        $this->ensureRuntimeDirectoriesExist();
+
+        // Slow query logging. Useful in production and effectively free:
+        // the listener only formats a message past the threshold.
         DB::listen(function ($query) {
-            // Log slow queries only
-            if ($query->time > 1000) {
-                \Log::warning('Slow query detected', [
+            if ($query->time > self::SLOW_QUERY_THRESHOLD_MS) {
+                Log::warning('Slow query detected', [
                     'query' => $query->sql,
-                    'time' => $query->time . 'ms'
+                    'time'  => $query->time . 'ms',
                 ]);
             }
         });
+    }
+
+    /**
+     * Create the storage directories the file cache and session drivers
+     * write into, if they are missing.
+     */
+    private function ensureRuntimeDirectoriesExist(): void
+    {
+        $paths = [];
+
+        if (config('session.driver') === 'file') {
+            $paths[] = storage_path('framework/sessions');
+        }
+
+        if (config('cache.default') === 'file') {
+            $paths[] = storage_path('framework/cache/data');
+        }
+
+        foreach ($paths as $path) {
+            if (!is_dir($path)) {
+                @mkdir($path, 0775, true);
+            }
+        }
     }
 }

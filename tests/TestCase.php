@@ -8,10 +8,44 @@ use App\Models\Resident;
 use App\Models\Society;
 use App\Models\User;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Spatie\Permission\Models\Role;
 
 abstract class TestCase extends BaseTestCase
 {
     use CreatesApplication;
+
+    /**
+     * Ensure a role exists on the web guard and return it.
+     *
+     * Spatie caches its permission map; RefreshDatabase truncates the tables
+     * underneath that cache, so it has to be reset per test or roles created
+     * here appear missing.
+     */
+    protected function makeRole(string $name): Role
+    {
+        app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+
+        return Role::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
+    }
+
+    /** Create an active user in $society holding $role. */
+    protected function makeUserWithRole(Society $society, string $role, array $overrides = []): User
+    {
+        $this->makeRole($role);
+
+        $user = User::create(array_merge([
+            'society_id' => $society->id,
+            'name'       => $role . ' User',
+            'email'      => strtolower(str_replace(' ', '', $role)) . uniqid() . '@test.local',
+            'phone'      => '9' . random_int(100000000, 999999999),
+            'password'   => bcrypt('correct-horse-battery-staple'),
+            'status'     => 'active',
+        ], $overrides));
+
+        $user->assignRole($role);
+
+        return $user;
+    }
 
     /** Create a society with one building. */
     protected function makeSociety(string $name = 'Test Society'): Society

@@ -34,7 +34,11 @@ class SendUserWelcomeEmail
 
             $variables = [
                 'user_name' => $user->name,
-                'temporary_password' => $event->temporaryPassword ?? 'password123',
+                // No fallback: a hardcoded default here would put a known
+                // credential into the welcome email of any account created
+                // without one. Absent password renders as an empty string,
+                // and the recipient uses the reset flow instead.
+                'temporary_password' => $event->temporaryPassword ?? '',
                 'login_url' => route('login'),
             ];
 

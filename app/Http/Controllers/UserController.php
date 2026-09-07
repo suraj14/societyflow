@@ -83,7 +83,9 @@ class UserController extends BaseController
             $avatarPath = 'avatars/' . $filename;
         }
         
-        $temporaryPassword = 'password123';
+        // Random, emailed to the user by the UserCreated listener below.
+        // Never rendered back to the admin who created the account.
+        $temporaryPassword = \App\Helpers\TemporaryPassword::generate();
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
@@ -102,7 +104,7 @@ class UserController extends BaseController
         }
         
         return redirect()->route('users.index')
-            ->with('success', 'User created successfully! Default password is: password123');
+            ->with('success', 'User created successfully! ' . \App\Helpers\TemporaryPassword::noticeFor($user->email));
     }
     
     public function edit(User $user)
