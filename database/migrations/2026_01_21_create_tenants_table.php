@@ -43,17 +43,36 @@ return new class extends Migration
         // users.tenant_id FK — deferred here because add_owner_tenant_to_users
         // sorts before this migration, when tenants doesn't exist yet.
         if (Schema::hasColumn('users', 'tenant_id')) {
-            $fks = collect(\Illuminate\Support\Facades\DB::select(
-                "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
-                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
-                   AND REFERENCED_TABLE_NAME IS NOT NULL"
-            ))->pluck('CONSTRAINT_NAME');
+            $fks = $this->existingForeignKeys('users');
             if (!$fks->contains('users_tenant_id_foreign')) {
                 Schema::table('users', function (Blueprint $table) {
                     $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('set null');
                 });
             }
         }
+    }
+
+    /**
+     * Names of the foreign key constraints already on $table.
+     *
+     * information_schema is MySQL-only. SQLite cannot ALTER TABLE ADD
+     * CONSTRAINT (Laravel's SQLite grammar compiles ->foreign() to a no-op),
+     * so an empty list is correct there.
+     */
+    private function existingForeignKeys(string $table): \Illuminate\Support\Collection
+    {
+        $connection = Schema::getConnection();
+
+        if ($connection->getDriverName() !== 'mysql') {
+            return collect();
+        }
+
+        return collect($connection->select(
+            "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+               AND REFERENCED_TABLE_NAME IS NOT NULL",
+            [$table]
+        ))->pluck('CONSTRAINT_NAME');
     }
 
     /**

@@ -27,11 +27,7 @@ return new class extends Migration
             });
         }
 
-        $fks = collect(\Illuminate\Support\Facades\DB::select(
-            "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
-             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
-               AND REFERENCED_TABLE_NAME IS NOT NULL"
-        ))->pluck('CONSTRAINT_NAME');
+        $fks = $this->existingForeignKeys('users');
 
         Schema::table('users', function (Blueprint $table) use ($fks) {
             if (!$fks->contains('users_owner_id_foreign')) {
@@ -51,6 +47,31 @@ return new class extends Migration
                 // index already exists — fine
             }
         }
+    }
+
+    /**
+     * Names of the foreign key constraints already on $table.
+     *
+     * information_schema is MySQL-only; querying it unguarded made this
+     * migration (and therefore the whole test suite) unrunnable on SQLite.
+     * SQLite cannot ALTER TABLE ADD CONSTRAINT at all — Laravel's SQLite
+     * grammar compiles ->foreign() to a no-op — so an empty list is the
+     * correct answer there: the guarded calls below simply do nothing.
+     */
+    private function existingForeignKeys(string $table): \Illuminate\Support\Collection
+    {
+        $connection = Schema::getConnection();
+
+        if ($connection->getDriverName() !== 'mysql') {
+            return collect();
+        }
+
+        return collect($connection->select(
+            "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+               AND REFERENCED_TABLE_NAME IS NOT NULL",
+            [$table]
+        ))->pluck('CONSTRAINT_NAME');
     }
 
     /**
