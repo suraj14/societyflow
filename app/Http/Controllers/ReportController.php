@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\Flat;
 use App\Models\UtilityBill;
 use App\Models\Payment;
-use App\Models\Rent;
 use App\Models\SystemSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;

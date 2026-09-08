@@ -140,6 +140,20 @@ class ProfileApiController extends Controller
 
         $user->update(['password' => Hash::make($request->password)]);
 
+        // Changing a password must end every other session. Without this a
+        // stolen token stayed valid indefinitely after the victim changed
+        // their password - the one action a user takes to recover from a
+        // compromise did nothing to the attacker's access. The OTP reset
+        // flow already did this; the in-app change did not.
+        //
+        // The current token is preserved so the user is not logged out of
+        // the device they just changed it on.
+        $currentTokenId = $user->currentAccessToken()?->id;
+
+        $user->tokens()
+            ->when($currentTokenId, fn ($q) => $q->where('id', '!=', $currentTokenId))
+            ->delete();
+
         return response()->json(['success' => true, 'message' => 'Password changed successfully']);
     }
 }

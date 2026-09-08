@@ -59,24 +59,26 @@ class VerifyCsrfToken extends Middleware
         }
     }
 
-    /**
-     * Determine if the request has a valid CSRF token.
-     * Enhanced to handle token regeneration more gracefully.
+    /*
+     * tokensMatch() is deliberately NOT overridden.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return bool
+     * The previous override accepted $request->bearerToken() as a CSRF
+     * token and dropped the parent's handling of the encrypted
+     * X-XSRF-TOKEN header. Two problems:
+     *
+     *   - Treating an Authorization bearer token as proof of CSRF intent
+     *     conflates authentication with request forgery protection. They
+     *     are different controls and the bearer token is not a per-session
+     *     secret the way the CSRF token is.
+     *   - Dropping X-XSRF-TOKEN broke the standard cookie-based flow that
+     *     axios and every Laravel-aware JS client use by default, which is
+     *     likely why the "token mismatch" problems this class complains
+     *     about in its comments appeared in the first place.
+     *
+     * Laravel's own implementation handles _token, X-CSRF-TOKEN and the
+     * encrypted X-XSRF-TOKEN cookie correctly. The handle() override above
+     * is kept: it only changes how a mismatch is REPORTED (a friendly
+     * redirect or JSON 419 instead of an exception page) and never lets a
+     * request through.
      */
-    protected function tokensMatch($request)
-    {
-        $token = $request->input('_token') ?: $request->bearerToken();
-
-        if (!$token) {
-            $token = $request->header('X-CSRF-TOKEN');
-        }
-
-        return hash_equals(
-            (string) $request->session()->token(),
-            (string) $token
-        );
-    }
 }

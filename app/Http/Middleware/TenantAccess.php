@@ -17,12 +17,19 @@ class TenantAccess
     public function handle(Request $request, Closure $next)
     {
         $user = auth()->user();
-        
-        // Check if user is authenticated and has Tenant role
-        if (!$user || !$user->hasRole('Tenant')) {
-            return redirect()->route('tenant.rent')->with('error', 'Access denied. Tenant access required.');
+
+        if (!$user) {
+            return redirect()->route('login');
         }
-        
+
+        // Denial used to redirect to route('tenant.rent'), which is itself
+        // inside the Tenant-only route group - so a non-tenant who hit any
+        // guarded route was redirected straight back into another guarded
+        // route. Deny with a 403 instead of bouncing the user around.
+        if (!$user->hasRole('Tenant')) {
+            abort(403, 'Access denied. Tenant access required.');
+        }
+
         return $next($request);
     }
 }

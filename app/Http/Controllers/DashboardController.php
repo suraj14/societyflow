@@ -21,16 +21,6 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
-        // Debug: Log user roles for troubleshooting
-        \Log::info('Dashboard Access Debug', [
-            'user_id' => $user->id,
-            'user_email' => $user->email,
-            'user_roles' => $user->getRoleNames()->toArray(),
-            'has_villa_owner' => $user->hasRole('Villa Owner'),
-            'has_apartment_owner' => $user->hasRole('Apartment Owner'),
-            'has_both_roles' => $user->hasRole('Villa Owner') && $user->hasRole('Apartment Owner')
-        ]);
-
         // Redirect based on role - PRIORITY ORDER MATTERS
         if ($user->hasRole('Super Admin')) {
             return redirect()->route('super-admin.dashboard');
@@ -44,13 +34,11 @@ class DashboardController extends Controller
         // Check for multiple owner roles - if user has both Villa Owner and Apartment Owner,
         // treat them as a general Owner and show owner dashboard
         if ($user->hasRole('Villa Owner') && $user->hasRole('Apartment Owner')) {
-            \Log::info('Multi-property owner detected - routing to owner dashboard');
             return $this->ownerDashboard();
         }
 
         // Single owner role - show specific dashboard
         if ($user->hasRole('Villa Owner')) {
-            \Log::info('Single Villa Owner detected - routing to villa dashboard');
             return redirect()->route('villa-owner.dashboard');
         }
 
@@ -196,17 +184,6 @@ class DashboardController extends Controller
             'upcoming_visitors' => Visitor::where('host_user_id', $user->id)->where('expected_entry_time', '>=', today())->count(),
         ];
 
-        // Debug information (can be removed in production)
-        \Log::info('Owner Dashboard Debug', [
-            'user_id' => $user->id,
-            'user_email' => $user->email,
-            'owner_id' => $user->owner_id,
-            'user_roles' => $user->getRoleNames()->toArray(),
-            'properties_count' => $properties->count(),
-            'properties' => $properties->pluck('id', 'flat_number')->toArray(),
-            'stats' => $stats
-        ]);
-
         $myBills = Payment::where('user_id', $user->id)
             ->latest()
             ->take(5)
@@ -342,16 +319,6 @@ class DashboardController extends Controller
             'my_bookings' => FacilityBooking::where('user_id', $user->id)->where('status', 'approved')->count(),
             'upcoming_visitors' => Visitor::where('host_user_id', $user->id)->where('expected_entry_time', '>=', today())->count(),
         ];
-
-        // Debug information
-        \Log::info('Tenant Dashboard Debug', [
-            'user_id' => $user->id,
-            'user_email' => $user->email,
-            'tenant_id' => $user->tenant_id,
-            'tenant_found' => $tenant ? $tenant->id : null,
-            'unit_found' => $unit ? $unit->flat_number : null,
-            'user_roles' => $user->getRoleNames()->toArray(),
-        ]);
 
         $myBills = Payment::where('user_id', $user->id)
             ->latest()

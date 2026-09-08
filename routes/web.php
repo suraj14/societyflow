@@ -173,37 +173,11 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
         Route::get('api/rent/units', [App\Http\Controllers\Admin\RentController::class, 'getUnitsOnRent'])->name('api.rent.units');
         Route::post('api/rent/validate', [App\Http\Controllers\Admin\RentController::class, 'validateRentRecord'])->name('api.rent.validate');
         
-        // Debug route to test villa data
-        Route::get('api/rent/debug', function() {
-            $societyId = auth()->user()->society_id ?? 1;
-            
-            $villas = \App\Models\Flat::where('society_id', $societyId)
-                ->where('property_type', 'villa')
-                ->with(['tenants' => function($q) {
-                    $q->where('status', 'active')->with('user');
-                }, 'villaArea'])
-                ->get();
-                
-            $result = [
-                'society_id' => $societyId,
-                'total_villas' => $villas->count(),
-                'villas' => $villas->map(function($villa) {
-                    return [
-                        'id' => $villa->id,
-                        'flat_number' => $villa->flat_number,
-                        'villa_name' => $villa->villa_name,
-                        'status' => $villa->status,
-                        'tenants_count' => $villa->tenants->count(),
-                        'tenant_names' => $villa->tenants->map(function($t) {
-                            return $t->user ? $t->user->name : 'No user';
-                        })
-                    ];
-                })
-            ];
-            
-            return response()->json($result);
-        });
-        
+        // Removed: an unnamed `api/rent/debug` route that dumped every villa
+        // in the society with its tenants and their names as JSON. It was
+        // unreferenced by any view or script, and its `?? 1` fallback meant a
+        // user with no society_id was served society #1's tenant roster.
+
         // Tenant Assignment Management
         Route::get('/tenant-assignments', [App\Http\Controllers\Admin\UserTenantAssignmentController::class, 'index'])->name('tenant-assignments.index');
         Route::post('/tenant-assignments/assign', [App\Http\Controllers\Admin\UserTenantAssignmentController::class, 'assign'])->name('tenant-assignments.assign');
