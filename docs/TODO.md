@@ -24,7 +24,7 @@ checked in a browser. Update after each task. Keep entries short.
 | # | Task | Module | Status | Relevant files | Tests required |
 |---|---|---|---|---|---|
 | P1-1 | Restore `users.create` and `users.edit` views (500 today) | Users | done (verified `c601c78`) | `resources/views/users/{create,edit}.blade.php` (new), `app/Http/Controllers/UserController.php` | `WebSmokeTest` create/edit rows; browser check as Admin + Super Admin |
-| P1-2 | Restore push-notification `templates` and `edit-template` views (500 today) | Notifications | open | `resources/views/admin/push-notifications/{templates,edit-template}.blade.php` (new), `Admin/PushNotificationController.php` | `WebSmokeTest`; browser check |
+| P1-2 | Restore push-notification `templates` and `edit-template` views (500 today) | Notifications | done (verified `8be3e6f`) | `resources/views/admin/push-notifications/{templates,edit-template}.blade.php` (new), `Admin/PushNotificationController.php` | `WebSmokeTest`; browser check |
 | P1-3 | Fix `/complaints/create` JS "Complaint form elements not found" | Complaints | open | `resources/views/complaints/create.blade.php` | Browser check: no console errors, form submits |
 | P1-4 | Fix Admin `/settings` `Unexpected token '<'` page error (script fetching HTML) | Settings | open | `resources/views/settings/index.blade.php`, `app/Http/Controllers/SettingsController.php` | Browser check: no pageerror on all tabs |
 | P1-5 | Per-role CRUD / validation / search / pagination browser flows for every module | All | in progress (sweep paused) | scratchpad Playwright harness; route list in `tests/Feature/WebSmokeTest.php` | Sweep report: 0 × 5xx, 0 error signatures, 0 cross-society hits |
@@ -48,6 +48,7 @@ checked in a browser. Update after each task. Keep entries short.
 | P2-8 | Add model factories; consolidate the ~44 seeders | Tests/DB | open | `database/factories/` (new), `database/seeders/` | Suite green; `db:seed` idempotent |
 | P2-9 | Make `ServerDiscovery` injectable via a provider rather than a static override | Flutter | open | `lib/core/services/server_discovery.dart` | `test/widget_test.dart` |
 | P2-10 | Switch demo/test seeders with fixed passwords to generated ones or a production guard | Seeders | open | `DemoUsersSeeder`, `ComprehensiveTestDataSeeder`, `GuardRoleSeeder`, etc. | Fresh seed → 0 weak passwords (already asserted for default path) |
+| P2-11 | Per-society push templates: `push_notification_templates.trigger_action` is UNIQUE, so the `society_id` column and the "own + global" list query can never hold an override; `PushNotificationService` also picks templates without society scoping | Notifications | open — design decision | migration for unique `(society_id, trigger_action)`, `app/Services/PushNotificationService.php` | `PushNotificationTemplateTest`; service unit test picks society template over global |
 
 ## P3 — Nice-to-have
 
@@ -83,3 +84,4 @@ Kept brief; full detail in commit messages `git log 5913335..HEAD`.
 | Fresh install: services wipe bug; seeder credentials | `1f37780` |
 | Notice cross-society leak; `notices.history` view; Super Admin settings routes | `53ec880` |
 | `users.create`/`users.edit` views; Super Admin society selector; form-path JSON guards | `c601c78` |
+| Push template screens; `updateTemplate` IDOR; save redirect | `8be3e6f` |
