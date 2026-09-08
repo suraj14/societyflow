@@ -51,17 +51,37 @@ class VisitorController extends Controller
             'visitor_email' => 'nullable|email|max:255',
             'purpose' => 'required|string|max:255',
             'visit_date' => 'required|date',
-            'expected_time' => 'nullable|string',
+            'expected_time' => 'nullable|date_format:H:i',
             'vehicle_number' => 'nullable|string|max:50',
-            'notes' => 'nullable|string',
+            'notes' => 'nullable|string|max:2000',
         ]);
 
-        $validated['society_id'] = $villa->society_id;
-        $validated['flat_id'] = $villa->id;
-        $validated['host_user_id'] = $user->id;
-        $validated['status'] = 'expected';
+        // The form's field names do not match the visitors table, so they are
+        // mapped here rather than mass-assigned. Previously $validated went
+        // straight into Visitor::create(), which meant writing visit_date,
+        // expected_time, notes and status - none of which are columns - while
+        // never setting expected_entry_time, which is NOT NULL with no
+        // default. The insert could not succeed, so this form never worked.
+        $expectedEntry = $validated['visit_date'] . ' ' . ($validated['expected_time'] ?? '00:00');
 
-        Visitor::create($validated);
+        Visitor::create([
+            'society_id'          => $villa->society_id,
+            'flat_id'             => $villa->id,
+            'host_user_id'        => $user->id,
+            'visitor_name'        => $validated['visitor_name'],
+            'visitor_phone'       => $validated['visitor_phone'],
+            'visitor_email'       => $validated['visitor_email'] ?? null,
+            'visitor_type'        => 'guest',
+            'purpose'             => $validated['purpose'],
+            'vehicle_number'      => $validated['vehicle_number'] ?? null,
+            'expected_entry_time' => \Carbon\Carbon::parse($expectedEntry),
+            // An owner registering their own guest is pre-approved, matching
+            // what VisitorApiController does for the same situation.
+            'approval_status'     => 'allowed',
+            'entry_status'        => 'pending',
+            'approved_by'         => $user->id,
+            'security_notes'      => $validated['notes'] ?? null,
+        ]);
 
         return redirect()->route('villa-owner.visitors')
             ->with('success', 'Visitor added successfully. Security will be notified.');

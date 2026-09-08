@@ -44,7 +44,7 @@
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-600">{{ $visitor->purpose }}</td>
                             <td class="px-6 py-4 text-sm text-gray-600">
-                                {{ \Carbon\Carbon::parse($visitor->visit_date)->format('d M Y') }}
+                                {{ \Carbon\Carbon::parse($visitor->expected_entry_time ?? $visitor->created_at)->format('d M Y') }}
                                 @if($visitor->expected_time)
                                     <br><span class="text-xs text-gray-400">{{ $visitor->expected_time }}</span>
                                 @endif

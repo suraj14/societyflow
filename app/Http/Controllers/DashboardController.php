@@ -84,11 +84,20 @@ class DashboardController extends Controller
             'occupied_units' => Flat::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'occupied')->count(),
             'open_tickets' => Complaint::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'open')->count(),
             'pending_dues' => Payment::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'pending')->sum('amount'),
+            // Was ->where('status','paid')->whereMonth('paid_at', ...).
+            // payments has no paid_at column and no row ever has status
+            // 'paid' - the real values are 'pending' and 'success', and the
+            // date column is payment_date. On SQLite a double-quoted unknown
+            // column degrades to a string literal, so this silently summed to
+            // zero instead of erroring; on MySQL it is a hard failure.
             'monthly_revenue' => Payment::when($societyId, fn($q) => $q->where('society_id', $societyId))
-                ->where('status', 'paid')
-                ->whereMonth('paid_at', now()->month)
+                ->success()
+                ->whereMonth('payment_date', now()->month)
+                ->whereYear('payment_date', now()->year)
                 ->sum('amount'),
-            'visitors_today' => Visitor::when($societyId, fn($q) => $q->where('society_id', $societyId))->whereDate('visit_date', today())->count(),
+            // visitors has no visit_date column; the scheduled arrival is
+            // expected_entry_time.
+            'visitors_today' => Visitor::when($societyId, fn($q) => $q->where('society_id', $societyId))->whereDate('expected_entry_time', today())->count(),
         ];
 
         $recentTickets = Complaint::when($societyId, fn($q) => $q->where('society_id', $societyId))
@@ -139,12 +148,19 @@ class DashboardController extends Controller
                 ->get();
         }
         
-        // Method 4: Through Owner table by email/name matching
+        // Method 4: Through Owner table by email match.
+        //
+        // This used to be ->where('email', ...)->orWhere('name', ...), which
+        // linked an account to any owner sharing a display name - and then
+        // persisted that link with $user->update(['owner_id' => ...]) below,
+        // permanently attaching someone to another person's property. Email
+        // is unique on owners; name is not. Also scoped to the user's own
+        // society, which the original query was not.
         if ($properties->isEmpty()) {
             $owner = Owner::where('email', $user->email)
-                ->orWhere('name', $user->name)
+                ->when($user->society_id, fn($q) => $q->where('society_id', $user->society_id))
                 ->first();
-                
+
             if ($owner) {
                 $properties = Flat::with(['building', 'villaArea'])
                     ->where('owner_id', $owner->id)
@@ -177,7 +193,7 @@ class DashboardController extends Controller
             'my_tickets' => Complaint::where('created_by', $user->id)->count(),
             'open_tickets' => Complaint::where('created_by', $user->id)->where('status', 'open')->count(),
             'my_bookings' => FacilityBooking::where('user_id', $user->id)->where('status', 'approved')->count(),
-            'upcoming_visitors' => Visitor::where('host_user_id', $user->id)->where('visit_date', '>=', today())->count(),
+            'upcoming_visitors' => Visitor::where('host_user_id', $user->id)->where('expected_entry_time', '>=', today())->count(),
         ];
 
         // Debug information (can be removed in production)
@@ -226,7 +242,7 @@ class DashboardController extends Controller
         $stats = [
             // 1. Visitors Today - Core feature for staff
             'visitors_today' => Visitor::when($societyId, fn($q) => $q->where('society_id', $societyId))
-                ->whereDate('visit_date', today())
+                ->whereDate('expected_entry_time', today())
                 ->count(),
             
             // 2. Pending Tickets assigned to staff or general pending tickets
@@ -262,7 +278,7 @@ class DashboardController extends Controller
 
         // Today's visitors for staff to manage
         $todayVisitors = Visitor::when($societyId, fn($q) => $q->where('society_id', $societyId))
-            ->whereDate('visit_date', today())
+            ->whereDate('expected_entry_time', today())
             ->with(['flat.building'])
             ->latest()
             ->get();
@@ -324,7 +340,7 @@ class DashboardController extends Controller
             'my_tickets' => Complaint::where('created_by', $user->id)->count(),
             'open_tickets' => Complaint::where('created_by', $user->id)->where('status', 'open')->count(),
             'my_bookings' => FacilityBooking::where('user_id', $user->id)->where('status', 'approved')->count(),
-            'upcoming_visitors' => Visitor::where('host_user_id', $user->id)->where('visit_date', '>=', today())->count(),
+            'upcoming_visitors' => Visitor::where('host_user_id', $user->id)->where('expected_entry_time', '>=', today())->count(),
         ];
 
         // Debug information

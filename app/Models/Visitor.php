@@ -18,6 +18,7 @@ class Visitor extends Model
         'approved_by',
         'visitor_name',
         'visitor_phone',
+        'visitor_email',
         'visitor_id_proof',
         'visitor_id_number',
         'visitor_type',

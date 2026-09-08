@@ -123,7 +123,7 @@
                                 <p class="text-sm font-medium text-gray-800">{{ $visitor->visitor_name }}</p>
                                 <p class="text-xs text-gray-500">{{ $visitor->purpose }}</p>
                             </div>
-                            <span class="text-xs text-gray-500">{{ \Carbon\Carbon::parse($visitor->visit_date)->format('d M') }}</span>
+                            <span class="text-xs text-gray-500">{{ \Carbon\Carbon::parse($visitor->expected_entry_time ?? $visitor->created_at)->format('d M') }}</span>
                         </div>
                     @empty
                         <p class="text-gray-500 text-sm text-center py-4">No visitors yet</p>

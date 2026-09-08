@@ -12,7 +12,7 @@
         <h4>Updated Visitor Status</h4>
         <p><strong>Visitor Name:</strong> {{ $visitor->name }}</p>
         <p><strong>Phone Number:</strong> {{ $visitor->phone }}</p>
-        <p><strong>Visit Date:</strong> {{ \Carbon\Carbon::parse($visitor->visit_date ?? $visitor->created_at)->format('F j, Y') }}</p>
+        <p><strong>Visit Date:</strong> {{ \Carbon\Carbon::parse($visitor->expected_entry_time ?? $visitor->created_at)->format('F j, Y') }}</p>
         <p><strong>Previous Status:</strong> {{ ucfirst($visitor->getOriginal('status') ?? 'pending') }}</p>
         <p><strong>Current Status:</strong> 
             <span style="color: {{ $visitor->status === 'approved' ? '#28a745' : ($visitor->status === 'denied' ? '#dc3545' : '#6c757d') }};">

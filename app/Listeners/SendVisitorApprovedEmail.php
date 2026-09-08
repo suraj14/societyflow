@@ -49,11 +49,18 @@ class SendVisitorApprovedEmail
                 return;
             }
 
+            // Every one of these read a non-existent attribute
+            // ($visitor->name, ->phone, ->visit_date, ->visit_time), so the
+            // approval email rendered with an empty name, phone and date.
+            // The real columns are visitor_name, visitor_phone and
+            // expected_entry_time.
+            $expectedEntry = $visitor->expected_entry_time;
+
             $baseVariables = [
-                'visitor_name' => $visitor->name ?? '',
-                'visitor_phone' => $visitor->phone ?? '',
-                'visit_date' => $visitor->visit_date ?? '',
-                'visit_time' => $visitor->visit_time ?? '',
+                'visitor_name' => $visitor->visitor_name ?? '',
+                'visitor_phone' => $visitor->visitor_phone ?? '',
+                'visit_date' => $expectedEntry ? $expectedEntry->format('F j, Y') : '',
+                'visit_time' => $expectedEntry ? $expectedEntry->format('g:i A') : '',
                 'view_url' => route('visitors.show', $visitor->id) ?? '#',
             ];
 

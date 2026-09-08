@@ -42,7 +42,7 @@
                     </div>
                     <div>
                         <p class="text-sm text-gray-500">Visit Date</p>
-                        <p class="font-medium text-gray-800">{{ \Carbon\Carbon::parse($visitor->visit_date)->format('d M Y') }}</p>
+                        <p class="font-medium text-gray-800">{{ \Carbon\Carbon::parse($visitor->expected_entry_time ?? $visitor->created_at)->format('d M Y') }}</p>
                     </div>
                     @if($visitor->expected_time)
                     <div>

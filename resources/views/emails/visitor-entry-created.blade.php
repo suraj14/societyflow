@@ -13,7 +13,7 @@
         <p><strong>Visitor Name:</strong> {{ $visitor->name }}</p>
         <p><strong>Phone Number:</strong> {{ $visitor->phone }}</p>
         <p><strong>Purpose of Visit:</strong> {{ $visitor->purpose ?? 'General Visit' }}</p>
-        <p><strong>Expected Date:</strong> {{ \Carbon\Carbon::parse($visitor->visit_date ?? $visitor->created_at)->format('F j, Y') }}</p>
+        <p><strong>Expected Date:</strong> {{ \Carbon\Carbon::parse($visitor->expected_entry_time ?? $visitor->created_at)->format('F j, Y') }}</p>
         <p><strong>Expected Time:</strong> {{ \Carbon\Carbon::parse($visitor->visit_time ?? $visitor->created_at)->format('g:i A') }}</p>
         <p><strong>Status:</strong> {{ ucfirst($visitor->status ?? 'pending') }}</p>
         @if($visitor->flat)

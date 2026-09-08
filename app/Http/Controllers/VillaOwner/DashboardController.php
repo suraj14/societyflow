@@ -31,7 +31,7 @@ class DashboardController extends Controller
         $pendingDues = $villa->getPendingDues();
         
         $todayVisitors = Visitor::where('flat_id', $villa->id)
-            ->whereDate('visit_date', today())
+            ->whereDate('expected_entry_time', today())
             ->count();
 
         $upcomingBookings = FacilityBooking::where('flat_id', $villa->id)
