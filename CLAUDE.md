@@ -9,7 +9,9 @@ Detailed docs live in [docs/](docs/): [TESTING.md](docs/TESTING.md),
 
 **Start every session by reading [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md)**
 — it holds the current branch, verified commit, open bugs, blockers and the
-next task. **Update it after every major task.** Keep it short; link, don't paste.
+next task. Prioritised work is in [docs/TODO.md](docs/TODO.md) (P0–P3; a task
+is `done` only when verified). **Update both after every task.** Keep them
+short; link, don't paste.
 
 ---
 
