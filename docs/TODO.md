@@ -23,7 +23,7 @@ checked in a browser. Update after each task. Keep entries short.
 
 | # | Task | Module | Status | Relevant files | Tests required |
 |---|---|---|---|---|---|
-| P1-1 | Restore `users.create` and `users.edit` views (500 today) | Users | open | `resources/views/users/{create,edit}.blade.php` (new), `app/Http/Controllers/UserController.php` | `WebSmokeTest` create/edit rows; browser check as Admin + Super Admin |
+| P1-1 | Restore `users.create` and `users.edit` views (500 today) | Users | done (verified `c601c78`) | `resources/views/users/{create,edit}.blade.php` (new), `app/Http/Controllers/UserController.php` | `WebSmokeTest` create/edit rows; browser check as Admin + Super Admin |
 | P1-2 | Restore push-notification `templates` and `edit-template` views (500 today) | Notifications | open | `resources/views/admin/push-notifications/{templates,edit-template}.blade.php` (new), `Admin/PushNotificationController.php` | `WebSmokeTest`; browser check |
 | P1-3 | Fix `/complaints/create` JS "Complaint form elements not found" | Complaints | open | `resources/views/complaints/create.blade.php` | Browser check: no console errors, form submits |
 | P1-4 | Fix Admin `/settings` `Unexpected token '<'` page error (script fetching HTML) | Settings | open | `resources/views/settings/index.blade.php`, `app/Http/Controllers/SettingsController.php` | Browser check: no pageerror on all tabs |
@@ -82,3 +82,4 @@ Kept brief; full detail in commit messages `git log 5913335..HEAD`.
 | MySQL portability (2 queries); root debug scripts removed; docs | `8b54a65` |
 | Fresh install: services wipe bug; seeder credentials | `1f37780` |
 | Notice cross-society leak; `notices.history` view; Super Admin settings routes | `53ec880` |
+| `users.create`/`users.edit` views; Super Admin society selector; form-path JSON guards | `c601c78` |
