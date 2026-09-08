@@ -125,6 +125,15 @@ class FacilityApiController extends Controller
         return response()->json(['success' => true, 'message' => 'Booking cancelled.']);
     }
 
+    /**
+     * The JSON keys are the installed app's contract and stay as they are;
+     * the columns behind three of them were wrong.
+     *
+     * $f->charges, ->open_time and ->close_time are not columns on
+     * facilities - they are booking_charge, opening_time and closing_time -
+     * so every facility reached the app with 0.00 charges and no opening
+     * hours.
+     */
     private function formatFacility(Facility $f): array
     {
         return [
@@ -132,11 +141,11 @@ class FacilityApiController extends Controller
             'name'        => $f->name,
             'description' => $f->description,
             'capacity'    => $f->capacity,
-            'charges'     => (float) ($f->charges ?? 0),
+            'charges'     => (float) ($f->booking_charge ?? 0),
             'image'       => ApiImageHelper::storageUrl($f->image ?? null),
             'status'      => $f->status,
-            'open_time'   => $f->open_time,
-            'close_time'  => $f->close_time,
+            'open_time'   => $f->opening_time,
+            'close_time'  => $f->closing_time,
         ];
     }
 

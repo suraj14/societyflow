@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\GeneratesDocumentNumber;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Staff extends Model
 {
-    use HasFactory;
+    use HasFactory, GeneratesDocumentNumber;
 
     protected $fillable = [
         'society_id',
@@ -184,11 +185,7 @@ class Staff extends Model
 
     public static function generateEmployeeId(int $societyId): string
     {
-        $prefix = 'EMP';
-        $societyCode = str_pad($societyId, 3, '0', STR_PAD_LEFT);
-        $sequence = static::where('society_id', $societyId)->count() + 1;
-        $sequenceCode = str_pad($sequence, 4, '0', STR_PAD_LEFT);
-        
-        return $prefix . $societyCode . $sequenceCode;
+        // No year segment, 4-digit counter - matches the original format.
+        return static::nextDocumentNumber($societyId, 'EMP', 'employee_id', 4, false);
     }
 }

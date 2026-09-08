@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\GeneratesDocumentNumber;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Complaint extends Model
 {
-    use HasFactory;
+    use HasFactory, GeneratesDocumentNumber;
 
     protected $fillable = [
         'society_id',
@@ -243,11 +244,6 @@ class Complaint extends Model
 
     public static function generateComplaintNumber(int $societyId): string
     {
-        $prefix = 'CMP';
-        $societyCode = str_pad($societyId, 3, '0', STR_PAD_LEFT);
-        $sequence = static::where('society_id', $societyId)->count() + 1;
-        $sequenceCode = str_pad($sequence, 6, '0', STR_PAD_LEFT);
-        
-        return $prefix . $societyCode . date('Y') . $sequenceCode;
+        return static::nextDocumentNumber($societyId, 'CMP', 'complaint_number');
     }
 }

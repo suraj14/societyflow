@@ -44,13 +44,25 @@ class ComplaintApiController extends Controller
         $user     = $request->user();
         $resident = $user->resident()->with('flat')->first();
 
-        // Find or match category
+        // Match the free-text category hint to one of the society's categories.
+        //
+        // This was a LIKE '%hint%' search, so a one-character hint matched an
+        // arbitrary category and the complaint was filed under it. Exact match
+        // first (case-insensitively), then a prefix match, and otherwise no
+        // category - which the column now permits.
         $categoryId = null;
-        if ($request->category) {
-            $cat = ComplaintCategory::where('society_id', $user->society_id)
-                ->where('name', 'like', '%' . $request->category . '%')
-                ->first();
-            $categoryId = $cat?->id;
+        if (filled($request->category)) {
+            $hint = trim($request->category);
+
+            $categoryId = ComplaintCategory::where('society_id', $user->society_id)
+                ->whereRaw('LOWER(name) = ?', [mb_strtolower($hint)])
+                ->value('id');
+
+            if (!$categoryId && mb_strlen($hint) >= 3) {
+                $categoryId = ComplaintCategory::where('society_id', $user->society_id)
+                    ->where('name', 'like', $hint . '%')
+                    ->value('id');
+            }
         }
 
         $imagePath = null;
