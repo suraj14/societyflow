@@ -243,7 +243,11 @@
                 <!-- Pagination -->
                 <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
                     <div class="flex-1 flex justify-between sm:hidden">
-                        {{ $bills->simplePaginate() }}
+                        {{-- $bills is already a paginator; simplePaginate() is a
+                             query-builder method and forwarded to the underlying
+                             collection, which fataled the whole page whenever any
+                             bill existed. links() renders the same controls. --}}
+                        {{ $bills->links() }}
                     </div>
                     <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
                         <div>

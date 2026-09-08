@@ -19,7 +19,13 @@ class UtilityBillController extends BaseController
         $societyId = $this->getSocietyId();
         
         if (!$societyId) {
-            return view('utility-bills.index', ['bills' => collect(), 'flats' => collect()]);
+            // The view calls paginator methods (links/firstItem/total), so the
+            // empty case has to be an empty paginator - a plain Collection
+            // fatals the page.
+            return view('utility-bills.index', [
+                'bills' => new \Illuminate\Pagination\LengthAwarePaginator([], 0, 15),
+                'flats' => collect(),
+            ]);
         }
 
         $query = UtilityBill::bySociety($societyId)->with(['flat', 'society']);
@@ -37,10 +43,15 @@ class UtilityBillController extends BaseController
         // Admin and Super Admin see all bills in their society
 
         $bills = $query
+            // Grouped: an ungrouped orWhere binds at the top level of the
+            // WHERE and would escape the resident scoping applied above,
+            // returning every bill whose type matched the search term.
             ->when(request('search'), function($q, $search) {
-                $q->whereHas('flat', function($sq) use ($search) {
-                    $sq->where('flat_number', 'like', "%{$search}%");
-                })->orWhere('bill_type', 'like', "%{$search}%");
+                $q->where(function($outer) use ($search) {
+                    $outer->whereHas('flat', function($sq) use ($search) {
+                        $sq->where('flat_number', 'like', "%{$search}%");
+                    })->orWhere('bill_type', 'like', "%{$search}%");
+                });
             })
             ->when(request('flat_id'), function($q, $flatId) {
                 $q->byFlat($flatId);
@@ -184,7 +195,18 @@ class UtilityBillController extends BaseController
             }
             
             $billTypes = UtilityBill::getBillTypes();
-            return view('utility-bills.create', compact('flats', 'billTypes'));
+
+            // The view reads $propertyType and $properties unguarded, so this
+            // branch has to supply them too. Returning only flats+billTypes
+            // made the admin create form fatal with "Undefined variable
+            // $propertyType". Null/empty here selects the flat-dropdown
+            // branch of the view, which is what an admin should see.
+            return view('utility-bills.create', [
+                'flats'        => $flats,
+                'billTypes'    => $billTypes,
+                'propertyType' => null,
+                'properties'   => collect(),
+            ]);
         }
         
         $billTypes = UtilityBill::getBillTypes();

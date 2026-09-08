@@ -13,12 +13,19 @@ class BillingController extends Controller
     {
         $query = SubscriptionPayment::with(['society', 'subscriptionPlan']);
 
-        // Search functionality
+        // Search functionality.
+        //
+        // The orWhere used to sit outside a group, so it escaped the search
+        // clause entirely: OR binds across the whole WHERE, which meant any
+        // row with a matching transaction_id came back regardless of the
+        // status and date filters applied below.
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->whereHas('society', function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%");
-            })->orWhere('transaction_id', 'like', "%{$search}%");
+            $query->where(function ($q) use ($search) {
+                $q->whereHas('society', function ($sq) use ($search) {
+                    $sq->where('name', 'like', "%{$search}%");
+                })->orWhere('transaction_id', 'like', "%{$search}%");
+            });
         }
 
         // Status filter

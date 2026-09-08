@@ -95,11 +95,20 @@ class FacilityBookingController extends Controller
         }
 
         // Filters
+        //
+        // The two clauses must be grouped. Ungrouped, the trailing
+        // orWhereHas bound at the top level of the WHERE and escaped the
+        // role-based scoping applied above - so a resident searching for a
+        // facility by name received every booking of that facility in the
+        // system, not just their own.
         if ($request->filled('search')) {
-            $query->whereHas('user', function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%');
-            })->orWhereHas('facility', function ($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%');
+            $search = $request->search;
+            $query->where(function ($outer) use ($search) {
+                $outer->whereHas('user', function ($q) use ($search) {
+                    $q->where('name', 'like', '%' . $search . '%');
+                })->orWhereHas('facility', function ($q) use ($search) {
+                    $q->where('name', 'like', '%' . $search . '%');
+                });
             });
         }
 
