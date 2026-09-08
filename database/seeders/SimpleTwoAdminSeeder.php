@@ -55,13 +55,25 @@ class SimpleTwoAdminSeeder extends Seeder
             ]
         );
 
-        // Create Admin Users
+        // Create Admin Users.
+        //
+        // Passwords are generated, not hardcoded. This seeder is listed in
+        // DatabaseSeeder - the default `php artisan db:seed` path - so the
+        // previous Hash::make('password') meant every fresh install, including
+        // a production one, shipped with admin@societyflow.com / password
+        // already active and printed on screen.
+        //
+        // Set SEED_ADMIN_PASSWORD to pin a known value for local development.
         $adminRole = Role::where('name', 'Admin')->first();
+
+        $pinned = env('SEED_ADMIN_PASSWORD');
+        $admin1Password = $pinned ?: \App\Helpers\TemporaryPassword::generate();
+        $admin2Password = $pinned ?: \App\Helpers\TemporaryPassword::generate();
 
         $admin1 = User::create([
             'name' => 'Rajesh Kumar',
             'email' => 'admin@societyflow.com',
-            'password' => Hash::make('password'),
+            'password' => Hash::make($admin1Password),
             'phone' => '+91-9876543210',
             'society_id' => $society1->id,
             'status' => 'active',
@@ -72,7 +84,7 @@ class SimpleTwoAdminSeeder extends Seeder
         $admin2 = User::create([
             'name' => 'Priya Sharma',
             'email' => 'sahgunvilla@gmail.com',
-            'password' => Hash::make('password'),
+            'password' => Hash::make($admin2Password),
             'phone' => '+91-8765432109',
             'society_id' => $society2->id,
             'status' => 'active',
@@ -87,9 +99,13 @@ class SimpleTwoAdminSeeder extends Seeder
         // Create different settings for both societies
         $this->createSettings($society1, $society2);
 
+        // Printed once, to the operator running the seeder. Not stored
+        // anywhere and not recoverable afterwards - use the password reset
+        // flow if it is lost.
         echo "✅ Two admin accounts created successfully!\n";
-        echo "🏢 Urban Heights Admin: admin@societyflow.com / password\n";
-        echo "🏡 Sahgun Villa Admin: sahgunvilla@gmail.com / password\n";
+        echo "🏢 Urban Heights Admin: admin@societyflow.com / {$admin1Password}\n";
+        echo "🏡 Sahgun Villa Admin: sahgunvilla@gmail.com / {$admin2Password}\n";
+        echo "\n⚠  Record these now. They are generated per run and are not stored.\n";
     }
 
     private function createSettings($society1, $society2)

@@ -155,8 +155,16 @@ class ServicesSeeder extends Seeder
             ],
         ];
 
+        // updateOrCreate, not create: running this seeder twice used to insert
+        // a second copy of all 17 services. That is where the duplicate
+        // catalogue entries came from, and it now violates the unique index on
+        // (name, category) added by
+        // 2026_09_07_000006_deduplicate_services_and_add_unique_index.
         foreach ($services as $service) {
-            Service::create($service);
+            Service::updateOrCreate(
+                ['name' => $service['name'], 'category' => $service['category']],
+                $service
+            );
         }
 
         $this->command->info('Services seeded successfully!');
