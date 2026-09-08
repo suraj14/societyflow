@@ -17,11 +17,16 @@ class NoticeController extends BaseController
         $user = auth()->user();
         $query = Notice::with(['society', 'createdBy', 'approvedBy']);
 
-        // Filter by society for Admin users
-        if ($user->hasRole('Admin')) {
+        // Scope to the user's own society for everyone except Super Admin.
+        //
+        // This used to read `if ($user->hasRole('Admin'))`, so only Admin was
+        // scoped. Every other role - Tenant, Apartment Owner, Villa Owner,
+        // Staff, Guard, Accountant - fell through with no filter and saw
+        // every notice in the database, including other societies' drafts and
+        // rejected submissions. Super Admin is cross-society by design.
+        if (!$user->hasRole('Super Admin')) {
             $query->where('society_id', $user->society_id);
         }
-        // Super Admin sees all notices
 
         // Search filter
         if ($request->filled('search')) {
@@ -341,8 +346,8 @@ class NoticeController extends BaseController
         $query = Notice::with(['society', 'createdBy'])
             ->where('status', 'pending');
 
-        // Filter by society for Admin users
-        if ($user->hasRole('Admin')) {
+        // Everyone except Super Admin is scoped to their own society.
+        if (!$user->hasRole('Super Admin')) {
             $query->where('society_id', $user->society_id);
         }
 
@@ -356,8 +361,8 @@ class NoticeController extends BaseController
         $user = auth()->user();
         $query = Notice::with(['society', 'createdBy', 'approvedBy']);
 
-        // Filter by society for Admin users
-        if ($user->hasRole('Admin')) {
+        // Everyone except Super Admin is scoped to their own society.
+        if (!$user->hasRole('Super Admin')) {
             $query->where('society_id', $user->society_id);
         }
 

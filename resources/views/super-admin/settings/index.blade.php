@@ -70,7 +70,7 @@
         <div class="p-6">
             <!-- App Settings Tab -->
             <div x-show="activeTab === 'app'" x-cloak>
-                <form action="{{ route('super-admin.settings.update.app') }}" method="POST">
+                <form action="{{ route('settings.app.update') }}" method="POST">
                     @csrf
                     <div class="space-y-6">
                         <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
@@ -129,7 +129,7 @@
 
             <!-- Language Settings Tab -->
             <div x-show="activeTab === 'language'" x-cloak>
-                <form action="{{ route('super-admin.settings.update.language') }}" method="POST">
+                <form action="{{ route('settings.language.update') }}" method="POST">
                     @csrf
                     <div class="space-y-6">
                         <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
@@ -167,7 +167,7 @@
 
             <!-- Storage Settings Tab -->
             <div x-show="activeTab === 'storage'" x-cloak>
-                <form action="{{ route('super-admin.settings.update.storage') }}" method="POST">
+                <form action="{{ route('settings.storage.update') }}" method="POST">
                     @csrf
                     <div class="space-y-6">
                         <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
@@ -229,7 +229,7 @@
 
             <!-- Theme Settings Tab -->
             <div x-show="activeTab === 'theme'" x-cloak>
-                <form action="{{ route('super-admin.settings.update.theme') }}" method="POST" enctype="multipart/form-data">
+                <form action="{{ route('settings.theme.update') }}" method="POST" enctype="multipart/form-data">
                     @csrf
                     <div class="space-y-6">
                         <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
@@ -289,7 +289,7 @@
 
             <!-- Currency Settings Tab -->
             <div x-show="activeTab === 'currency'" x-cloak>
-                <form action="{{ route('super-admin.settings.update.currency') }}" method="POST">
+                <form action="{{ route('settings.currency.update') }}" method="POST">
                     @csrf
                     <div class="space-y-6">
                         <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
@@ -368,7 +368,7 @@
     });
 
     function testStorage() {
-        fetch('{{ route("super-admin.settings.test.storage") }}', {
+        fetch('{{ route("settings.storage.test") }}', {
             method: 'POST',
             headers: {
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,

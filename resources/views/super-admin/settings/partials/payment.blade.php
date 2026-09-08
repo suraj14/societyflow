@@ -1,4 +1,4 @@
-<form action="{{ route('super-admin.settings.update.payment') }}" method="POST">
+<form action="{{ route('settings.payment.update') }}" method="POST">
     @csrf
     <div class="space-y-6">
         <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
