@@ -143,9 +143,17 @@ class PushNotificationController extends BaseController
     {
         $societyId = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
         
-        $templates = PushNotificationTemplate::when($societyId, function($query) use ($societyId) {
-            return $query->where('society_id', $societyId)->orWhereNull('society_id');
-        })->paginate(15);
+        // Own society's templates plus the global (null society) defaults.
+        // Grouped: an ungrouped `where ... orWhereNull` would escape any
+        // filter added in front of it (see SearchScopeLeakTest).
+        $templates = PushNotificationTemplate::with('society')
+            ->when($societyId, function ($query) use ($societyId) {
+                $query->where(function ($q) use ($societyId) {
+                    $q->where('society_id', $societyId)->orWhereNull('society_id');
+                });
+            })
+            ->orderBy('trigger_action')
+            ->paginate(15);
 
         return view('admin.push-notifications.templates', compact('templates'));
     }
@@ -155,11 +163,7 @@ class PushNotificationController extends BaseController
      */
     public function editTemplate(PushNotificationTemplate $template)
     {
-        $societyId = auth()->user()->society_id;
-        
-        if ($template->society_id && $template->society_id !== $societyId && !auth()->user()->hasRole('Super Admin')) {
-            abort(403);
-        }
+        $this->authorizeTemplate($template);
 
         return view('admin.push-notifications.edit-template', compact('template'));
     }
@@ -167,8 +171,31 @@ class PushNotificationController extends BaseController
     /**
      * Update push notification template
      */
+    /**
+     * Abort unless the current user may edit this template.
+     *
+     * Global templates (society_id null) are shared defaults every Admin may
+     * adjust; a society-specific one belongs to that society alone.
+     */
+    private function authorizeTemplate(PushNotificationTemplate $template): void
+    {
+        $user = auth()->user();
+
+        if ($user->hasRole('Super Admin') || $template->society_id === null) {
+            return;
+        }
+
+        if ((int) $template->society_id !== (int) $user->society_id) {
+            abort(403, 'This template belongs to another society.');
+        }
+    }
+
     public function updateTemplate(Request $request, PushNotificationTemplate $template)
     {
+        // editTemplate() checked society ownership but updateTemplate() did
+        // not, so an Admin could PUT to any society's template by id.
+        $this->authorizeTemplate($template);
+
         return $this->handleFormSubmission(function() use ($request, $template) {
             $validated = $request->validate([
                 'title' => 'required|string|max:255',
@@ -181,9 +208,11 @@ class PushNotificationController extends BaseController
 
             $template->update($validated);
 
-            return redirect()->route('admin.push-notifications.templates')
-                           ->with('success', 'Push notification template updated successfully');
-        });
+            // handleFormSubmission ignores a redirect returned from the
+            // closure and falls back to back(), so the success redirect has
+            // to be passed as its arguments - as every other caller does.
+            return $template;
+        }, 'Push notification template updated successfully', 'admin.push-notifications.templates');
     }
 
     /**
