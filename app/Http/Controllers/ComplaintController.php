@@ -105,7 +105,7 @@ class ComplaintController extends BaseController
         $properties = collect();
         if ($user->hasRole('Villa Owner') || $user->hasRole('Apartment Owner')) {
             // Get owned flats
-            $ownedFlats = \App\Models\Flat::where('owner_id', $user->id)
+            $ownedFlats = \App\Models\Flat::where('owner_id', $user->owner_id)
                                           ->where('society_id', $societyId)
                                           ->with(['building', 'villaArea'])
                                           ->get();
@@ -170,7 +170,7 @@ class ComplaintController extends BaseController
                     $flatId = $request->flat_id;
                 } else {
                     // Get first owned flat
-                    $ownedFlat = \App\Models\Flat::where('owner_id', $user->id)
+                    $ownedFlat = \App\Models\Flat::where('owner_id', $user->owner_id)
                                                  ->where('society_id', $societyId)
                                                  ->first();
                     $flatId = $ownedFlat ? $ownedFlat->id : null;

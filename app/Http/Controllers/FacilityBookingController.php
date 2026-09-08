@@ -53,7 +53,7 @@ class FacilityBookingController extends Controller
             }
             
             // Also check for villas with direct owner_id match
-            $directVillas = Flat::where('owner_id', $user->id)
+            $directVillas = Flat::where('owner_id', $user->owner_id)
                                ->where('property_type', 'villa')
                                ->pluck('id');
             
@@ -70,7 +70,7 @@ class FacilityBookingController extends Controller
             }
         } elseif ($user->hasRole('Apartment Owner')) {
             // Apartment Owner: See bookings for their own apartments OR bookings they created
-            $ownedApartments = Flat::where('owner_id', $user->id)
+            $ownedApartments = Flat::where('owner_id', $user->owner_id)
                                    ->where('property_type', 'apartment')
                                    ->pluck('id');
             if ($ownedApartments->count() > 0) {
@@ -149,7 +149,7 @@ class FacilityBookingController extends Controller
             }
             
             // Also check for villas with direct owner_id match
-            $directVillas = Flat::where('owner_id', $user->id)
+            $directVillas = Flat::where('owner_id', $user->owner_id)
                                ->where('property_type', 'villa')
                                ->pluck('id');
             
@@ -165,7 +165,7 @@ class FacilityBookingController extends Controller
                 $statsQuery->where('user_id', $user->id);
             }
         } elseif ($user->hasRole('Apartment Owner')) {
-            $ownedApartments = Flat::where('owner_id', $user->id)
+            $ownedApartments = Flat::where('owner_id', $user->owner_id)
                                    ->where('property_type', 'apartment')
                                    ->pluck('id');
             if ($ownedApartments->count() > 0) {
@@ -229,7 +229,7 @@ class FacilityBookingController extends Controller
             
             // Also check for villas with direct owner_id match
             $directVillas = Flat::with('villaArea')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $user->owner_id)
                             ->where('property_type', 'villa')
                             ->where('society_id', $societyId)
                             ->get();
@@ -268,7 +268,7 @@ class FacilityBookingController extends Controller
                             ->where('property_type', 'apartment')
                             ->where('society_id', $societyId)
                             ->where(function ($query) use ($user) {
-                                $query->where('owner_id', $user->id)
+                                $query->where('owner_id', $user->owner_id)
                                       ->orWhereHas('residents', function ($q) use ($user) {
                                           $q->where('user_id', $user->id)
                                             ->where('status', 'active');
@@ -297,7 +297,7 @@ class FacilityBookingController extends Controller
             $userFlats = Flat::with('building', 'villaArea')
                             ->where('society_id', $societyId)
                             ->where(function ($query) use ($user) {
-                                $query->where('owner_id', $user->id)
+                                $query->where('owner_id', $user->owner_id)
                                       ->orWhereHas('residents', function ($q) use ($user) {
                                           $q->where('user_id', $user->id);
                                       });
@@ -467,7 +467,7 @@ class FacilityBookingController extends Controller
             
             // Also check for villas with direct owner_id match
             $directVillas = Flat::with('villaArea')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $user->owner_id)
                             ->where('property_type', 'villa')
                             ->where('society_id', $societyId)
                             ->get();
@@ -495,7 +495,7 @@ class FacilityBookingController extends Controller
                             ->where('property_type', 'apartment')
                             ->where('society_id', $societyId)
                             ->where(function ($query) use ($user) {
-                                $query->where('owner_id', $user->id)
+                                $query->where('owner_id', $user->owner_id)
                                       ->orWhereHas('residents', function ($q) use ($user) {
                                           $q->where('user_id', $user->id)
                                             ->where('status', 'active');
@@ -515,7 +515,7 @@ class FacilityBookingController extends Controller
                             ->where('society_id', $societyId)
                             ->where('status', 'occupied')
                             ->where(function ($query) use ($user) {
-                                $query->where('owner_id', $user->id)
+                                $query->where('owner_id', $user->owner_id)
                                       ->orWhereHas('residents', function ($q) use ($user) {
                                           $q->where('user_id', $user->id);
                                       });

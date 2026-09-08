@@ -24,31 +24,18 @@ class UtilityBillController extends BaseController
 
         $query = UtilityBill::bySociety($societyId)->with(['flat', 'society']);
         
-        // Filter by tenant's flat
-        if ($user->hasRole('Tenant')) {
-            $tenant = Tenant::where('user_id', $user->id)->first();
-            if ($tenant) {
-                $query->where('flat_id', $tenant->flat_id);
-            } else {
-                $query->whereIn('flat_id', []);
-            }
+        // Residents see only bills for units they reside in, own or rent.
+        //
+        // This used to branch per role and resolve ownership with
+        // Flat::where('owner_id', $user->id) - but flats.owner_id is a
+        // foreign key to owners.id, not users.id, so it matched whichever
+        // unrelated owner happened to share that id, or nothing at all.
+        // UserFlatResolver resolves all three attachment paths correctly.
+        if (!$user->hasAnyRole(['Super Admin', 'Admin'])) {
+            $query->whereIn('flat_id', \App\Support\UserFlatResolver::flatIdsFor($user));
         }
-        // Filter by owner's properties
-        elseif ($user->hasRole('Villa Owner') || $user->hasRole('Apartment Owner')) {
-            $ownedFlats = Flat::where('owner_id', $user->id)->pluck('id');
-            
-            // Also get flats where user is owner through Resident model
-            $residentFlats = Flat::whereHas('residents', function($q) use ($user) {
-                $q->where('user_id', $user->id)
-                  ->where('type', 'owner')
-                  ->where('status', 'active');
-            })->pluck('id');
-            
-            $allFlats = $ownedFlats->merge($residentFlats)->unique();
-            $query->whereIn('flat_id', $allFlats);
-        }
-        // Admin and Super Admin see all
-        
+        // Admin and Super Admin see all bills in their society
+
         $bills = $query
             ->when(request('search'), function($q, $search) {
                 $q->whereHas('flat', function($sq) use ($search) {
@@ -124,7 +111,7 @@ class UtilityBillController extends BaseController
             
             // Also check for villas with direct owner_id match
             $directVillas = Flat::with('villaArea')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $user->owner_id)
                             ->where('property_type', 'villa')
                             ->where('society_id', $societyId)
                             ->get();
@@ -135,7 +122,7 @@ class UtilityBillController extends BaseController
             $apartments = Flat::with('building')
                             ->where('property_type', 'apartment')
                             ->where('society_id', $societyId)
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $user->owner_id)
                             ->get();
             
             // If no apartments found via owner_id, check through Resident model

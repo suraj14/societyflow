@@ -22,7 +22,7 @@ class FacilityController extends Controller
         
         // If not found through relationship, try direct owner_id match
         if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->id)
+            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
                                     ->where('property_type', 'villa')
                                     ->first();
         }
@@ -52,7 +52,7 @@ class FacilityController extends Controller
         
         // If not found through relationship, try direct owner_id match
         if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->id)
+            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
                                     ->where('property_type', 'villa')
                                     ->first();
         }
@@ -77,7 +77,7 @@ class FacilityController extends Controller
         
         // If not found through relationship, try direct owner_id match
         if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->id)
+            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
                                     ->where('property_type', 'villa')
                                     ->first();
         }
@@ -143,7 +143,7 @@ class FacilityController extends Controller
         
         // If not found through relationship, try direct owner_id match
         if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->id)
+            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
                                     ->where('property_type', 'villa')
                                     ->first();
         }
@@ -174,7 +174,7 @@ class FacilityController extends Controller
         
         // If not found through relationship, try direct owner_id match
         if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->id)
+            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
                                     ->where('property_type', 'villa')
                                     ->first();
         }

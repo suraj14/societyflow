@@ -49,7 +49,7 @@ class PaymentController extends Controller
             }
             
             // Also check for villas with direct owner_id match
-            $directVillas = \App\Models\Flat::where('owner_id', $user->id)
+            $directVillas = \App\Models\Flat::where('owner_id', $user->owner_id)
                                            ->where('property_type', 'villa')
                                            ->pluck('id');
             
@@ -75,7 +75,7 @@ class PaymentController extends Controller
             }
             
             // Also check for apartments with direct owner_id match
-            $directApartments = \App\Models\Flat::where('owner_id', $user->id)
+            $directApartments = \App\Models\Flat::where('owner_id', $user->owner_id)
                                                ->where('property_type', 'apartment')
                                                ->pluck('id');
             
@@ -120,7 +120,7 @@ class PaymentController extends Controller
             }
             
             // Also check for villas with direct owner_id match
-            $directVillas = \App\Models\Flat::where('owner_id', $user->id)
+            $directVillas = \App\Models\Flat::where('owner_id', $user->owner_id)
                                            ->where('property_type', 'villa')
                                            ->pluck('id');
             
@@ -145,7 +145,7 @@ class PaymentController extends Controller
             }
             
             // Also check for apartments with direct owner_id match
-            $directApartments = \App\Models\Flat::where('owner_id', $user->id)
+            $directApartments = \App\Models\Flat::where('owner_id', $user->owner_id)
                                                ->where('property_type', 'apartment')
                                                ->pluck('id');
             
@@ -212,7 +212,7 @@ class PaymentController extends Controller
             }
             
             $directVillas = Flat::with('villaArea')
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $user->owner_id)
                             ->where('property_type', 'villa')
                             ->where('society_id', $societyId)
                             ->get();
@@ -223,7 +223,7 @@ class PaymentController extends Controller
             $apartments = Flat::with('building')
                             ->where('property_type', 'apartment')
                             ->where('society_id', $societyId)
-                            ->where('owner_id', $user->id)
+                            ->where('owner_id', $user->owner_id)
                             ->get();
             
             // If no apartments found via owner_id, check through Resident model

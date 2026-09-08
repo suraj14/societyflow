@@ -63,6 +63,11 @@ class RolesAndPermissionsSeeder extends Seeder
             'manage_units',
             'manage_villas',
             'access_settings',
+            // Distinct from access_settings (reach the settings screens):
+            // this one gates changing configuration. Admin\EmailTemplateMappingController
+            // has always authorized against it, but it was never created, so
+            // Gate denied and those screens 403'd for every role.
+            'manage_settings',
             'view_reports',
             'access_super_admin',
         ];
@@ -105,8 +110,9 @@ class RolesAndPermissionsSeeder extends Seeder
             'manage_services',
             'manage_notices',
             'access_settings',
+            'manage_settings',
             'view_reports',
-            
+
             // View permissions (Society-scoped)
             'view_facility',
             'view_all_visitors',
