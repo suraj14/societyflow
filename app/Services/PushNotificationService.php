@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\Log;
 
 class PushNotificationService
 {
-    private const FCM_ENDPOINT = 'https://fcm.googleapis.com/fcm/send';
     private const MAX_RETRIES = 3;
 
     /**
@@ -113,15 +112,27 @@ class PushNotificationService
                 'data' => $customData,
             ];
 
-            // Send via FCM if server key is configured
             $settings = PushNotificationSetting::where('society_id', $subscription->society_id)->first();
-            if ($settings && $settings->fcm_server_key) {
-                $this->sendViaFCM($subscription, $payload, $settings->fcm_server_key);
-            }
 
-            // Send via Web Push (VAPID)
-            if ($settings && $settings->vapid_private_key) {
+            // Route by the shape of the subscription rather than sending to
+            // both transports. A browser Web Push subscription stores a
+            // push-service URL in `endpoint`; an FCM subscription stores a
+            // device token, which is not a URL. Attempting FCM delivery to a
+            // browser endpoint (or vice versa) always fails and would mark
+            // the whole send failed even when the correct transport
+            // succeeded.
+            $isWebPushEndpoint = str_starts_with((string) $subscription->endpoint, 'http');
+
+            if ($isWebPushEndpoint) {
+                if (!$settings || !$settings->vapid_private_key) {
+                    throw new \Exception('Web Push subscription but no VAPID key configured for this society.');
+                }
                 $this->sendViaWebPush($subscription, $payload, $settings);
+            } else {
+                // Previously gated on $settings->fcm_server_key, the
+                // credential for the retired legacy API; the v1 API
+                // authenticates with the uploaded service account instead.
+                $this->sendViaFCM($subscription, $payload);
             }
 
             $subscription->markAsUsed();
@@ -167,21 +178,38 @@ class PushNotificationService
     }
 
     /**
-     * Send via Firebase Cloud Messaging
+     * Send via Firebase Cloud Messaging.
+     *
+     * This used to POST https://fcm.googleapis.com/fcm/send with an
+     * `Authorization: key=<server key>` header. Google decommissioned that
+     * legacy HTTP API in June 2024, so every call had been failing - which
+     * the caller swallowed into a "failed" log row.
+     *
+     * FirebaseService already implements the current v1 API correctly
+     * (service-account JWT -> OAuth2 access token ->
+     * v1/projects/{id}/messages:send). It was simply never wired up. This
+     * now delegates to it.
      */
-    private function sendViaFCM(PushSubscription $subscription, array $payload, string $serverKey): void
+    private function sendViaFCM(PushSubscription $subscription, array $payload): void
     {
-        $response = Http::withHeaders([
-            'Authorization' => 'key=' . $serverKey,
-            'Content-Type' => 'application/json',
-        ])->post(self::FCM_ENDPOINT, [
-            'to' => $subscription->endpoint,
-            'notification' => $payload,
-            'data' => $payload['data'] ?? [],
-        ]);
+        if (!FirebaseService::isConfigured()) {
+            throw new \Exception(
+                'FCM is not configured. Upload a Firebase service account JSON '
+                . '(storage/app/private/firebase-credentials.json) - the legacy '
+                . 'server key field is no longer usable.'
+            );
+        }
 
-        if (!$response->successful()) {
-            throw new \Exception('FCM send failed: ' . $response->body());
+        $sent = app(FirebaseService::class)->sendNotification(
+            $subscription->endpoint,
+            $payload['title'] ?? '',
+            $payload['body'] ?? '',
+            // FCM data values must be strings.
+            collect($payload['data'] ?? [])->map(fn ($v) => (string) $v)->all()
+        );
+
+        if (!$sent) {
+            throw new \Exception('FCM send failed for subscription ' . $subscription->id);
         }
     }
 
