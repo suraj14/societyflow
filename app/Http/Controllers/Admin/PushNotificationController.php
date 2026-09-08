@@ -209,7 +209,12 @@ class PushNotificationController extends BaseController
             'by_trigger' => PushNotificationLog::when($societyId, function($query) use ($societyId) {
                 return $query->where('society_id', $societyId);
             })
-            ->selectRaw('trigger_action, COUNT(*) as count, SUM(CASE WHEN status = "sent" THEN 1 ELSE 0 END) as sent')
+            // Bound parameter rather than a "sent" literal: in MySQL double
+            // quotes delimit an identifier, so `status = "sent"` compared the
+            // column against a non-existent column named sent and errored.
+            // It only worked because SQLite falls back to treating an
+            // unresolvable double-quoted token as a string.
+            ->selectRaw('trigger_action, COUNT(*) as count, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as sent', ['sent'])
             ->groupBy('trigger_action')
             ->get(),
         ];

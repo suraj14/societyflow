@@ -80,9 +80,16 @@ class SuperAdminController extends Controller
             ->whereBetween('payment_date', [$startDate, $endDate])
             ->sum('amount');
 
+        // YEAR()/MONTH() are MySQL functions and do not exist in SQLite, so
+        // this query failed outright on the development database. Grouping
+        // on a driver-appropriate expression keeps it working on both.
+        $driver     = \Illuminate\Support\Facades\DB::connection()->getDriverName();
+        $yearExpr   = $driver === 'sqlite' ? "strftime('%Y', payment_date)" : 'YEAR(payment_date)';
+        $monthExpr  = $driver === 'sqlite' ? "strftime('%m', payment_date)" : 'MONTH(payment_date)';
+
         $revenueByMonth = Payment::success()
             ->whereBetween('payment_date', [$startDate, $endDate])
-            ->selectRaw('YEAR(payment_date) as year, MONTH(payment_date) as month, SUM(amount) as total')
+            ->selectRaw("{$yearExpr} as year, {$monthExpr} as month, SUM(amount) as total")
             ->groupBy('year', 'month')
             ->orderBy('year')
             ->orderBy('month')
