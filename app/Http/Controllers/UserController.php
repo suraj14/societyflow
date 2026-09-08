@@ -44,8 +44,14 @@ class UserController extends BaseController
         
         // Get available roles
         $roles = Role::all();
-        
-        return view('users.create', compact('roles'));
+
+        // Super Admin has no society of their own, so the form must let them
+        // pick one; store() rejected every Super Admin submission otherwise.
+        $societies = auth()->user()->hasRole('Super Admin')
+            ? \App\Models\Society::where('status', 'active')->orderBy('name')->get()
+            : collect();
+
+        return view('users.create', compact('roles', 'societies'));
     }
     
     public function store(Request $request)
@@ -63,9 +69,14 @@ class UserController extends BaseController
         
         $currentUser = auth()->user();
         $societyId = $this->getSocietyId();
-        
-        if ($currentUser->hasRole('Super Admin') && !$societyId) {
-            return response()->json(['error' => 'Super Admin must specify a society to create users.'], 422);
+
+        // Super Admin has no society_id; take the one chosen in the form,
+        // validated against real societies so a forged id cannot attach a
+        // user to an arbitrary tenant. Admins always get their own society
+        // regardless of what the request carries.
+        if ($currentUser->hasRole('Super Admin')) {
+            $request->validate(['society_id' => 'required|exists:societies,id']);
+            $societyId = (int) $request->society_id;
         }
         
         $avatarPath = null;
@@ -134,14 +145,20 @@ class UserController extends BaseController
         $currentUser = auth()->user();
         $societyId = $this->getSocietyId();
         
-        // Verify user belongs to the same society (for Admin only)
+        // Verify user belongs to the same society (for Admin only).
+        // These early returns used to be JSON-only, so the standalone edit
+        // form (a normal browser POST) received raw JSON instead of a page.
         if ($currentUser->hasRole('Admin') && $user->society_id !== $societyId) {
-            return response()->json(['error' => 'User not found.'], 404);
+            abort(404, 'User not found.');
         }
-        
+
         // Check if user is trying to change their own role
-        if ($user->id === auth()->id() && $request->role !== $user->roles->first()->name) {
-            return response()->json(['error' => 'You cannot change your own role.'], 422);
+        if ($user->id === auth()->id() && $request->role !== $user->roles->first()?->name) {
+            if ($request->expectsJson()) {
+                return response()->json(['error' => 'You cannot change your own role.'], 422);
+            }
+
+            return back()->withInput()->withErrors(['role' => 'You cannot change your own role.']);
         }
         
         $request->validate([
@@ -197,12 +214,16 @@ class UserController extends BaseController
         
         // Verify user belongs to the same society (for Admin only)
         if ($currentUser->hasRole('Admin') && $user->society_id !== $societyId) {
-            return response()->json(['error' => 'User not found.'], 404);
+            abort(404, 'User not found.');
         }
-        
+
         // Prevent deleting own account
         if ($user->id === auth()->id()) {
-            return response()->json(['error' => 'You cannot delete your own account.'], 422);
+            if (request()->expectsJson()) {
+                return response()->json(['error' => 'You cannot delete your own account.'], 422);
+            }
+
+            return back()->with('error', 'You cannot delete your own account.');
         }
         
         // Delete avatar if exists - skip deletion to avoid fileinfo error

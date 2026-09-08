@@ -263,7 +263,7 @@ class WebSmokeTest extends TestCase
         $admin = $this->makeUserWithRole($this->society, 'Admin');
 
         foreach (['/buildings/create', '/flats/create', '/owners/create', '/complaints/create',
-                  '/facilities/create', '/notices/create', '/events/create', '/visitors/create',
+                  '/facilities/create', '/notices/create', '/events/create', '/visitors/create', '/users/create',
                   '/utility-bills/create', '/payments/create'] as $uri) {
             $response = $this->actingAs($admin)->get($uri);
 
