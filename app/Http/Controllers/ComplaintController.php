@@ -7,6 +7,7 @@ use App\Models\ComplaintCategory;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Rule;
 use App\Traits\HandlesFormSubmissions;
 
 class ComplaintController extends BaseController
@@ -258,9 +259,11 @@ class ComplaintController extends BaseController
 
     public function edit(Complaint $complaint)
     {
+        $this->authorizeComplaintManagement($complaint);
+
         $user = Auth::user();
         $societyId = $user->society_id;
-        
+
         // Get categories for the current user's society
         $categories = ComplaintCategory::where('society_id', $societyId)
                                       ->where('status', 'active')
@@ -272,9 +275,18 @@ class ComplaintController extends BaseController
 
     public function update(Request $request, Complaint $complaint)
     {
+        $this->authorizeComplaintManagement($complaint);
+
         return $this->handleFormSubmission(function() use ($request, $complaint) {
-            $request->validate([
-                'complaint_category_id' => 'required|exists:complaint_categories,id',
+            $validated = $request->validate([
+                'complaint_category_id' => [
+                    'required',
+                    // Category must belong to the complaint's own society,
+                    // otherwise a valid-looking id from another society could
+                    // be attached to it.
+                    Rule::exists('complaint_categories', 'id')
+                        ->where('society_id', $complaint->society_id),
+                ],
                 'title' => 'required|string|max:255',
                 'description' => 'required|string',
                 'priority' => 'required|in:low,medium,high,urgent',
@@ -282,7 +294,12 @@ class ComplaintController extends BaseController
             ]);
 
             $oldStatus = $complaint->status;
-            $complaint->update($request->all());
+
+            // Only the validated fields are written. This was
+            // $complaint->update($request->all()), which let a request rewrite
+            // society_id, created_by, assigned_to and flat_id - moving a
+            // complaint into another society or reassigning its author.
+            $complaint->update($validated);
 
             // Dispatch event if status changed
             if ($oldStatus !== $complaint->status) {
@@ -295,10 +312,37 @@ class ComplaintController extends BaseController
 
     public function destroy(Complaint $complaint)
     {
+        $this->authorizeComplaintManagement($complaint);
+
         $complaint->delete();
 
         return redirect()->route('complaints.index')
             ->with('success', 'Complaint deleted successfully!');
+    }
+
+    /**
+     * Abort unless the current user may modify this complaint.
+     *
+     * edit/update/destroy previously had no authorization at all, and the
+     * complaints resource route is only guarded by `auth` - so any signed-in
+     * user could rewrite or delete any complaint in any society by id.
+     *
+     * Society staff manage every complaint in their own society; a resident
+     * manages only the ones they raised.
+     */
+    private function authorizeComplaintManagement(Complaint $complaint): void
+    {
+        $this->authorizeSocietyAccess($complaint);
+
+        $user = Auth::user();
+
+        if ($user->hasAnyRole(['Super Admin', 'Admin', 'Staff'])) {
+            return;
+        }
+
+        if ((int) $complaint->created_by !== (int) $user->id) {
+            abort(403, 'You are not authorized to modify this complaint.');
+        }
     }
 
     public function addUpdate(Request $request, Complaint $complaint)

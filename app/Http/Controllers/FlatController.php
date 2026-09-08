@@ -156,6 +156,8 @@ class FlatController extends BaseController
 
     public function show(Flat $flat)
     {
+        $this->authorizeSocietyAccess($flat);
+
         $flat->load(['building.society', 'activeResident', 'maintenanceBills']);
         
         $stats = [
@@ -171,8 +173,10 @@ class FlatController extends BaseController
 
     public function edit(Flat $flat)
     {
+        $this->authorizeSocietyAccess($flat);
+
         $user = auth()->user();
-        
+
         // If user is Super Admin, show all societies and buildings; otherwise, only their society
         if ($user->hasRole('Super Admin')) {
             $societies = Society::where('status', 'active')->get();
@@ -191,8 +195,10 @@ class FlatController extends BaseController
 
     public function update(Request $request, Flat $flat)
     {
+        $this->authorizeSocietyAccess($flat);
+
         $user = auth()->user();
-        
+
         // Validation rules
         $rules = [
             'building_id' => 'required|exists:buildings,id',
@@ -237,6 +243,8 @@ class FlatController extends BaseController
 
     public function destroy(Flat $flat)
     {
+        $this->authorizeSocietyAccess($flat);
+
         if ($flat->status === 'occupied') {
             return back()->with('error', 'Cannot delete occupied flat!');
         }
@@ -253,6 +261,8 @@ class FlatController extends BaseController
 
     public function changeStatus(Request $request, Flat $flat)
     {
+        $this->authorizeSocietyAccess($flat);
+
         $request->validate([
             'status' => 'required|in:vacant,occupied,on_rent,maintenance',
         ]);

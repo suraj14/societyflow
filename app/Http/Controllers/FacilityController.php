@@ -111,6 +111,8 @@ class FacilityController extends BaseController
 
     public function show(Facility $facility)
     {
+        $this->authorizeSocietyAccess($facility);
+
         $facility->load(['society', 'bookings' => function ($query) {
             $query->latest()->take(10);
         }]);
@@ -127,11 +129,15 @@ class FacilityController extends BaseController
 
     public function edit(Facility $facility)
     {
+        $this->authorizeFacilityManagement($facility);
+
         return view('facilities.edit', compact('facility'));
     }
 
     public function update(Request $request, Facility $facility)
     {
+        $this->authorizeFacilityManagement($facility);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -177,6 +183,8 @@ class FacilityController extends BaseController
 
     public function destroy(Facility $facility)
     {
+        $this->authorizeFacilityManagement($facility);
+
         if ($facility->bookings()->whereIn('status', ['pending', 'approved'])->exists()) {
             return redirect()->route('facilities.index')
                 ->with('error', 'Cannot delete facility with active bookings.');
@@ -190,5 +198,22 @@ class FacilityController extends BaseController
 
         return redirect()->route('facilities.index')
             ->with('success', 'Facility deleted successfully.');
+    }
+
+    /**
+     * Abort unless the current user may administer this facility.
+     *
+     * The facilities resource route is guarded only by `auth`, and
+     * edit/update/destroy had no checks at all - so any resident could
+     * rename or delete their society's shared amenities, and any admin
+     * could reach another society's by id.
+     */
+    private function authorizeFacilityManagement(Facility $facility): void
+    {
+        $this->authorizeSocietyAccess($facility);
+
+        if (!auth()->user()->hasAnyRole(['Super Admin', 'Admin'])) {
+            abort(403, 'Only administrators can manage facilities.');
+        }
     }
 }

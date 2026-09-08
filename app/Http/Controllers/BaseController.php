@@ -5,12 +5,13 @@ namespace App\Http\Controllers;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Foundation\Validation\ValidatesRequests;
 use Illuminate\Routing\Controller;
+use App\Http\Controllers\Concerns\AuthorizesSocietyAccess;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Support\Facades\Log;
 
 class BaseController extends Controller
 {
-    use AuthorizesRequests, ValidatesRequests, HandlesFormSubmissions;
+    use AuthorizesRequests, ValidatesRequests, HandlesFormSubmissions, AuthorizesSocietyAccess;
 
     /**
      * Check if user can manage facilities

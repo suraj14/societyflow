@@ -10,12 +10,13 @@ use App\Models\Flat;
 use App\Models\Building;
 use App\Models\VillaArea;
 use App\Events\PaymentReceived;
+use App\Http\Controllers\Concerns\AuthorizesSocietyAccess;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    use HandlesFormSubmissions;
+    use HandlesFormSubmissions, AuthorizesSocietyAccess;
     public function index()
     {
         $user = auth()->user();
@@ -379,43 +380,33 @@ class PaymentController extends Controller
 
     public function show(Payment $payment)
     {
-        $user = auth()->user();
-        
-        // Verify payment belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $payment->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
-        
+        // Was `if ($user->hasRole('Admin') && $payment->society_id !== ...)`:
+        // the && meant every non-Admin role skipped the check entirely, so any
+        // authenticated resident could read any payment in any society.
+        $this->authorizeOwnedRecord($payment);
+
         // Load necessary relationships
         $payment->load(['flat.building', 'flat.villaArea', 'society']);
-        
+
         return view('payments.show', compact('payment'));
     }
 
     public function edit(Payment $payment)
     {
-        $user = auth()->user();
-        
-        // Verify payment belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $payment->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
-        
+        $this->authorizeOwnedRecord($payment);
+
         // Eager load the flat relationship
         $payment->load(['flat.building', 'flat.villaArea']);
-        
+
         return view('payments.edit', compact('payment'));
     }
 
     public function update(Request $request, Payment $payment)
     {
+        $this->authorizeOwnedRecord($payment);
+
         $user = auth()->user();
-        
-        // Verify payment belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $payment->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
-        
+
         try {
             $request->validate([
                 'property_type' => 'required|in:apartment,villa',
@@ -482,13 +473,8 @@ class PaymentController extends Controller
 
     public function destroy(Payment $payment)
     {
-        $user = auth()->user();
-        
-        // Verify payment belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $payment->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
-        
+        $this->authorizeOwnedRecord($payment);
+
         $payment->delete();
 
         return redirect()->route('payments.index')
@@ -501,32 +487,32 @@ class PaymentController extends Controller
     public function receipt(Payment $payment)
     {
         $user = auth()->user();
-        
-        // Authorization check based on user role
-        if ($user->hasRole('Admin')) {
-            // Admin can view receipts from their society
-            if ($payment->society_id !== $user->society_id) {
+
+        // Society isolation first, for every role.
+        $this->authorizeSocietyAccess($payment);
+
+        if (!$user->hasAnyRole(['Super Admin', 'Admin'])) {
+            // The payer always sees their own receipt.
+            $isPayer = $payment->user_id !== null && (int) $payment->user_id === (int) $user->id;
+
+            // Owners also see receipts raised against a unit they own.
+            // Previously this branch tested hasRole('Owner'), a role that does
+            // not exist in this application - the real roles are
+            // 'Apartment Owner' and 'Villa Owner' - so every apartment owner
+            // fell through to the default deny and got a 403 on their own
+            // receipt.
+            $ownsUnit = false;
+            if (!$isPayer && $payment->flat_id && $user->owner) {
+                $ownsUnit = $user->owner->flats()
+                    ->whereKey($payment->flat_id)
+                    ->exists();
+            }
+
+            if (!$isPayer && !$ownsUnit) {
                 abort(403, 'Unauthorized access.');
             }
-        } elseif ($user->hasRole('Tenant')) {
-            // Tenant can only view their own payment receipts
-            if ($payment->user_id !== $user->id) {
-                abort(403, 'Unauthorized access.');
-            }
-        } elseif ($user->hasRole('Owner') || $user->hasRole('Villa Owner')) {
-            // Owner can view receipts for their properties
-            $userFlats = [];
-            if ($user->owner) {
-                $userFlats = $user->owner->flats->pluck('id')->toArray();
-            }
-            if (!in_array($payment->flat_id, $userFlats)) {
-                abort(403, 'Unauthorized access.');
-            }
-        } else {
-            // Other roles not allowed
-            abort(403, 'Unauthorized access.');
         }
-        
+
         // Load necessary relationships
         $payment->load(['flat.building', 'flat.villaArea', 'society', 'user']);
         

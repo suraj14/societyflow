@@ -182,6 +182,8 @@ class OwnerController extends BaseController
 
     public function show(Owner $owner)
     {
+        $this->authorizeSocietyAccess($owner);
+
         $owner->load(['society', 'flats', 'building', 'villaArea']);
 
         // Fetch flat data for displaying property details
@@ -209,6 +211,8 @@ class OwnerController extends BaseController
 
     public function edit(Owner $owner)
     {
+        $this->authorizeSocietyAccess($owner);
+
         $user = auth()->user();
 
         // If user is Super Admin, show all societies; otherwise, only their society
@@ -227,6 +231,8 @@ class OwnerController extends BaseController
 
     public function update(Request $request, Owner $owner)
     {
+        $this->authorizeSocietyAccess($owner);
+
         $user = auth()->user();
 
         $rules = [
@@ -348,6 +354,8 @@ class OwnerController extends BaseController
 
     public function destroy(Owner $owner)
     {
+        $this->authorizeSocietyAccess($owner);
+
         // Check if owner has any assigned properties in flats table
         $assignedProperties = $owner->flats()->count();
         if ($assignedProperties > 0) {
