@@ -5,9 +5,6 @@ import '../../../core/utils/auto_refresh_mixin.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../visitors/providers/visitors_provider.dart';
-import '../../notices/screens/notices_screen.dart';
-import '../../services/screens/services_screen.dart';
-import '../../events/screens/events_screen.dart';
 import '../../shell/main_shell.dart';
 
 class GuardHomeScreen extends ConsumerStatefulWidget {
@@ -98,11 +95,11 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Welcome, ${user?.name ?? 'Guard'}!', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
-          Text(_greeting(), style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 12)),
+          Text(_greeting(), style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12)),
         ])),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
           child: const Text('On Duty', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
         ),
       ]),
@@ -255,7 +252,7 @@ class _StatTile extends StatelessWidget {
     child: Row(children: [
       Container(
         width: 42, height: 42,
-        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
         child: Icon(icon, color: color, size: 20),
       ),
       const SizedBox(width: 12),
@@ -280,9 +277,9 @@ class _ActionButton extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, color: color, size: 24),
@@ -305,14 +302,14 @@ class _ModuleRow extends StatelessWidget {
     padding: const EdgeInsets.all(14),
     onTap: onTap,
     child: Row(children: [
-      Container(width: 42, height: 42, decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color, size: 20)),
+      Container(width: 42, height: 42, decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: color, size: 20)),
       const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label, style: AppTextStyles.label),
         const SizedBox(height: 2),
         Text(subtitle, style: AppTextStyles.caption),
       ])),
-      Icon(Icons.arrow_forward_ios_rounded, size: 13, color: AppColors.textHint),
+      const Icon(Icons.arrow_forward_ios_rounded, size: 13, color: AppColors.textHint),
     ]),
   );
 }
@@ -342,7 +339,7 @@ class _EmergencySheet extends StatelessWidget {
         child: AppCard(
           padding: const EdgeInsets.all(14),
           child: Row(children: [
-            Container(width: 40, height: 40, decoration: BoxDecoration(color: Color(c['color'] as int).withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(c['icon'] as IconData, color: Color(c['color'] as int), size: 20)),
+            Container(width: 40, height: 40, decoration: BoxDecoration(color: Color(c['color'] as int).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(c['icon'] as IconData, color: Color(c['color'] as int), size: 20)),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(c['label'] as String, style: AppTextStyles.label),

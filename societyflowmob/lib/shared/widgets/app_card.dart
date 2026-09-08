@@ -20,7 +20,7 @@ class AppCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadius.lg),
           border: Border.all(color: AppColors.divider),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2)),
+            BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
           ],
         ),
         child: child,
@@ -44,7 +44,7 @@ class GradientCard extends StatelessWidget {
         gradient: AppColors.cardGradient,
         borderRadius: BorderRadius.circular(AppRadius.xl),
         boxShadow: [
-          BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 6)),
+          BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6)),
         ],
       ),
       child: child,
@@ -68,7 +68,7 @@ class StatCard extends StatelessWidget {
         color: AppColors.cardBg,
         borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -76,7 +76,7 @@ class StatCard extends StatelessWidget {
         children: [
           Container(
             width: 34, height: 34,
-            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
             child: Icon(icon, color: color, size: 17),
           ),
           const SizedBox(height: 10),

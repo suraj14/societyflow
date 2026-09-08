@@ -22,6 +22,26 @@ use App\Http\Controllers\Api\EventApiController;
 
 Route::prefix('v1')->group(function () {
 
+    /*
+     * Server identity check.
+     *
+     * The mobile app discovers its server by scanning the local subnet. It
+     * used to accept the first host that completed a TCP connection on port
+     * 8000 and then send that host a bearer token - any machine on the
+     * network answering on that port would have received it. The app now
+     * calls this endpoint and requires the marker below before trusting a
+     * host.
+     *
+     * Deliberately unauthenticated and free of any tenant data.
+     */
+    Route::get('/health', function () {
+        return response()->json([
+            'application' => 'societyflow',
+            'api'         => 'v1',
+            'status'      => 'ok',
+        ]);
+    });
+
     // Public auth routes
     Route::prefix('auth')->group(function () {
         Route::post('/login',           [AuthApiController::class, 'login']);

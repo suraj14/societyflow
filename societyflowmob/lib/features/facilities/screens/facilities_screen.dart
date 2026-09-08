@@ -101,7 +101,7 @@ class _FacilityCard extends StatelessWidget {
             Row(children: [
               Expanded(child: Text(facility.name, style: AppTextStyles.label.copyWith(fontSize: 15))),
               if (facility.charges > 0)
-                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: AppColors.secondary.withOpacity(0.1), borderRadius: BorderRadius.circular(20)), child: Text('₹${facility.charges.toStringAsFixed(0)}/hr', style: const TextStyle(color: AppColors.secondary, fontSize: 11, fontWeight: FontWeight.w600))),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: AppColors.secondary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)), child: Text('₹${facility.charges.toStringAsFixed(0)}/hr', style: const TextStyle(color: AppColors.secondary, fontSize: 11, fontWeight: FontWeight.w600))),
             ]),
             if (facility.description != null) ...[
               const SizedBox(height: 4),
@@ -264,7 +264,7 @@ class _BookingList extends ConsumerWidget {
         return AppCard(
           padding: const EdgeInsets.all(14),
           child: Row(children: [
-            Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.meeting_room_rounded, color: AppColors.primary, size: 20)),
+            Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.meeting_room_rounded, color: AppColors.primary, size: 20)),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(b.facilityName ?? 'Facility', style: AppTextStyles.label),

@@ -70,7 +70,7 @@ class _EventCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: (event.isOngoing ? AppColors.secondary : AppColors.primary).withOpacity(0.1),
+                  color: (event.isOngoing ? AppColors.secondary : AppColors.primary).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(event.isOngoing ? 'Ongoing' : 'Upcoming', style: TextStyle(color: event.isOngoing ? AppColors.secondary : AppColors.primary, fontSize: 10, fontWeight: FontWeight.w600)),

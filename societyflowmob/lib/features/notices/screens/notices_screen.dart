@@ -72,7 +72,7 @@ class _NoticeCard extends StatelessWidget {
           const SizedBox(height: 12),
         ],
         Row(children: [
-          Container(width: 40, height: 40, decoration: BoxDecoration(color: (notice.isImportant ? AppColors.error : AppColors.primary).withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(notice.isImportant ? Icons.priority_high_rounded : Icons.campaign_rounded, color: notice.isImportant ? AppColors.error : AppColors.primary, size: 18)),
+          Container(width: 40, height: 40, decoration: BoxDecoration(color: (notice.isImportant ? AppColors.error : AppColors.primary).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(notice.isImportant ? Icons.priority_high_rounded : Icons.campaign_rounded, color: notice.isImportant ? AppColors.error : AppColors.primary, size: 18)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(notice.title, style: AppTextStyles.label, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -80,7 +80,7 @@ class _NoticeCard extends StatelessWidget {
             Text(notice.postedBy ?? 'Admin', style: AppTextStyles.caption),
           ])),
           if (notice.isImportant)
-            Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1), borderRadius: BorderRadius.circular(20)), child: const Text('Important', style: TextStyle(color: AppColors.error, fontSize: 10, fontWeight: FontWeight.w600))),
+            Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3), decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)), child: const Text('Important', style: TextStyle(color: AppColors.error, fontSize: 10, fontWeight: FontWeight.w600))),
         ]),
         const SizedBox(height: 10),
         Text(notice.content, style: AppTextStyles.body2, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -108,7 +108,7 @@ class _NoticeCard extends StatelessWidget {
             Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2)))),
             Expanded(child: ListView(controller: ctrl, padding: const EdgeInsets.all(24), children: [
               if (notice.isImportant)
-                Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1), borderRadius: BorderRadius.circular(8)), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.priority_high_rounded, color: AppColors.error, size: 14), SizedBox(width: 4), Text('Important Notice', style: TextStyle(color: AppColors.error, fontSize: 12, fontWeight: FontWeight.w600))])),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: const Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.priority_high_rounded, color: AppColors.error, size: 14), SizedBox(width: 4), Text('Important Notice', style: TextStyle(color: AppColors.error, fontSize: 12, fontWeight: FontWeight.w600))])),
               if (notice.image != null) ...[
                 NetImage(url: notice.image, width: double.infinity, height: 200, borderRadius: BorderRadius.circular(AppRadius.lg)),
                 const SizedBox(height: 16),

@@ -216,6 +216,48 @@ class WebSmokeTest extends TestCase
         );
     }
 
+    /**
+     * Detail and edit screens for the records seeded above.
+     *
+     * Index pages exercise the list partials; show/edit pages exercise a
+     * completely different set of views and were entirely uncovered.
+     */
+    public function test_detail_and_edit_screens_render_for_admin(): void
+    {
+        $admin = $this->makeUserWithRole($this->society, 'Admin');
+
+        $targets = [
+            '/buildings/'         => \App\Models\Building::class,
+            '/flats/'             => \App\Models\Flat::class,
+            '/owners/'            => Owner::class,
+            '/complaints/'        => Complaint::class,
+            '/facilities/'        => Facility::class,
+            '/facility-bookings/' => FacilityBooking::class,
+            '/visitors/'          => Visitor::class,
+            '/notices/'           => Notice::class,
+            '/events/'            => Event::class,
+            '/payments/'          => Payment::class,
+            '/utility-bills/'     => UtilityBill::class,
+        ];
+
+        $failures = [];
+
+        foreach ($targets as $prefix => $model) {
+            $record = $model::query()->first();
+            $this->assertNotNull($record, "no seeded record for {$prefix}");
+
+            foreach (["{$prefix}{$record->getKey()}", "{$prefix}{$record->getKey()}/edit"] as $uri) {
+                $status = $this->actingAs($admin)->get($uri)->getStatusCode();
+
+                if ($status >= 500) {
+                    $failures[] = "{$uri} => {$status}";
+                }
+            }
+        }
+
+        $this->assertSame([], $failures, "screens returned 5xx:\n" . implode("\n", $failures));
+    }
+
     public function test_create_forms_render_for_admin(): void
     {
         $admin = $this->makeUserWithRole($this->society, 'Admin');

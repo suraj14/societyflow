@@ -61,11 +61,11 @@ class _OtpPhoneScreenState extends ConsumerState<OtpPhoneScreen> {
                   borderRadius: BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Container(width: 56, height: 56, decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.phone_android_rounded, color: Colors.white, size: 28)),
+                  Container(width: 56, height: 56, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.phone_android_rounded, color: Colors.white, size: 28)),
                   const SizedBox(height: 20),
                   const Text('Login with OTP', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.5)),
                   const SizedBox(height: 6),
-                  Text('Enter your registered mobile number', style: TextStyle(fontSize: 15, color: Colors.white.withOpacity(0.8))),
+                  Text('Enter your registered mobile number', style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.8))),
                 ]),
               ),
 
@@ -96,11 +96,11 @@ class _OtpPhoneScreenState extends ConsumerState<OtpPhoneScreen> {
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.primary.withOpacity(0.15))),
-                      child: Row(children: [
-                        const Icon(Icons.info_outline_rounded, color: AppColors.primary, size: 16),
-                        const SizedBox(width: 8),
-                        const Expanded(child: Text('Use the mobile number registered with your society admin.', style: TextStyle(color: AppColors.primary, fontSize: 12, height: 1.4))),
+                      decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.primary.withValues(alpha: 0.15))),
+                      child: const Row(children: [
+                        Icon(Icons.info_outline_rounded, color: AppColors.primary, size: 16),
+                        SizedBox(width: 8),
+                        Expanded(child: Text('Use the mobile number registered with your society admin.', style: TextStyle(color: AppColors.primary, fontSize: 12, height: 1.4))),
                       ]),
                     ),
                     const SizedBox(height: 32),

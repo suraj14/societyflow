@@ -109,7 +109,7 @@ class _VisitorsScreenState extends ConsumerState<VisitorsScreen>
           Container(
             margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
+            decoration: BoxDecoration(color: AppColors.error.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
             child: Row(children: [
               const Icon(Icons.error_outline, color: AppColors.error, size: 16),
               const SizedBox(width: 8),
@@ -192,9 +192,9 @@ class _ResidentPendingBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.12),
+        color: AppColors.warning.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.4)),
       ),
       child: Row(children: [
         const Icon(Icons.notifications_active_rounded, color: AppColors.warning, size: 18),
@@ -316,7 +316,7 @@ class _VisitorCard extends ConsumerWidget {
           Container(
             width: 46, height: 46,
             decoration: BoxDecoration(
-              color: _typeColor(visitor.visitorType).withOpacity(0.1),
+              color: _typeColor(visitor.visitorType).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(_typeIcon(visitor.visitorType), color: _typeColor(visitor.visitorType), size: 22),
@@ -347,7 +347,7 @@ class _VisitorCard extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: AppColors.secondary.withOpacity(0.1),
+                  color: AppColors.secondary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -547,13 +547,15 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
       // Refresh the visitor from state
       final updated = ref.read(visitorsProvider).allVisitors.where((v) => v.id == _visitor.id).firstOrNull;
       if (updated != null && mounted) setState(() => _visitor = updated);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(msg),
         backgroundColor: AppColors.secondary,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
       ));
+      }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error));
     } finally {
@@ -580,7 +582,7 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
           Row(children: [
             Container(
               width: 52, height: 52,
-              decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(14)),
+              decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
               child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 26),
             ),
             const SizedBox(width: 14),
@@ -614,9 +616,9 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.08),
+                  color: AppColors.warning.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.warning.withOpacity(0.3)),
+                  border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
                 ),
                 child: Column(children: [
                   Row(children: [

@@ -5,10 +5,6 @@ import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/status_badge.dart';
 import '../../auth/providers/auth_provider.dart';
-import '../../notices/screens/notices_screen.dart';
-import '../../facilities/screens/facilities_screen.dart';
-import '../../services/screens/services_screen.dart';
-import '../../events/screens/events_screen.dart';
 import '../../shell/main_shell.dart';
 import '../../../core/utils/auto_refresh_mixin.dart';
 import '../providers/home_provider.dart';
@@ -91,7 +87,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
     child: GradientCard(
       child: Row(children: [
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-          Text('Good ${_greeting()}! 👋', style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.8))),
+          Text('Good ${_greeting()}! 👋', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.8))),
           const SizedBox(height: 4),
           Text(
             user?.name ?? 'Resident',
@@ -101,7 +97,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)),
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               const Icon(Icons.home_outlined, color: Colors.white, size: 12),
               const SizedBox(width: 4),
@@ -112,7 +108,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
         const SizedBox(width: 12),
         Container(
           width: 60, height: 60,
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), shape: BoxShape.circle),
+          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
           child: const Icon(Icons.person_rounded, color: Colors.white, size: 30),
         ),
       ]),
@@ -158,15 +154,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
               width: 220,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.06),
+                color: AppColors.primary.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(AppRadius.lg),
-                border: Border.all(color: AppColors.primary.withOpacity(0.15)),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                Row(children: [
-                  const Icon(Icons.campaign_rounded, color: AppColors.primary, size: 14),
-                  const SizedBox(width: 5),
-                  const Text('Notice', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.3)),
+                const Row(children: [
+                  Icon(Icons.campaign_rounded, color: AppColors.primary, size: 14),
+                  SizedBox(width: 5),
+                  Text('Notice', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.3)),
                 ]),
                 const SizedBox(height: 5),
                 Text(s.notices[i]['title'] ?? '', style: AppTextStyles.label.copyWith(fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -190,7 +186,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
           child: AppCard(
             padding: const EdgeInsets.all(14),
             child: Row(children: [
-              Container(width: 40, height: 40, decoration: BoxDecoration(color: _actColor(a['type']).withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(_actIcon(a['type']), color: _actColor(a['type']), size: 18)),
+              Container(width: 40, height: 40, decoration: BoxDecoration(color: _actColor(a['type']).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(_actIcon(a['type']), color: _actColor(a['type']), size: 18)),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(a['title'] ?? '', style: AppTextStyles.label),
@@ -274,15 +270,15 @@ class _FeatureCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.07),
+          color: color.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: color.withOpacity(0.18)),
+          border: Border.all(color: color.withValues(alpha: 0.18)),
         ),
         child: Row(children: [
           Container(
             width: 38, height: 38,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: color, size: 19),
@@ -295,7 +291,7 @@ class _FeatureCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Icon(Icons.arrow_forward_ios_rounded, size: 12, color: color.withOpacity(0.5)),
+          Icon(Icons.arrow_forward_ios_rounded, size: 12, color: color.withValues(alpha: 0.5)),
         ]),
       ),
     );

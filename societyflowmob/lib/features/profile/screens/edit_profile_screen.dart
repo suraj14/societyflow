@@ -31,7 +31,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
     Future.microtask(() {
       final user = ref.read(currentUserProvider);
       if (user != null) {
-        _nameCtrl.text = user.name ?? '';
+        _nameCtrl.text = user.name;
         _phoneCtrl.text = user.phone ?? '';
       }
     });

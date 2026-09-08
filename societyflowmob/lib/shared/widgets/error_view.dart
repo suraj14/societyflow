@@ -26,13 +26,13 @@ class ErrorView extends StatelessWidget {
             Container(
               width: 72, height: 72,
               decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.08),
+                color: AppColors.error.withValues(alpha: 0.08),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 32, color: AppColors.error.withOpacity(0.6)),
+              child: Icon(icon, size: 32, color: AppColors.error.withValues(alpha: 0.6)),
             ),
             const SizedBox(height: 20),
-            Text(
+            const Text(
               'Something went wrong',
               style: AppTextStyles.h3,
               textAlign: TextAlign.center,
@@ -76,9 +76,9 @@ class ErrorBanner extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.error.withOpacity(0.08),
+        color: AppColors.error.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.error.withOpacity(0.2)),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
       ),
       child: Row(children: [
         const Icon(Icons.error_outline_rounded, color: AppColors.error, size: 16),

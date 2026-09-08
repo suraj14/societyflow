@@ -27,13 +27,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref.read(authProvider.notifier).login(email: _emailCtrl.text.trim(), password: _passwordCtrl.text);
       if (mounted) Navigator.pushReplacementNamed(context, '/home');
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(e.toString().replaceFirst('Exception: ', '')),
         backgroundColor: AppColors.error,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
       ));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -55,11 +57,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 borderRadius: BorderRadius.only(bottomLeft: Radius.circular(32), bottomRight: Radius.circular(32)),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Container(width: 56, height: 56, decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.apartment_rounded, color: Colors.white, size: 28)),
+                Container(width: 56, height: 56, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.apartment_rounded, color: Colors.white, size: 28)),
                 const SizedBox(height: 20),
                 const Text('Welcome back! 👋', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.5)),
                 const SizedBox(height: 6),
-                Text('Sign in to your SocietyFlow account', style: TextStyle(fontSize: 15, color: Colors.white.withOpacity(0.8))),
+                Text('Sign in to your SocietyFlow account', style: TextStyle(fontSize: 15, color: Colors.white.withValues(alpha: 0.8))),
               ]),
             ),
 
@@ -95,7 +97,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   const SizedBox(height: 24),
                   AppButton(label: 'Sign In', onPressed: _login, isLoading: _isLoading, icon: Icons.login_rounded),
                   const SizedBox(height: 20),
-                  Row(children: [const Expanded(child: Divider()), Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('or', style: AppTextStyles.body2)), const Expanded(child: Divider())]),
+                  const Row(children: [Expanded(child: Divider()), Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text('or', style: AppTextStyles.body2)), Expanded(child: Divider())]),
                   const SizedBox(height: 20),
                   // OTP Login
                   AppButton(

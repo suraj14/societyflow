@@ -64,8 +64,8 @@ class NetImage extends StatelessWidget {
 
   Widget _fallback(BorderRadius radius) => Container(
     width: width, height: height,
-    decoration: BoxDecoration(color: (fallbackColor ?? AppColors.primary).withOpacity(0.08), borderRadius: radius),
-    child: Icon(fallbackIcon, color: (fallbackColor ?? AppColors.primary).withOpacity(0.35), size: (height ?? 40) * 0.4),
+    decoration: BoxDecoration(color: (fallbackColor ?? AppColors.primary).withValues(alpha: 0.08), borderRadius: radius),
+    child: Icon(fallbackIcon, color: (fallbackColor ?? AppColors.primary).withValues(alpha: 0.35), size: (height ?? 40) * 0.4),
   );
 }
 

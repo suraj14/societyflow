@@ -59,11 +59,11 @@ class _PaymentsScreenState extends ConsumerState<PaymentsScreen>
       child: GradientCard(
         child: Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Total Due', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13)),
+            Text('Total Due', style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13)),
             const SizedBox(height: 4),
             Text('₹${totalDue.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
             const SizedBox(height: 4),
-            Text('${state.bills.where((b) => !b.isPaid).length} pending bills', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+            Text('${state.bills.where((b) => !b.isPaid).length} pending bills', style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12)),
           ])),
         ]),
       ),
@@ -99,7 +99,7 @@ class _BillCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Column(children: [
         Row(children: [
-          Container(width: 44, height: 44, decoration: BoxDecoration(color: (bill.isPaid ? AppColors.secondary : AppColors.warning).withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.receipt_long_rounded, color: bill.isPaid ? AppColors.secondary : AppColors.warning, size: 20)),
+          Container(width: 44, height: 44, decoration: BoxDecoration(color: (bill.isPaid ? AppColors.secondary : AppColors.warning).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.receipt_long_rounded, color: bill.isPaid ? AppColors.secondary : AppColors.warning, size: 20)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${bill.month} ${bill.year}', style: AppTextStyles.label),
@@ -148,7 +148,7 @@ class _PaymentHistory extends ConsumerWidget {
         return AppCard(
           padding: const EdgeInsets.all(14),
           child: Row(children: [
-            Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.secondary.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.check_circle_rounded, color: AppColors.secondary, size: 20)),
+            Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.secondary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.check_circle_rounded, color: AppColors.secondary, size: 20)),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(p.billType, style: AppTextStyles.label),

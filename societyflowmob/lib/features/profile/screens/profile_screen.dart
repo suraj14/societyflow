@@ -32,9 +32,9 @@ class ProfileScreen extends ConsumerWidget {
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(user?.name ?? 'Resident', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
                 const SizedBox(height: 4),
-                Text(user?.email ?? '', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13)),
+                Text(user?.email ?? '', style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13)),
                 const SizedBox(height: 6),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3), decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(20)), child: Text(user?.role ?? 'Resident', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600))),
+                Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3), decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)), child: Text(user?.role ?? 'Resident', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600))),
               ])),
             ]),
           ),
@@ -54,7 +54,7 @@ class ProfileScreen extends ConsumerWidget {
           // Family Members — only shown for owners
           if (user?.isOwner == true) ...[
             const SizedBox(height: 16),
-            _FamilyMembersCard(),
+            const _FamilyMembersCard(),
           ],
           const SizedBox(height: 16),
           AppCard(
@@ -114,7 +114,7 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(children: [
-      Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.08), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppColors.primary, size: 16)),
+      Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppColors.primary, size: 16)),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label, style: AppTextStyles.caption),
@@ -134,7 +134,7 @@ class _MenuItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       onTap: onTap,
-      leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.08), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppColors.primary, size: 18)),
+      leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppColors.primary, size: 18)),
       title: Text(label, style: AppTextStyles.body1.copyWith(fontWeight: FontWeight.w500)),
       trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textHint, size: 20),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -157,7 +157,7 @@ class _FamilyMembersCard extends ConsumerWidget {
         Row(children: [
           Container(
             width: 32, height: 32,
-            decoration: BoxDecoration(color: AppColors.info.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: AppColors.info.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
             child: const Icon(Icons.people_rounded, color: AppColors.info, size: 16),
           ),
           const SizedBox(width: 10),
@@ -182,7 +182,7 @@ class _FamilyMembersCard extends ConsumerWidget {
                 Container(
                   width: 36, height: 36,
                   decoration: BoxDecoration(
-                    color: _relationColor(m.relationship).withOpacity(0.1),
+                    color: _relationColor(m.relationship).withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -200,7 +200,7 @@ class _FamilyMembersCard extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: _relationColor(m.relationship).withOpacity(0.1),
+                        color: _relationColor(m.relationship).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(m.relationship, style: TextStyle(color: _relationColor(m.relationship), fontSize: 10, fontWeight: FontWeight.w600)),

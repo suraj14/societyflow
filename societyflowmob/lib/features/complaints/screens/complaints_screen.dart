@@ -36,7 +36,6 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
     startAutoRefresh();
   }
 
-  void _startAutoRefresh() {} // kept for compatibility, mixin handles it
 
   @override
   void dispose() { _tabController.dispose(); super.dispose(); }
@@ -126,7 +125,7 @@ class _ComplaintCard extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Container(width: 44, height: 44, decoration: BoxDecoration(color: _statusColor(complaint.status).withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.support_agent_rounded, color: _statusColor(complaint.status), size: 20)),
+          Container(width: 44, height: 44, decoration: BoxDecoration(color: _statusColor(complaint.status).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: Icon(Icons.support_agent_rounded, color: _statusColor(complaint.status), size: 20)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(complaint.title, style: AppTextStyles.label, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -223,15 +222,15 @@ class _ComplaintDetailSheetState extends ConsumerState<_ComplaintDetailSheet> {
                   child: Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.05),
+                      color: AppColors.primary.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.primary.withOpacity(0.15)),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
                     ),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
                         Container(
                           width: 28, height: 28,
-                          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.15), shape: BoxShape.circle),
+                          decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.15), shape: BoxShape.circle),
                           child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 14),
                         ),
                         const SizedBox(width: 8),

@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'dart:io';
 import 'dart:developer' as dev;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,10 +20,21 @@ class ServerDiscovery {
 
   static String? _resolvedUrl;
 
+  /// Short-circuits discovery with a fixed URL.
+  ///
+  /// Discovery performs real socket and HTTP I/O against the local subnet,
+  /// which cannot run under `flutter test` - it made the splash screen, and
+  /// therefore the whole boot path, untestable. Setting this skips the scan.
+  /// Production never assigns it.
+  @visibleForTesting
+  static String? overrideBaseUrl;
+
   /// The currently resolved base URL (available after resolveBaseUrl() completes).
-  static String get currentBaseUrl => _resolvedUrl ?? ApiConfig.devFallbackUrl;
+  static String get currentBaseUrl =>
+      overrideBaseUrl ?? _resolvedUrl ?? ApiConfig.devFallbackUrl;
 
   static Future<String> resolveBaseUrl() async {
+    if (overrideBaseUrl != null) return overrideBaseUrl!;
     if (ApiConfig.useProduction) return ApiConfig.prodUrl;
     if (_resolvedUrl != null) return _resolvedUrl!;
 
@@ -133,15 +146,65 @@ class ServerDiscovery {
     return null;
   }
 
+  /// Whether [baseUrl] is actually a SocietyFlow server.
+  ///
+  /// This used to be a bare `Socket.connect` - any machine on the subnet
+  /// with something listening on port 8000 passed, and the app then sent it
+  /// the user's bearer token. A printer, a router admin page or another
+  /// developer's server would all have qualified.
+  ///
+  /// Now the port check is only a fast pre-filter; the host must also answer
+  /// GET /health with the application marker before it is trusted.
   static Future<bool> _isReachable(String baseUrl, Duration timeout) async {
+    final host = _hostOf(baseUrl);
+    if (host == null) return false;
+
+    // Cheap reject: skip the HTTP round trip for the vast majority of
+    // scanned addresses that have nothing listening at all.
     try {
-      final ip = baseUrl.replaceAll('http://', '').split(':')[0];
-      final socket = await Socket.connect(ip, _port, timeout: timeout);
+      final socket = await Socket.connect(host, _port, timeout: timeout);
       socket.destroy();
-      return true;
     } catch (_) {
       return false;
     }
+
+    return _isSocietyFlow(baseUrl, timeout);
+  }
+
+  /// Confirms the server identifies itself as SocietyFlow.
+  static Future<bool> _isSocietyFlow(String baseUrl, Duration timeout) async {
+    HttpClient? client;
+    try {
+      client = HttpClient()
+        ..connectionTimeout = timeout
+        ..idleTimeout = timeout;
+
+      final request = await client
+          .getUrl(Uri.parse('$baseUrl/health'))
+          .timeout(timeout);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+
+      final response = await request.close().timeout(timeout);
+      if (response.statusCode != 200) return false;
+
+      final body = await response
+          .transform(const Utf8Decoder())
+          .join()
+          .timeout(timeout);
+
+      final decoded = jsonDecode(body);
+      return decoded is Map && decoded['application'] == 'societyflow';
+    } catch (_) {
+      return false;
+    } finally {
+      client?.close(force: true);
+    }
+  }
+
+  static String? _hostOf(String baseUrl) {
+    final uri = Uri.tryParse(baseUrl);
+    if (uri == null || uri.host.isEmpty) return null;
+    return uri.host;
   }
 
   static Future<String?> _getCachedUrl() async {

@@ -86,7 +86,7 @@ class _ServiceCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       onTap: () => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => _RequestSheet(service: service)),
       child: Row(children: [
-        Container(width: 48, height: 48, decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Icon(_icon(service.category), color: AppColors.primary, size: 22)),
+        Container(width: 48, height: 48, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)), child: Icon(_icon(service.category), color: AppColors.primary, size: 22)),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(service.name, style: AppTextStyles.label),
@@ -168,7 +168,7 @@ class _ProviderList extends StatelessWidget {
         return AppCard(
           padding: const EdgeInsets.all(14),
           child: Row(children: [
-            Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.info.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.person_rounded, color: AppColors.info, size: 22)),
+            Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.info.withValues(alpha: 0.1), shape: BoxShape.circle), child: const Icon(Icons.person_rounded, color: AppColors.info, size: 22)),
             const SizedBox(width: 12),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(p.name, style: AppTextStyles.label),

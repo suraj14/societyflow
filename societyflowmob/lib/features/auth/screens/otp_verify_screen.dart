@@ -54,8 +54,12 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    for (final c in _controllers) c.dispose();
-    for (final f in _focusNodes) f.dispose();
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
     super.dispose();
   }
 
@@ -73,7 +77,9 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
     } catch (e) {
       if (mounted) {
         // Clear OTP fields on error
-        for (final c in _controllers) c.clear();
+        for (final c in _controllers) {
+          c.clear();
+        }
         _focusNodes[0].requestFocus();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(e.toString().replaceFirst('Exception: ', '')),
@@ -94,12 +100,16 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
       await ref.read(authProvider.notifier).sendOtp(phone: widget.phone);
       if (mounted) {
         _startCountdown();
-        for (final c in _controllers) c.clear();
+        for (final c in _controllers) {
+          c.clear();
+        }
         _focusNodes[0].requestFocus();
         // Update dev OTP if returned
         final devOtp = ref.read(authProvider).devOtp;
         if (devOtp != null && devOtp.length == 4) {
-          for (int i = 0; i < 4; i++) _controllers[i].text = devOtp[i];
+          for (int i = 0; i < 4; i++) {
+            _controllers[i].text = devOtp[i];
+          }
         }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: const Text('OTP resent successfully'),
@@ -172,7 +182,7 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
                     decoration: InputDecoration(
                       counterText: '',
                       filled: true,
-                      fillColor: _controllers[i].text.isNotEmpty ? AppColors.primary.withOpacity(0.08) : AppColors.background,
+                      fillColor: _controllers[i].text.isNotEmpty ? AppColors.primary.withValues(alpha: 0.08) : AppColors.background,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _controllers[i].text.isNotEmpty ? AppColors.primary : AppColors.divider, width: _controllers[i].text.isNotEmpty ? 2 : 1)),
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: _controllers[i].text.isNotEmpty ? AppColors.primary : AppColors.divider, width: _controllers[i].text.isNotEmpty ? 2 : 1)),
                       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
@@ -221,7 +231,7 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
               const SizedBox(height: 24),
               Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: AppColors.warning.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.warning.withOpacity(0.3))),
+                decoration: BoxDecoration(color: AppColors.warning.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.warning.withValues(alpha: 0.3))),
                 child: Row(children: [
                   const Icon(Icons.developer_mode_rounded, color: AppColors.warning, size: 16),
                   const SizedBox(width: 8),

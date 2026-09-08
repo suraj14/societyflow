@@ -43,9 +43,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       );
       setState(() { _accountInfo = info; _step = 2; });
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error, behavior: SnackBarBehavior.floating, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), margin: const EdgeInsets.all(16)),
       );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -62,9 +64,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       );
       if (mounted) Navigator.pushReplacementNamed(context, '/home');
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error),
       );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -97,11 +101,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         // Header
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.08), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withOpacity(0.2))),
-          child: Row(children: [
-            const Icon(Icons.info_outline_rounded, color: AppColors.primary, size: 20),
-            const SizedBox(width: 12),
-            const Expanded(child: Text('Your account is created by your society admin. Enter your registered email and phone to activate it.', style: TextStyle(color: AppColors.primary, fontSize: 13, height: 1.4))),
+          decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withValues(alpha: 0.2))),
+          child: const Row(children: [
+            Icon(Icons.info_outline_rounded, color: AppColors.primary, size: 20),
+            SizedBox(width: 12),
+            Expanded(child: Text('Your account is created by your society admin. Enter your registered email and phone to activate it.', style: TextStyle(color: AppColors.primary, fontSize: 13, height: 1.4))),
           ]),
         ),
         const SizedBox(height: 28),
@@ -140,12 +144,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         // Account info card
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: AppColors.secondary.withOpacity(0.08), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.secondary.withOpacity(0.3))),
+          decoration: BoxDecoration(color: AppColors.secondary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.secondary.withValues(alpha: 0.3))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const Icon(Icons.check_circle_rounded, color: AppColors.secondary, size: 20),
-              const SizedBox(width: 8),
-              const Text('Account Found!', style: TextStyle(color: AppColors.secondary, fontWeight: FontWeight.w700, fontSize: 14)),
+            const Row(children: [
+              Icon(Icons.check_circle_rounded, color: AppColors.secondary, size: 20),
+              SizedBox(width: 8),
+              Text('Account Found!', style: TextStyle(color: AppColors.secondary, fontWeight: FontWeight.w700, fontSize: 14)),
             ]),
             const SizedBox(height: 10),
             _infoRow(Icons.person_rounded, 'Name', _accountInfo?['name'] ?? ''),
