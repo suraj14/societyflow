@@ -31,31 +31,18 @@ class MaintenanceBill extends Model
         'balance_amount',
         'status',
         'notes',
+        // Both added by 2026_02_02_120000_add_bill_type_and_paid_date_to_
+        // maintenance_bills, so they are unconditionally present.
+        //
+        // These used to be appended by an overridden getFillable() that ran
+        // Schema::hasColumn() at runtime. Laravel calls getFillable() very
+        // frequently, and each call issued two PRAGMA table_info queries: a
+        // 12-bill API response executed 90 introspection queries out of 94
+        // total, and the count grew linearly with the rows returned. Listing
+        // them statically removes the introspection entirely.
+        'bill_type',
+        'paid_date',
     ];
-
-    /**
-     * Get fillable attributes dynamically based on existing columns
-     */
-    public function getFillable()
-    {
-        $fillable = $this->fillable;
-        
-        try {
-            // Add bill_type if column exists
-            if (\Illuminate\Support\Facades\Schema::hasColumn('maintenance_bills', 'bill_type')) {
-                $fillable[] = 'bill_type';
-            }
-            
-            // Add paid_date if column exists
-            if (\Illuminate\Support\Facades\Schema::hasColumn('maintenance_bills', 'paid_date')) {
-                $fillable[] = 'paid_date';
-            }
-        } catch (\Exception $e) {
-            // If we can't check columns, just use the base fillable array
-        }
-        
-        return $fillable;
-    }
 
     // Converted from casts(): the casts() method is Laravel 11+;
     // on Laravel 10 it was never applied. Casting a column that doesn't
