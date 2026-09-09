@@ -57,6 +57,40 @@
                         </select>
                         @error('subscription_plan_id')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
                     </div>
+
+                    {{--
+                        Property Type — the source of truth for this society.
+                        It decides which property types can be created, which
+                        navigation appears, and which dashboard figures mean
+                        anything. Set once here; never asked again elsewhere.
+                    --}}
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Property Type <span class="text-red-500">*</span>
+                        </label>
+                        <div class="grid sm:grid-cols-3 gap-3" id="property-type-choices">
+                            @foreach(\App\Enums\SocietyPropertyType::options() as $value => $label)
+                                <label class="relative flex items-start p-4 border rounded-lg cursor-pointer hover:bg-gray-50
+                                              {{ old('property_type', 'both') === $value ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-300' }}">
+                                    <input type="radio" name="property_type" value="{{ $value }}" required
+                                           class="mt-1 text-blue-600 focus:ring-blue-500"
+                                           {{ old('property_type', 'both') === $value ? 'checked' : '' }}>
+                                    <span class="ml-3">
+                                        <span class="block text-sm font-medium text-gray-900">{{ $label }}</span>
+                                        <span class="block text-xs text-gray-500 mt-0.5">
+                                            @if($value === 'villa') Villas and villa areas only
+                                            @elseif($value === 'apartment') Buildings and apartments only
+                                            @else Both apartments and villas
+                                            @endif
+                                        </span>
+                                    </span>
+                                </label>
+                            @endforeach
+                        </div>
+                        @error('property_type')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+
+                        <div id="property-type-preview" class="mt-3 rounded-lg bg-blue-50 border border-blue-200 p-4 text-sm text-blue-900"></div>
+                    </div>
                 </div>
             </div>
 
@@ -154,3 +188,41 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+// Live preview of what the chosen property type switches on, so the admin
+// can see the consequence before saving. Purely informational - the server
+// enforces the value.
+document.addEventListener('DOMContentLoaded', function () {
+    const preview = document.getElementById('property-type-preview');
+    const choices = document.querySelectorAll('input[name="property_type"]');
+    if (!preview || !choices.length) return;
+
+    const FEATURES = {
+        villa:     ['Villa areas', 'Villas', 'Villa owners', 'Villa residents', 'Villa visitors', 'Villa billing'],
+        apartment: ['Buildings / towers', 'Apartments', 'Apartment owners', 'Apartment residents', 'Apartment visitors', 'Apartment billing'],
+        both:      ['Buildings / towers', 'Apartments', 'Villa areas', 'Villas', 'Owners of both kinds', 'Residents of both kinds', 'Visitors for both', 'Billing for both'],
+    };
+
+    function render(value) {
+        const items = FEATURES[value] || [];
+        preview.innerHTML =
+            '<p class="font-semibold mb-2">This society will have:</p><ul class="space-y-1">' +
+            items.map(i => '<li>&#10003; ' + i + '</li>').join('') +
+            '</ul>';
+
+        document.querySelectorAll('#property-type-choices label').forEach(function (label) {
+            const input = label.querySelector('input');
+            label.classList.toggle('border-blue-500', input.checked);
+            label.classList.toggle('ring-2', input.checked);
+            label.classList.toggle('ring-blue-200', input.checked);
+            label.classList.toggle('border-gray-300', !input.checked);
+        });
+    }
+
+    choices.forEach(c => c.addEventListener('change', () => render(c.value)));
+    render(document.querySelector('input[name="property_type"]:checked')?.value || 'both');
+});
+</script>
+@endpush

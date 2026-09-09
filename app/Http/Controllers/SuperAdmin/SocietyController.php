@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\SuperAdmin;
 
+use App\Enums\SocietyPropertyType;
 use App\Http\Controllers\Controller;
 use App\Models\Society;
 use App\Models\SubscriptionPlan;
@@ -11,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class SocietyController extends Controller
@@ -61,6 +63,10 @@ class SocietyController extends Controller
             'country' => 'required|string|max:100',
             'pincode' => 'required|string|max:10',
             'subscription_plan_id' => 'required|exists:subscription_plans,id',
+            // Decides which property types may exist in this society, and so
+            // which navigation, dashboard figures and APIs appear. Chosen
+            // once here - never again on individual screens.
+            'property_type' => ['required', Rule::in(SocietyPropertyType::values())],
             'admin_name' => 'required|string|max:255',
             'admin_email' => 'required|email|unique:users,email',
             'admin_password' => 'required|string|min:8|confirmed',
@@ -85,6 +91,7 @@ class SocietyController extends Controller
                 'country' => $request->country ?? 'India',
                 'pincode' => $request->pincode,
                 'subscription_plan_id' => $request->subscription_plan_id,
+                'property_type' => $request->property_type,
                 'status' => 'active',
                 'trial_ends_at' => now()->addDays($subscriptionPlan->trial_days ?? 30),
             ]);
@@ -184,6 +191,7 @@ class SocietyController extends Controller
             'country' => 'required|string|max:100',
             'pincode' => 'required|string|max:10',
             'subscription_plan_id' => 'required|exists:subscription_plans,id',
+            'property_type' => ['required', Rule::in(SocietyPropertyType::values())],
             'status' => 'required|in:active,inactive,suspended',
         ]);
 
@@ -195,7 +203,7 @@ class SocietyController extends Controller
             
             // Update society
             $updateData = $request->only([
-                'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'pincode', 'subscription_plan_id', 'status'
+                'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'pincode', 'subscription_plan_id', 'property_type', 'status'
             ]);
             
             \Log::info('Updating society with data', $updateData);

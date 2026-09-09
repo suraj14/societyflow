@@ -275,6 +275,104 @@ class SocietyPropertyTypeTest extends TestCase
         $this->assertSame('villa', $owner->fresh()->property_type);
     }
 
+    // ── Super Admin configures the society ───────────────────────────────────
+
+    /**
+     * A complete society update payload.
+     *
+     * subscription_plan_id is `required|exists`, so a society created without
+     * one makes the whole update fail validation and redirect straight back -
+     * which looks like success to assertRedirect(). A real plan is created so
+     * the request under test is the property_type rule, not this.
+     */
+    private function societyPayload(Society $society, array $overrides = []): array
+    {
+        $planId = $society->subscription_plan_id ?? \App\Models\SubscriptionPlan::create([
+            'name' => 'Test Plan',
+            'slug' => 'test-plan-' . uniqid(),
+            'monthly_price' => 0,
+            'yearly_price' => 0,
+            'max_flats' => 100,
+            'max_users' => 100,
+            'max_staff' => 10,
+            'trial_days' => 30,
+            'status' => 'active',
+        ])->id;
+
+        return array_merge([
+            'name' => $society->name,
+            'email' => $society->email,
+            'phone' => '9876500000',
+            'address' => 'Some address',
+            'city' => 'City',
+            'state' => 'State',
+            'country' => 'India',
+            'pincode' => '000000',
+            'subscription_plan_id' => $planId,
+            'status' => 'active',
+        ], $overrides);
+    }
+
+    public function test_super_admin_can_change_a_societys_property_type(): void
+    {
+        $society = $this->societyOfType(SocietyPropertyType::Both);
+        $superAdmin = $this->makeUserWithRole($society, 'Super Admin', ['society_id' => null]);
+
+        $this->actingAs($superAdmin)
+            ->get("/super-admin/societies/{$society->id}/edit")
+            ->assertOk()
+            ->assertSee('Property Type', false);
+
+        $this->actingAs($superAdmin)
+            ->put("/super-admin/societies/{$society->id}", $this->societyPayload($society, [
+                'property_type' => 'villa',
+            ]))
+            ->assertSessionHasNoErrors()
+            ->assertRedirect();
+
+        $this->assertSame(SocietyPropertyType::Villa, $society->fresh()->propertyType());
+    }
+
+    public function test_society_rejects_an_unknown_property_type(): void
+    {
+        $society = $this->societyOfType(SocietyPropertyType::Both);
+        $superAdmin = $this->makeUserWithRole($society, 'Super Admin', ['society_id' => null]);
+
+        $this->actingAs($superAdmin)
+            ->put("/super-admin/societies/{$society->id}", $this->societyPayload($society, [
+                'property_type' => 'penthouse',
+            ]))
+            ->assertSessionHasErrors('property_type');
+
+        $this->assertSame(SocietyPropertyType::Both, $society->fresh()->propertyType());
+    }
+
+    /**
+     * Changing the society type immediately changes what owners may be
+     * created - the whole point of making it the source of truth.
+     */
+    public function test_narrowing_the_society_type_starts_rejecting_the_other_type(): void
+    {
+        $this->seedRoles();
+        $society = $this->societyOfType(SocietyPropertyType::Both);
+        $admin = $this->makeUserWithRole($society, 'Admin');
+
+        // Allowed while the society is mixed.
+        $this->actingAs($admin)
+            ->post('/owners', $this->ownerPayload(['name' => 'Before', 'property_type' => 'apartment']))
+            ->assertRedirect();
+
+        $society->update(['property_type' => SocietyPropertyType::Villa->value]);
+
+        // Refused once it is villa-only.
+        $this->actingAs($admin)
+            ->post('/owners', $this->ownerPayload(['name' => 'After', 'property_type' => 'apartment']))
+            ->assertSessionHasErrors('property_type');
+
+        $this->assertDatabaseHas('owners', ['name' => 'Before']);
+        $this->assertDatabaseMissing('owners', ['name' => 'After']);
+    }
+
     // ── The create screen only offers supported types ────────────────────────
 
     public function test_create_form_offers_only_the_supported_type(): void
