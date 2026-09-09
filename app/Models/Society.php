@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\PropertyType;
+use App\Enums\SocietyPropertyType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -28,6 +30,7 @@ class Society extends Model
         'email',
         'website',
         'description',
+        'property_type',
         'logo',
         'settings',
         'status',
@@ -36,10 +39,83 @@ class Society extends Model
     ];
 
     protected $casts = [
+        'property_type' => SocietyPropertyType::class,
         'settings' => 'array',
         'trial_ends_at' => 'datetime',
         'subscription_ends_at' => 'datetime',
     ];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Property type - the source of truth for the whole application
+    |--------------------------------------------------------------------------
+    |
+    | A society contains apartments, villas, or both. That single setting
+    | decides which property types may be created, which navigation appears,
+    | and which dashboard figures mean anything. Nothing else in the codebase
+    | should hardcode 'apartment'/'villa' assumptions - ask the society.
+    |
+    | Rows written before this column existed default to Both, which hides
+    | nothing, so these accessors are always safe to call.
+    */
+
+    /** Never null, even for rows predating the column. */
+    public function propertyType(): SocietyPropertyType
+    {
+        return $this->property_type instanceof SocietyPropertyType
+            ? $this->property_type
+            : (SocietyPropertyType::tryFrom((string) $this->property_type) ?? SocietyPropertyType::Both);
+    }
+
+    public function supportsApartments(): bool
+    {
+        return $this->propertyType()->supportsApartments();
+    }
+
+    public function supportsVillas(): bool
+    {
+        return $this->propertyType()->supportsVillas();
+    }
+
+    /** True when both kinds coexist and screens must distinguish them. */
+    public function isMixedProperty(): bool
+    {
+        return $this->propertyType()->isMixed();
+    }
+
+    public function supportsPropertyType(PropertyType|string|null $type): bool
+    {
+        return $this->propertyType()->supports($type);
+    }
+
+    /**
+     * Property types this society permits, as plain strings.
+     *
+     * Use for `Rule::in(...)` so validation and the UI can never disagree.
+     *
+     * @return array<int,string>
+     */
+    public function allowedPropertyTypeValues(): array
+    {
+        return $this->propertyType()->allowedValues();
+    }
+
+    /**
+     * Shape handed to the mobile app and any JS that needs to branch on
+     * society capability instead of guessing.
+     *
+     * @return array<string,mixed>
+     */
+    public function propertyConfig(): array
+    {
+        return [
+            'property_type' => $this->propertyType()->value,
+            'property_type_label' => $this->propertyType()->label(),
+            'supports_apartments' => $this->supportsApartments(),
+            'supports_villas' => $this->supportsVillas(),
+            'is_mixed' => $this->isMixedProperty(),
+        ];
+    }
 
     protected static function boot()
     {

@@ -167,15 +167,33 @@
                         <h3 class="text-md font-semibold text-gray-800 mb-4">Property Information</h3>
                         
                         <div class="space-y-4">
-                            <!-- Property Type -->
+                            {{--
+                                Property Type — offered by the society, not hardcoded.
+                                A villa township never shows "Apartment" and an apartment
+                                society never shows "Villa". For a Super Admin the list is
+                                rebuilt in JS when they switch society. The backend applies
+                                the same rule, so a forged value is rejected regardless.
+                            --}}
+                            @php
+                                $currentSocietyId = old('society_id', auth()->user()->society_id);
+                                $initialOptions = $propertyTypeOptions[$currentSocietyId]
+                                    ?? (count($propertyTypeOptions) === 1 ? reset($propertyTypeOptions) : []);
+                            @endphp
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Property Type</label>
                                 <select name="property_type" id="property_type"
+                                        data-options='@json($propertyTypeOptions)'
                                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                                     <option value="">Select Property Type</option>
-                                    <option value="apartment" {{ old('property_type') === 'apartment' ? 'selected' : '' }}>Apartment</option>
-                                    <option value="villa" {{ old('property_type') === 'villa' ? 'selected' : '' }}>Villa</option>
+                                    @foreach($initialOptions as $value => $label)
+                                        <option value="{{ $value }}" {{ old('property_type') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                    @endforeach
                                 </select>
+                                @if(count($initialOptions) === 1)
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        This society contains {{ strtolower(reset($initialOptions)) }}s only.
+                                    </p>
+                                @endif
                                 @error('property_type')
                                     <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
                                 @enderror
@@ -381,6 +399,32 @@ document.addEventListener('DOMContentLoaded', function() {
             return societySelect.value;
         }
         return document.querySelector('input[name="society_id"]')?.value || '';
+    }
+
+    // Rebuild the property-type choices from the selected society, so a
+    // Super Admin switching societies never sees a type that society does
+    // not contain. The server enforces the same rule independently.
+    const propertyTypeOptionsBySociety = JSON.parse(propertyTypeSelect.dataset.options || '{}');
+
+    function refreshPropertyTypeOptions() {
+        const options = propertyTypeOptionsBySociety[getSocietyId()] || {};
+        const previous = propertyTypeSelect.value;
+
+        propertyTypeSelect.innerHTML = '<option value="">Select Property Type</option>';
+        Object.entries(options).forEach(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            propertyTypeSelect.appendChild(option);
+        });
+
+        // Keep the choice only if the new society still supports it.
+        propertyTypeSelect.value = Object.prototype.hasOwnProperty.call(options, previous) ? previous : '';
+        propertyTypeSelect.dispatchEvent(new Event('change'));
+    }
+
+    if (societySelect) {
+        societySelect.addEventListener('change', refreshPropertyTypeOptions);
     }
 
     // Fetch buildings
