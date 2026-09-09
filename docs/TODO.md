@@ -4,7 +4,7 @@ Status values: `open` · `in progress` · `blocked` · `done (verified <commit>)
 A task is `done` only when its tests pass and, where it has a UI, it was
 checked in a browser. Update after each task. Keep entries short.
 
-**Last updated:** 2026-09-08 · see [CURRENT_STATUS.md](CURRENT_STATUS.md)
+**Last updated:** 2026-09-09 · see [CURRENT_STATUS.md](CURRENT_STATUS.md)
 
 ---
 
@@ -18,6 +18,8 @@ checked in a browser. Update after each task. Keep entries short.
 | P0-4 | Verify money columns keep decimals on MySQL (`NUMERIC(10,0)` in SQLite schema) | Bills/Payments | open | migrations creating `maintenance_bills`, `payments`; add corrective migration if truncated | Insert 1234.56, read back 1234.56 on MySQL |
 | P0-5 | Production env hardening: HTTPS `APP_URL`, `APP_DEBUG=false`, `SESSION_SECURE_COOKIE=true`, `CORS_ALLOWED_ORIGINS`, real queue driver + worker, `schedule:run` cron | Deploy | open | `.env` (operator), `config/cors.php`, `app/Console/Kernel.php`, `docs/PRODUCTION_CHECKLIST.md` | Manual checklist sign-off |
 | P0-6 | Mobile: `useProduction=true`, HTTPS `prodUrl`, drop `usesCleartextTraffic` | Flutter | open | `societyflowmob/lib/core/config/api_config.dart`, `android/app/src/main/AndroidManifest.xml` | `flutter build apk --release`; login against prod URL |
+| P0-7 | `applicationId` is still `com.example.societyflow` — Google Play rejects `com.example.*`, and the ID is permanent once published | Flutter/Android | open — **operator decision** (app identity; invalidates any Firebase config keyed to the old ID) | `societyflowmob/android/app/build.gradle.kts` | `flutter build appbundle --release`; Play Console accepts the upload |
+| P0-8 | Release builds are signed with the **debug** key (`signingConfigs.getByName("debug")`); no keystore or `key.properties` exists | Flutter/Android | open — **operator decision** (must own and back up the keystore; losing it means the app can never be updated) | `societyflowmob/android/app/build.gradle.kts`, `android/key.properties` (new, git-ignored) | AAB signed with a release key; `keytool -printcert` shows the real cert |
 
 ## P1 — Important functionality
 

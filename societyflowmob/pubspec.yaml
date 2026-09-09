@@ -20,16 +20,18 @@ dependencies:
   shared_preferences: ^2.2.2
 
   # UI
-  shimmer: ^3.0.0
-  cached_network_image: ^3.3.1
-
-  # Utils
-  intl: ^0.19.0
+  shimmer: ^3.0.0            # skeleton_loader.dart
+  cached_network_image: ^3.3.1  # network_image_widget.dart
 
   # Image
-  image_picker: ^1.0.7
+  image_picker: ^1.0.7       # complaints_screen.dart (attachment picker)
 
-  cupertino_icons: ^1.0.6
+  # Removed 2026-09-09 after verifying zero references in lib/ and test/:
+  #   intl            - no import, and no DateFormat/NumberFormat/Intl usage;
+  #                     dates are formatted manually in the models/screens.
+  #   cupertino_icons - no import of package:flutter/cupertino, no
+  #                     CupertinoIcons reference; the app uses Material icons.
+  # Re-add either the moment it is actually needed.
 
 dev_dependencies:
   flutter_test:

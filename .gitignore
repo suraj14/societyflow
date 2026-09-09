@@ -39,6 +39,10 @@ pnpm-debug.log*
 /societyflowmob/.flutter-plugins
 /societyflowmob/.flutter-plugins-dependencies
 /societyflowmob/.packages
+# Kotlin 2.x compiler session dir, created by Gradle builds
+/societyflowmob/.kotlin/
+# Machine-specific SDK paths
+/societyflowmob/local.properties
 
 # Flutter generated files
 /societyflowmob/android/.gradle/
@@ -48,6 +52,18 @@ pnpm-debug.log*
 /societyflowmob/ios/Pods/
 /societyflowmob/ios/.symlinks/
 /societyflowmob/ios/Flutter/ephemeral/
+# macos/linux/windows ephemeral dirs are covered by the .gitignore files
+# Flutter ships inside each platform folder.
+
+# JVM crash dumps left behind when a Gradle/Kotlin build runs out of memory.
+# Also matched by the *.log rule below; listed explicitly because they are
+# large (a replay dump reached 2.4 MB here) and easy to commit by accident.
+hs_err_pid*.log
+replay_pid*.log
+
+# Release artifacts - build these, never commit them
+*.apk
+*.aab
 
 # ==========================================
 # IDE

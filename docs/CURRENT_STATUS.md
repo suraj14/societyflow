@@ -2,7 +2,7 @@
 
 Update this after every major task. Keep it short; link, don't paste.
 
-**Last updated:** 2026-09-08
+**Last updated:** 2026-09-09
 
 ## Branch and commit
 
@@ -28,7 +28,12 @@ Update this after every major task. Keep it short; link, don't paste.
 
 - `flutter analyze`: 4 informational (intentional `DropdownButtonFormField value:` deprecations)
 - `flutter test`: 12/12
-- Release APK builds (52.4 MB)
+- Release **APK 52.3 MB** / **AAB 42.3 MB** — both build clean from a wiped tree
+- Source project 1.5 MB; `build/` 1.2 GB and `.dart_tool/` 98 MB are regenerable
+- Cleaned: removed 3.36 GB of generated/cache content + 2 JVM crash dumps; dropped
+  unused `intl` and `cupertino_icons`. See [FLUTTER_PRODUCTION_DEPLOYMENT.md](FLUTTER_PRODUCTION_DEPLOYMENT.md)
+- **Not publishable yet**: `applicationId` is `com.example.*` and release builds
+  are debug-signed (P0-7, P0-8)
 - No device/emulator run in this environment
 
 ## Tests
@@ -57,10 +62,14 @@ Earlier session (13 commits): see `git log 5913335..1f37780` and [PRODUCTION_CHE
 - Weak credentials on 31 accounts — needs operator to run `users:rotate-weak-passwords --force`
 - `database.sqlite` still in git history — purge is an operator decision
 - MySQL portability unverified end to end
+- Mobile release blocked on operator: real `applicationId` (P0-7) and a release
+  keystore (P0-8) — both are identity/credential decisions
 
 ## Current task
 
-Browser-facing verification of every role and module — P1-1 and P1-2 done; P1-3 (complaints/create JS error) is next.
+Flutter production cleanup and release builds — done. Resuming browser-facing
+verification of every role and module: P1-1 and P1-2 done, P1-3
+(`/complaints/create` JS error) is next.
 
 ## Next recommended task
 
