@@ -7,7 +7,7 @@ Update this after every major task. Keep it short; link, don't paste.
 ## Branch and commit
 
 - Branch: `production-readiness` (`main` untouched at `2f65516`)
-- Latest verified commit: `8be3e6f` — push-template screens restored, update IDOR closed (P1-2)
+- Latest verified commit: `87d4a0f` — Flutter cleanup + verified release builds
 - Working tree: clean
 
 ## Backend
