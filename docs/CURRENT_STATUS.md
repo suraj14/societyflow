@@ -28,18 +28,20 @@ Update this after every major task. Keep it short; link, don't paste.
 
 - `flutter analyze`: 4 informational (intentional `DropdownButtonFormField value:` deprecations)
 - `flutter test`: 12/12
-- Release **APK 52.3 MB** / **AAB 42.3 MB** — both build clean from a wiped tree
-- Source project 1.5 MB; `build/` 1.2 GB and `.dart_tool/` 98 MB are regenerable
+- Release **APK 52.3 MB** / **AAB 42.3 MB** — verified 2026-09-09, but the Android
+  build is **currently blocked**: the Android Studio JDK install is incomplete (P0-9)
+- Flutter project now 13 MB on disk (build/ removed); backend source 11 MB
 - Cleaned: removed 3.36 GB of generated/cache content + 2 JVM crash dumps; dropped
   unused `intl` and `cupertino_icons`. See [FLUTTER_PRODUCTION_DEPLOYMENT.md](FLUTTER_PRODUCTION_DEPLOYMENT.md)
-- **Not publishable yet**: `applicationId` is `com.example.*` and release builds
-  are debug-signed (P0-7, P0-8)
+- **Not publishable yet**: `applicationId` is `com.example.*`, release builds are
+  debug-signed, and the JDK is broken (P0-7, P0-8, P0-9)
 - No device/emulator run in this environment
 
 ## Tests
 
-- PHP: 129 + 76 new (NoticeIsolation 21, CrossSocietyListing 43, UserManagement 7, PushNotificationTemplate 5) — focused runs green; full suite not re-run since `1f37780`
-- Full `php artisan test` / `route:list` / `composer validate` closing run **not yet done** for this session
+- Backend `php artisan test`: **206 passed, 469 assertions** (2026-09-09). `route:list`
+  and `composer validate` still outstanding (P1-6)
+- Flutter: `analyze` 4 informational, `test` 12/12 (2026-09-09)
 - MySQL run: never executed (no server available) — required before release
 
 ## Known bugs (open)
@@ -62,6 +64,10 @@ Earlier session (13 commits): see `git log 5913335..1f37780` and [PRODUCTION_CHE
 - Weak credentials on 31 accounts — needs operator to run `users:rotate-weak-passwords --force`
 - `database.sqlite` still in git history — purge is an operator decision
 - MySQL portability unverified end to end
+- **Android builds blocked**: Android Studio JBR is incomplete (no `jvm.cfg`), no
+  other JDK installed — see [DISK_SPACE_AND_DEPLOYMENT.md](DISK_SPACE_AND_DEPLOYMENT.md) §5
+- **D: drive 97% full (4 GB free)** — project is only 233 MB of it; biggest safe
+  win is the 5.7 GB `D:$RECYCLE.BIN`
 - Mobile release blocked on operator: real `applicationId` (P0-7) and a release
   keystore (P0-8) — both are identity/credential decisions
 
