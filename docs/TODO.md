@@ -29,9 +29,9 @@ checked in a browser. Update after each task. Keep entries short.
 | P1-1 | Restore `users.create` and `users.edit` views (500 today) | Users | done (verified `c601c78`) | `resources/views/users/{create,edit}.blade.php` (new), `app/Http/Controllers/UserController.php` | `WebSmokeTest` create/edit rows; browser check as Admin + Super Admin |
 | P1-2 | Restore push-notification `templates` and `edit-template` views (500 today) | Notifications | done (verified `8be3e6f`) | `resources/views/admin/push-notifications/{templates,edit-template}.blade.php` (new), `Admin/PushNotificationController.php` | `WebSmokeTest`; browser check |
 | P1-11 | Property-type architecture: foundation, owner enforcement, society config UI, API contract, navigation, dashboard, Flutter model | Society/All | done (verified `1719c31`) | `app/Enums/*`, `Society`, `OwnerController`, `SuperAdmin/SocietyController`, `DashboardController`, sidebar + mobile-menu, `societyflowmob/lib/features/auth/models/society_config.dart` | `SocietyPropertyTypeTest` 18, `ApiSocietyConfigTest` 4, `PropertyTypeNavigationTest` 4, `PropertyTypeDashboardTest` 5 |
-| P1-12 | Property-type: Guard experience (§8) and resident "My Property" screens (§7); express remaining module query scoping through the new society helpers (§4) | Guard/Residents | open | `docs/PROPERTY_TYPE_ARCHITECTURE.md` §8 | Per-role browser flows; cross-society leak tests |
-| P1-3 | Fix `/complaints/create` JS "Complaint form elements not found" | Complaints | open | `resources/views/complaints/create.blade.php` | Browser check: no console errors, form submits |
-| P1-4 | Fix Admin `/settings` `Unexpected token '<'` page error (script fetching HTML) | Settings | open | `resources/views/settings/index.blade.php`, `app/Http/Controllers/SettingsController.php` | Browser check: no pageerror on all tabs |
+| P1-12 | Property-type: remaining brief sections - guard approval actions (§8.4-6), visitor photo capture (§8.10), blacklist (§8.16), Flutter guard screens (§12) | Guard/Mobile | open | `app/Http/Controllers/GuardController.php`, `societyflowmob/lib/features/visitors/` | Gate flow tests; device camera and a blacklist table are prerequisites |
+| P1-3 | Fix `/complaints/create` JS "Complaint form elements not found" | Complaints | done (verified `6aa8512`) | `resources/views/complaints/create.blade.php` | Browser: empty submit blocked, real submit files a complaint, console clean |
+| P1-4 | Fix Admin `/settings` `Unexpected token '<'` page error | Settings | done (verified `6aa8512`) | `resources/views/settings/index.blade.php` | `SettingsPageIntegrityTest` 3; browser console clean for Admin + Super Admin |
 | P1-5 | Per-role CRUD / validation / search / pagination browser flows for every module | All | in progress (sweep paused) | scratchpad Playwright harness; route list in `tests/Feature/WebSmokeTest.php` | Sweep report: 0 × 5xx, 0 error signatures, 0 cross-society hits |
 | P1-6 | Closing run: `php artisan test`, `route:list`, `composer validate`, clean boot | All | open | — | All green; recorded in `CURRENT_STATUS.md` |
 | P1-7 | Backfill `flats.owner_id` (unset on ~89% of rows) and retire the address-matching fallback | Owners/Flats | open | `app/Support/UserFlatResolver.php`, new artisan command + dry-run report, new migration | `UtilityBillAccessTest` resolver cases; dry-run diff reviewed before write |
@@ -90,3 +90,12 @@ Kept brief; full detail in commit messages `git log 5913335..HEAD`.
 | Notice cross-society leak; `notices.history` view; Super Admin settings routes | `53ec880` |
 | `users.create`/`users.edit` views; Super Admin society selector; form-path JSON guards | `c601c78` |
 | Push template screens; `updateTemplate` IDOR; save redirect | `8be3e6f` |
+
+### Added 2026-09-12
+
+| ID | Task | Module | Status | Relevant files | Tests required |
+|---|---|---|---|---|---|
+| P1-13 | Guard experience: mobile-first gate, unified property search, check-in/out, history | Guard | done (verified `bf15237`) | `GuardController`, `resources/views/guard/*`, `layouts/guard.blade.php`, `routes/web.php` | `GuardGateTest` 10; browser lifecycle at 390px |
+| P1-14 | Society property-type enforced on rent/tenant writes and every property-type form | Owners/Tenants/Rent | done (verified `bf15237`) | `Concerns/ResolvesSocietyPropertyType`, `partials/property-type-options.blade.php`, 8 views | `PropertyTypeEnforcementTest` 7 |
+| P2-9 | Review 3 unrouted controllers (`InstallController`, `Admin/FirebaseSettingsController`, `SuperAdmin/SuperAdminController`) — no code references found; confirm with the owner before removing | Cleanup | open | those 3 files | Full suite after any removal |
+| P2-10 | `DashboardController::index` still ends in "Default: Admin dashboard" — any future role inherits the admin view. Consider an explicit deny. | Dashboard | open | `app/Http/Controllers/DashboardController.php` | A test per role asserting its landing page |
