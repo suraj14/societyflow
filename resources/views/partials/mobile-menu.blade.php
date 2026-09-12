@@ -132,6 +132,17 @@
                                 <span class="ml-3">Owners</span>
                             </a>
 
+                            @php
+                                // Mirrors the desktop sidebar: the society's configured
+                                // property type decides which groups exist. This partial is
+                                // always in the DOM, so guarding it matters even though it
+                                // is visually hidden on desktop.
+                                $sfSociety = auth()->user()?->society;
+                                $sfShowApartments = $sfSociety === null || $sfSociety->supportsApartments();
+                                $sfShowVillas = $sfSociety === null || $sfSociety->supportsVillas();
+                            @endphp
+
+                            @if($sfShowApartments)
                             <!-- Apartments Collapsible -->
                             <div x-data="{ open: {{ request()->routeIs('buildings.*') || request()->routeIs('flats.*') ? 'true' : 'false' }} }">
                                 <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
@@ -150,7 +161,9 @@
                                     </a>
                                 </div>
                             </div>
+                            @endif
 
+                            @if($sfShowVillas)
                             <!-- Villas Collapsible -->
                             <div x-data="{ open: {{ request()->routeIs('villa-areas.*') || request()->routeIs('villas.*') ? 'true' : 'false' }} }">
                                 <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
@@ -169,6 +182,7 @@
                                     </a>
                                 </div>
                             </div>
+                            @endif
 
                             <!-- Tenant Collapsible -->
                             <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') ? 'true' : 'false' }} }">

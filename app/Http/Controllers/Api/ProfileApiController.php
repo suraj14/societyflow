@@ -79,6 +79,14 @@ class ProfileApiController extends Controller
                 'is_owner'       => $user->isOwner() || $user->isVillaOwner(),
                 'is_tenant'      => $user->isTenant(),
                 'family_members' => $familyMembers,
+
+                // Same society capability object the login response carries,
+                // so a session restored from /profile branches identically.
+                'society'        => $society ? array_merge(
+                    ['id' => $society->id, 'name' => $society->name],
+                    $society->propertyConfig()
+                ) : null,
+                'property_type'  => $society?->propertyType()->value,
             ],
         ]);
     }

@@ -180,6 +180,18 @@
 
 
 
+                                @php
+                                    // Navigation follows the society's configured property type.
+                                    // A villa township never shows Buildings/Apartments and an
+                                    // apartment society never shows Villas. Super Admin has no
+                                    // society of their own and administers all of them, so they
+                                    // keep both groups.
+                                    $sfSociety = auth()->user()?->society;
+                                    $sfShowApartments = $sfSociety === null || $sfSociety->supportsApartments();
+                                    $sfShowVillas = $sfSociety === null || $sfSociety->supportsVillas();
+                                @endphp
+
+                                @if($sfShowApartments)
                                 <!-- Apartments Group -->
                                 <div x-data="{ open: {{ request()->routeIs('buildings.*') || request()->routeIs('flats.*') ? 'true' : 'false' }} }">
                                     <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
@@ -198,7 +210,9 @@
                                         </a>
                                     </div>
                                 </div>
+                                @endif
 
+                                @if($sfShowVillas)
                                 <!-- Villas Group -->
                                 <div x-data="{ open: {{ request()->routeIs('villa-areas.*') || request()->routeIs('villas.*') ? 'true' : 'false' }} }">
                                     <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
@@ -217,6 +231,7 @@
                                         </a>
                                     </div>
                                 </div>
+                                @endif
 
                                 <!-- Tenant Group -->
                                 <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') ? 'true' : 'false' }} }">

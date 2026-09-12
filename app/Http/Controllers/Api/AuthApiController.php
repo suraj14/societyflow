@@ -222,6 +222,20 @@ class AuthApiController extends Controller
             'society_id'    => $user->society_id,
             'is_owner'      => $user->isOwner() || $user->isVillaOwner(),
             'is_tenant'     => $user->isTenant(),
+
+            // The society's own capability, so the app branches on
+            // configuration instead of guessing from whether villa_number
+            // happens to be populated. A villa township never renders
+            // apartment UI and vice versa.
+            //
+            // Kept as a nested object AND mirrored into the flat keys above's
+            // sibling `property_type` so older builds that do not know about
+            // `society` keep working.
+            'society'       => $society ? array_merge(
+                ['id' => $society->id, 'name' => $society->name],
+                $society->propertyConfig()
+            ) : null,
+            'property_type' => $society?->propertyType()->value,
         ];
     }
 }
