@@ -487,3 +487,16 @@ Route::middleware(['auth'])->group(function () {
 });
 
 
+
+// Guard / Gate Routes - the mobile-first gate surface (brief §8, §18).
+// Admin is included so a society admin can see what their guards see; the
+// controller pins every query to the authenticated user's own society.
+Route::prefix('guard')->name('guard.')->middleware(['auth', 'role:Guard|Admin|Super Admin'])->group(function () {
+    Route::get('/', [App\Http\Controllers\GuardController::class, 'dashboard'])->name('dashboard');
+    Route::get('/visitors/create', [App\Http\Controllers\GuardController::class, 'createVisitor'])->name('visitors.create');
+    Route::post('/visitors', [App\Http\Controllers\GuardController::class, 'storeVisitor'])->name('visitors.store');
+    Route::get('/search/properties', [App\Http\Controllers\GuardController::class, 'searchProperty'])->name('search.properties');
+    Route::post('/visitors/{visitor}/check-in', [App\Http\Controllers\GuardController::class, 'checkIn'])->name('visitors.check-in');
+    Route::post('/visitors/{visitor}/check-out', [App\Http\Controllers\GuardController::class, 'checkOut'])->name('visitors.check-out');
+    Route::get('/history', [App\Http\Controllers\GuardController::class, 'history'])->name('history');
+});

@@ -108,6 +108,11 @@ class AuthController extends Controller
             return redirect()->route('villa-owner.dashboard');
         }
 
+        // Guards land at the gate, not on the society's admin dashboard.
+        if ($user->hasRole('Guard')) {
+            return redirect()->route('guard.dashboard');
+        }
+
         if ($user->hasAnyRole(['Apartment Owner', 'Tenant', 'Staff', 'Accountant', 'Manager'])) {
             return redirect()->route('dashboard');
         }

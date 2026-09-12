@@ -6,6 +6,7 @@ use App\Http\Controllers\BaseController;
 use App\Models\User;
 use App\Models\Flat;
 use App\Models\Tenant;
+use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -13,7 +14,7 @@ use Carbon\Carbon;
 
 class TenantController extends BaseController
 {
-    use HandlesFormSubmissions;
+    use HandlesFormSubmissions, ResolvesSocietyPropertyType;
     public function index()
     {
         // Only admin and super admin can access this
@@ -104,7 +105,7 @@ class TenantController extends BaseController
                 'family_members.*.phone' => 'nullable|string|max:20',
                 
                 // Simplified property assignment validation
-                'property_type' => 'nullable|in:apartment,villa',
+                'property_type' => $this->propertyTypeRuleFor($this->getSocietyId()),
             ]);
             
             $societyId = $this->getSocietyId();

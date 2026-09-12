@@ -8,6 +8,7 @@ use App\Models\Society;
 use App\Models\Building;
 use App\Models\VillaArea;
 use App\Models\Flat;
+use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
 use App\Traits\EnsuresDataConsistency;
 use Illuminate\Http\Request;
@@ -17,7 +18,7 @@ use Illuminate\Validation\Rule;
 
 class OwnerController extends BaseController
 {
-    use HandlesFormSubmissions, EnsuresDataConsistency;
+    use HandlesFormSubmissions, EnsuresDataConsistency, ResolvesSocietyPropertyType;
     public function index(Request $request)
     {
         $user = auth()->user();
@@ -81,72 +82,6 @@ class OwnerController extends BaseController
         return view('owners.create', compact(
             'societies', 'buildings', 'villaAreas', 'propertyTypeOptions', 'societyPropertyConfig'
         ));
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Society property-type helpers
-    |--------------------------------------------------------------------------
-    |
-    | The society decides which property types exist. These keep the form and
-    | the validator reading from that one source, so they cannot disagree.
-    */
-
-    /**
-     * The society a write belongs to.
-     *
-     * Super Admin may name one; everyone else is pinned to their own,
-     * whatever the request claims.
-     */
-    private function resolveSocietyIdForWrite(Request $request, $user): ?int
-    {
-        if ($user->hasRole('Super Admin')) {
-            $requested = $request->input('society_id');
-
-            return $requested !== null ? (int) $requested : null;
-        }
-
-        return $user->society_id !== null ? (int) $user->society_id : null;
-    }
-
-    /**
-     * Validation rule limiting property_type to what the society supports.
-     *
-     * An unknown society falls back to the full set; the society_id rule
-     * reports that problem on its own, and this should not mask it.
-     *
-     * @return array<int,mixed>
-     */
-    private function propertyTypeRuleFor(?int $societyId): array
-    {
-        $society = $societyId ? Society::find($societyId) : null;
-
-        $allowed = $society
-            ? $society->allowedPropertyTypeValues()
-            : PropertyType::values();
-
-        return ['nullable', Rule::in($allowed)];
-    }
-
-    /**
-     * value => label for each society, so a Super Admin switching societies
-     * gets the right choices without another round trip.
-     *
-     * @return array<int,array<string,string>>
-     */
-    private function propertyTypeOptionsFor($user, $societies): array
-    {
-        $map = [];
-
-        foreach ($societies as $society) {
-            $options = [];
-            foreach ($society->propertyType()->allows() as $type) {
-                $options[$type->value] = $type->label();
-            }
-            $map[$society->id] = $options;
-        }
-
-        return $map;
     }
 
     public function store(Request $request)
@@ -312,7 +247,20 @@ class OwnerController extends BaseController
             $villaAreas = VillaArea::where('society_id', $user->society_id)->get();
         }
 
-        return view('owners.edit', compact('owner', 'societies', 'buildings', 'villaAreas'));
+        // The owner's society fixes the choices. If the record already holds a
+        // type the society no longer supports (an admin narrowed it later),
+        // keep that option visible and flagged rather than silently rewriting
+        // the owner's property on the next save.
+        $propertyTypeOptions = $this->propertyTypeOptionsForSociety($owner->society);
+        $current = $owner->property_type;
+        if ($current && !isset($propertyTypeOptions[$current])) {
+            $label = PropertyType::tryFromMixed($current)?->label() ?? ucfirst($current);
+            $propertyTypeOptions[$current] = $label . ' (no longer supported by this society)';
+        }
+
+        return view('owners.edit', compact(
+            'owner', 'societies', 'buildings', 'villaAreas', 'propertyTypeOptions'
+        ));
     }
 
     public function update(Request $request, Owner $owner)

@@ -32,6 +32,14 @@ class DashboardController extends Controller
             return $this->adminDashboard();
         }
 
+        // A Guard gets the gate, not the society's books. Before this, Guard
+        // matched no branch above and fell through to "Default: Admin
+        // dashboard" at the bottom, which showed monthly revenue, pending
+        // dues, occupancy and resident counts to anyone on gate duty.
+        if ($user->hasRole('Guard')) {
+            return redirect()->route('guard.dashboard');
+        }
+
         // Check for multiple owner roles - if user has both Villa Owner and Apartment Owner,
         // treat them as a general Owner and show owner dashboard
         if ($user->hasRole('Villa Owner') && $user->hasRole('Apartment Owner')) {

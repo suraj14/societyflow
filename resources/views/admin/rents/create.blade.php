@@ -50,8 +50,7 @@
                                 class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                                 required>
                             <option value="">Select Property Type</option>
-                            <option value="apartment" {{ old('property_type') == 'apartment' ? 'selected' : '' }}>Apartment</option>
-                            <option value="villa" {{ old('property_type') == 'villa' ? 'selected' : '' }}>Villa</option>
+@include('partials.property-type-options')
                         </select>
                     </div>
 

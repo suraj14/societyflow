@@ -314,8 +314,7 @@
                                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                         required onchange="handlePropertyTypeChange()">
                                     <option value="">Select Property Type</option>
-                                    <option value="apartment">Apartment</option>
-                                    <option value="villa">Villa</option>
+@include('partials.property-type-options')
                                 </select>
                                 <div class="text-red-500 text-sm mt-1 hidden" id="drawer_property_type_error"></div>
                             </div>

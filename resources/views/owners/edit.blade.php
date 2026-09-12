@@ -218,9 +218,13 @@
                                 <select name="property_type" id="property_type"
                                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                                     <option value="">Select Property Type</option>
-                                    <option value="apartment" {{ old('property_type', $owner->property_type) === 'apartment' ? 'selected' : '' }}>Apartment</option>
-                                    <option value="villa" {{ old('property_type', $owner->property_type) === 'villa' ? 'selected' : '' }}>Villa</option>
+                                    @foreach($propertyTypeOptions as $sfValue => $sfLabel)
+                                        <option value="{{ $sfValue }}" {{ old('property_type', $owner->property_type) === $sfValue ? 'selected' : '' }}>{{ $sfLabel }}</option>
+                                    @endforeach
                                 </select>
+                                @if(count($propertyTypeOptions) === 1)
+                                    <p class="text-gray-500 text-sm mt-1">This society contains {{ Str::lower(reset($propertyTypeOptions)) }}s only.</p>
+                                @endif
                                 @error('property_type')
                                     <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
                                 @enderror

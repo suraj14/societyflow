@@ -8,6 +8,7 @@ use App\Models\Flat;
 use App\Models\Tenant;
 use App\Models\Society;
 use App\Models\Payment;
+use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\Log;
 
 class RentController extends BaseController
 {
-    use HandlesFormSubmissions;
+    use HandlesFormSubmissions, ResolvesSocietyPropertyType;
     public function index()
     {
         // Only admin and super admin can access this
@@ -68,7 +69,7 @@ class RentController extends BaseController
         
         return $this->handleFormSubmission(function() use ($request) {
             $request->validate([
-                'property_type' => 'required|in:apartment,villa',
+                'property_type' => $this->propertyTypeRuleFor($this->getSocietyId(), true),
                 'unit_id' => 'required|exists:flats,id',
                 'tenant_id' => 'required|exists:tenants,id',
                 'rent_amount' => 'required|numeric|min:1',
