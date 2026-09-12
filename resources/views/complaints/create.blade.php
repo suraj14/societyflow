@@ -19,7 +19,7 @@
         <!-- Form -->
         <div class="lg:col-span-2">
             <div class="bg-white rounded-lg shadow-md">
-                <form action="{{ route('complaints.store') }}" method="POST" enctype="multipart/form-data" class="p-6 space-y-6">
+                <form id="complaint-form" action="{{ route('complaints.store') }}" method="POST" enctype="multipart/form-data" class="p-6 space-y-6">
                     @csrf
 
                     <!-- Requested By (Auto-filled) -->
@@ -222,7 +222,7 @@
     function initComplaintForm() {
         console.log('🔧 Complaint Form: Initializing direct handler...');
         
-        const form = document.querySelector('form[action*="complaints.store"]');
+        const form = document.getElementById('complaint-form');
         const submitBtn = document.getElementById('submit-btn');
         
         if (!form || !submitBtn) {
@@ -235,7 +235,7 @@
         form.parentNode.replaceChild(newForm, form);
         
         // Get fresh references
-        const freshForm = document.querySelector('form[action*="complaints.store"]');
+        const freshForm = document.getElementById('complaint-form');
         const freshSubmitBtn = document.getElementById('submit-btn');
         
         console.log('✅ Complaint form elements found and refreshed');

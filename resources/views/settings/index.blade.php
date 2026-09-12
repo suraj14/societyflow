@@ -1379,11 +1379,7 @@
                     </div>
                 </form>
             </div>
-        </div>
-    </div>
-</div>
 
-<script>
             <!-- Language Settings Tab (Super Admin only) -->
             @if($isGlobalAdmin)
                 <div x-show="activeTab === 'language'" x-cloak>
