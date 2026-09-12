@@ -1,3 +1,5 @@
+import 'society_config.dart';
+
 class UserModel {
   final int id;
   final String name;
@@ -14,6 +16,10 @@ class UserModel {
   final bool isOwner;
   final bool isTenant;
 
+  /// What the user's society contains. Screens branch on this instead of
+  /// guessing from whether [villaNumber] is populated.
+  final SocietyConfig society;
+
   const UserModel({
     required this.id,
     required this.name,
@@ -29,6 +35,7 @@ class UserModel {
     this.societyName,
     this.isOwner = false,
     this.isTenant = false,
+    this.society = const SocietyConfig(),
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
@@ -46,6 +53,17 @@ class UserModel {
     societyName:  json['society_name']?.toString(),
     isOwner:      json['is_owner'] == true || json['is_owner'] == 1,
     isTenant:     json['is_tenant'] == true || json['is_tenant'] == 1,
+    // Nested object when the server supplies it; otherwise fall back to the
+    // flat `property_type` key, and finally to the permissive default so a
+    // response from an older build still parses.
+    society:      json['society'] is Map<String, dynamic>
+                      ? SocietyConfig.fromJson(json['society'] as Map<String, dynamic>)
+                      : SocietyConfig(
+                          name: json['society_name']?.toString(),
+                          propertyType: SocietyPropertyType.fromJson(
+                            json['property_type']?.toString(),
+                          ),
+                        ),
   );
 
   Map<String, dynamic> toJson() => {
@@ -55,7 +73,14 @@ class UserModel {
     'villa_area': villaArea, 'role': role,
     'status': status, 'society_name': societyName,
     'is_owner': isOwner, 'is_tenant': isTenant,
+    'society': society.toJson(),
   };
+
+  /// Label for the user's own property, e.g. "My Villa" / "My Apartment".
+  ///
+  /// Comes from the society's configuration, so a villa township never says
+  /// "Apartment" and a resident is never asked which they have.
+  String get propertyLabel => 'My ${society.propertyNoun}';
 
   /// Display unit — shows villa or flat depending on user type
   String get displayUnit {
