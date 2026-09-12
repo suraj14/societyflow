@@ -2,12 +2,12 @@
 
 Update this after every major task. Keep it short; link, don't paste.
 
-**Last updated:** 2026-09-09
+**Last updated:** 2026-09-12
 
 ## Branch and commit
 
 - Branch: `production-readiness` (`main` untouched at `2f65516`)
-- Latest verified commit: `87d4a0f` — Flutter cleanup + verified release builds
+- Latest verified commit: `1719c31` — society property-type architecture (web + API + mobile)
 - Working tree: clean
 
 ## Backend
@@ -27,7 +27,6 @@ Update this after every major task. Keep it short; link, don't paste.
 ## Flutter
 
 - `flutter analyze`: 4 informational (intentional `DropdownButtonFormField value:` deprecations)
-- `flutter test`: 12/12
 - Release **APK 52.3 MB** / **AAB 42.3 MB** — verified 2026-09-09, but the Android
   build is **currently blocked**: the Android Studio JDK install is incomplete (P0-9)
 - Flutter project now 13 MB on disk (build/ removed); backend source 11 MB
@@ -39,9 +38,9 @@ Update this after every major task. Keep it short; link, don't paste.
 
 ## Tests
 
-- Backend `php artisan test`: **206 passed, 469 assertions** (2026-09-09). `route:list`
-  and `composer validate` still outstanding (P1-6)
-- Flutter: `analyze` 4 informational, `test` 12/12 (2026-09-09)
+- Backend suite: **232 passed, 581 assertions** (2026-09-12); `route:list` (393) and
+  `composer validate` both clean
+- Flutter: `analyze` 4 informational, `test` 21/21 (2026-09-12)
 - MySQL run: never executed (no server available) — required before release
 
 ## Known bugs (open)
@@ -73,10 +72,14 @@ Earlier session (13 commits): see `git log 5913335..1f37780` and [PRODUCTION_CHE
 
 ## Current task
 
-Flutter production cleanup and release builds — done. Resuming browser-facing
-verification of every role and module: P1-1 and P1-2 done, P1-3
-(`/complaints/create` JS error) is next.
+Society property-type architecture — foundation, enforcement, config UI, API,
+navigation, dashboard and Flutter model are done and committed. Remaining
+brief sections: Guard experience (§8), resident "My Property" screens (§7),
+query scoping expressed through the new helpers (§4), production cleanup (§24).
 
 ## Next recommended task
 
-Resume the sweep: fix the 2 open bugs above, then run per-role CRUD/validation/search/pagination flows, then the closing run (`php artisan test`, `route:list`, `composer validate`) and update this file.
+Finish the property-type brief: Guard experience (§8), resident "My Property"
+screens (§7), then the 2 open browser bugs above. See
+[PROPERTY_TYPE_ARCHITECTURE.md](PROPERTY_TYPE_ARCHITECTURE.md) §8 for what is
+not yet done.
