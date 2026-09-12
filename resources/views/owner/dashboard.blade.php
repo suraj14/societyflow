@@ -50,18 +50,33 @@
                                 <p class="text-3xl font-bold">{{ $properties->count() }} Properties</p>
                             </div>
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div class="text-center">
-                                <p class="text-2xl font-bold">{{ $stats['apartments'] ?? 0 }}</p>
-                                <p class="text-blue-100 text-sm">Apartments</p>
-                            </div>
-                            <div class="text-center">
-                                <p class="text-2xl font-bold">{{ $stats['villas'] ?? 0 }}</p>
-                                <p class="text-blue-100 text-sm">Villas</p>
-                            </div>
+                        @php
+                            // An owner in a villa township has no use for a card
+                            // reading "Apartments: 0". The society already says
+                            // which kinds exist, so only the real ones are shown
+                            // and a single-type society gets one clean total
+                            // (brief §5, §7).
+                            $sfSociety        = auth()->user()?->society;
+                            $sfShowApartments = $sfSociety === null || $sfSociety->supportsApartments();
+                            $sfShowVillas     = $sfSociety === null || $sfSociety->supportsVillas();
+                            $sfIsMixed        = $sfSociety === null || $sfSociety->isMixedProperty();
+                        @endphp
+                        <div class="grid grid-cols-1 md:grid-cols-{{ $sfIsMixed ? '3' : '1' }} gap-4">
+                            @if($sfIsMixed)
+                                <div class="text-center">
+                                    <p class="text-2xl font-bold">{{ $stats['apartments'] ?? 0 }}</p>
+                                    <p class="text-blue-100 text-sm">Apartments</p>
+                                </div>
+                                <div class="text-center">
+                                    <p class="text-2xl font-bold">{{ $stats['villas'] ?? 0 }}</p>
+                                    <p class="text-blue-100 text-sm">Villas</p>
+                                </div>
+                            @endif
                             <div class="text-center">
                                 <p class="text-2xl font-bold">{{ $stats['total_properties'] ?? 0 }}</p>
-                                <p class="text-blue-100 text-sm">Total Units</p>
+                                <p class="text-blue-100 text-sm">
+                                    {{ $sfIsMixed ? 'Total Units' : ($sfShowVillas ? 'My Villas' : 'My Apartments') }}
+                                </p>
                             </div>
                         </div>
                     </div>

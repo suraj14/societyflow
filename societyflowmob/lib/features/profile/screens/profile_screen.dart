@@ -44,7 +44,13 @@ class ProfileScreen extends ConsumerWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Property Details', style: AppTextStyles.label),
               const SizedBox(height: 12),
-              _InfoRow(icon: Icons.home_rounded,      label: 'Unit',    value: user?.displayUnit ?? 'N/A'),
+              // "Villa" / "Apartment" / "Property" per the society's own
+              // configuration, so a villa township never says "Apartment".
+              _InfoRow(
+                icon: Icons.home_rounded,
+                label: user?.society.propertyNoun ?? 'Unit',
+                value: user?.displayUnit ?? 'N/A',
+              ),
               const Divider(height: 20),
               _InfoRow(icon: Icons.phone_rounded,     label: 'Phone',   value: user?.phone ?? 'N/A'),
               const Divider(height: 20),

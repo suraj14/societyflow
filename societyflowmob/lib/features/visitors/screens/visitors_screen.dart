@@ -794,6 +794,9 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
   @override
   Widget build(BuildContext context) {
     final flats = ref.watch(visitorsProvider).flats;
+    // The society decides the wording: a villa township should not read
+    // "Flat / Villa", nor an apartment society "Villa" (brief §12).
+    final propertyNoun = ref.watch(currentUserProvider)?.society.propertyNoun ?? 'Property';
     return Container(
       decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 20),
@@ -850,11 +853,11 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
 
             // Flat picker (guard only)
             if (widget.isStaff) ...[
-              const Text('Flat / Villa *', style: AppTextStyles.label),
+              Text('$propertyNoun *', style: AppTextStyles.label),
               const SizedBox(height: 6),
               DropdownButtonFormField<int>(
                 value: _selectedFlatId,
-                hint: const Text('Select flat or villa'),
+                hint: Text('Select ${propertyNoun.toLowerCase()}'),
                 isExpanded: true,
                 decoration: InputDecoration(
                   prefixIcon: const Icon(Icons.home_rounded, color: AppColors.textHint),
