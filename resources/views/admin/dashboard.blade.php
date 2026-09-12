@@ -5,8 +5,20 @@
 
 @section('content')
 <div class="p-6">
+    @php
+        // Cards follow the society's configured property type. A villa
+        // township has no buildings to count; an apartment society has no
+        // villas. A mixed society sees both, split out, so the numbers stay
+        // legible instead of collapsing into one opaque "units" figure.
+        // Super Admin has no society of their own and sees everything.
+        $sfShowApartments = $society === null || $society->supportsApartments();
+        $sfShowVillas     = $society === null || $society->supportsVillas();
+        $sfIsMixed        = $society === null || $society->isMixedProperty();
+    @endphp
+
     <!-- Stats Grid - Simple Clean Design -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        @if($sfShowApartments)
         <!-- Buildings -->
         <div class="bg-white rounded-lg shadow p-6">
             <div class="flex items-center justify-between">
@@ -19,19 +31,49 @@
                 </div>
             </div>
         </div>
+        @endif
 
-        <!-- Units -->
-        <div class="bg-white rounded-lg shadow p-6">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-gray-500 text-sm font-medium">Units</p>
-                    <p class="text-3xl font-bold text-gray-900 mt-2">{{ $stats['total_units'] ?? 0 }}</p>
-                </div>
-                <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                    <i class="fas fa-door-open text-green-600 text-xl"></i>
+        @if($sfIsMixed)
+            {{-- Mixed society: split the counts so they mean something. --}}
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium">Apartments</p>
+                        <p class="text-3xl font-bold text-gray-900 mt-2">{{ $stats['total_apartments'] ?? 0 }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-door-open text-green-600 text-xl"></i>
+                    </div>
                 </div>
             </div>
-        </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium">Villas</p>
+                        <p class="text-3xl font-bold text-gray-900 mt-2">{{ $stats['total_villas'] ?? 0 }}</p>
+                    </div>
+                    <div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-house-user text-amber-600 text-xl"></i>
+                    </div>
+                </div>
+            </div>
+        @else
+            {{-- Single-type society: one card, labelled for what it holds. --}}
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium">{{ $sfShowVillas ? 'Villas' : 'Apartments' }}</p>
+                        <p class="text-3xl font-bold text-gray-900 mt-2">
+                            {{ $sfShowVillas ? ($stats['total_villas'] ?? 0) : ($stats['total_apartments'] ?? 0) }}
+                        </p>
+                    </div>
+                    <div class="w-12 h-12 {{ $sfShowVillas ? 'bg-amber-100' : 'bg-green-100' }} rounded-lg flex items-center justify-center">
+                        <i class="fas {{ $sfShowVillas ? 'fa-house-user text-amber-600' : 'fa-door-open text-green-600' }} text-xl"></i>
+                    </div>
+                </div>
+            </div>
+        @endif
 
         <!-- Residents -->
         <div class="bg-white rounded-lg shadow p-6">

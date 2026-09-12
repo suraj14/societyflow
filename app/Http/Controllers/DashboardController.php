@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PropertyType;
 use App\Models\Building;
 use App\Models\Complaint;
 use App\Models\Facility;
@@ -65,9 +66,20 @@ class DashboardController extends Controller
         $user = auth()->user();
         $societyId = $user->society_id;
 
+        // The society's configured property type decides which figures mean
+        // anything: a villa township has no buildings to count, and an
+        // apartment society has no villas. A mixed society sees both, split
+        // out, so "120 villas / 80 apartments" is legible rather than a
+        // single opaque "200 units".
+        $society = $user->society;
+        $propertyStats = $this->propertyStats($societyId);
+
         $stats = [
             'total_buildings' => Building::when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
             'total_units' => Flat::when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
+            'total_villas' => $propertyStats['villas'],
+            'total_apartments' => $propertyStats['apartments'],
+            'vacant_units' => $propertyStats['vacant'],
             'total_residents' => Resident::when($societyId, fn($q) => $q->whereHas('flat', fn($q2) => $q2->where('society_id', $societyId)))->count(),
             'occupied_units' => Flat::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'occupied')->count(),
             'open_tickets' => Complaint::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'open')->count(),
@@ -106,7 +118,45 @@ class DashboardController extends Controller
             ->take(3)
             ->get();
 
-        return view('admin.dashboard', compact('stats', 'recentTickets', 'recentVisitors', 'notices'));
+        return view('admin.dashboard', compact('stats', 'recentTickets', 'recentVisitors', 'notices', 'society'));
+    }
+
+    /**
+     * Unit counts split by property type, in one pass.
+     *
+     * A single grouped query rather than four counts, so adding the
+     * property-type figures to the dashboard does not add round trips.
+     *
+     * @return array{villas:int,apartments:int,occupied:int,vacant:int}
+     */
+    private function propertyStats(?int $societyId): array
+    {
+        $rows = Flat::query()
+            ->when($societyId, fn($q) => $q->where('society_id', $societyId))
+            ->selectRaw('property_type, status, COUNT(*) as total')
+            ->groupBy('property_type', 'status')
+            ->get();
+
+        $stats = ['villas' => 0, 'apartments' => 0, 'occupied' => 0, 'vacant' => 0];
+
+        foreach ($rows as $row) {
+            $total = (int) $row->total;
+
+            if ($row->property_type === PropertyType::Villa->value) {
+                $stats['villas'] += $total;
+            } elseif ($row->property_type === PropertyType::Apartment->value) {
+                $stats['apartments'] += $total;
+            }
+
+            if ($row->status === 'vacant') {
+                $stats['vacant'] += $total;
+            } else {
+                // occupied, on_rent and under_maintenance all mean "not free".
+                $stats['occupied'] += $total;
+            }
+        }
+
+        return $stats;
     }
 
     private function ownerDashboard()
