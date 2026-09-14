@@ -8,7 +8,9 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use App\Enums\SocietyPropertyType;
 use App\Models\User;
 use App\Models\Society;
 use App\Models\SubscriptionPlan;
@@ -185,6 +187,10 @@ class AuthController extends Controller
             'phone' => 'required|string|max:15',
             'password' => 'required|string|min:8|confirmed',
             'terms' => 'required|accepted',
+            // Required, not optional: a society created without this silently
+            // became "both", which then offered villa menus to apartment
+            // blocks and vice versa. Asked once at registration (brief §1).
+            'property_type' => ['required', Rule::in(SocietyPropertyType::values())],
         ]);
 
         try {
@@ -212,6 +218,7 @@ class AuthController extends Controller
             // Create society (auto-approved for immediate use)
             $society = Society::create([
                 'name' => $request->society_name,
+                'property_type' => $request->property_type,
                 'slug' => Str::slug($request->society_name),
                 'subdomain' => Str::slug($request->society_name),
                 'email' => $request->email,

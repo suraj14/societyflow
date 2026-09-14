@@ -100,6 +100,52 @@
                         @enderror
                     </div>
 
+                    {{--
+                        Asked once, here, and never again. This answer decides
+                        which menus, forms, dashboard figures and mobile screens
+                        the society sees from now on, so residents are never
+                        made to pick "apartment or villa" later (brief §1, §2).
+                    --}}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            <i class="fas fa-city text-gray-400 mr-1"></i> What does your society contain?
+                        </label>
+
+                        @php
+                            $sfChoices = [
+                                'apartment' => ['Apartments', 'fa-building', 'Towers and flats'],
+                                'villa'     => ['Villas',     'fa-house-user', 'Independent houses'],
+                                'both'      => ['Both',       'fa-city', 'Apartments and villas'],
+                            ];
+                            $sfSelected = old('property_type', 'apartment');
+                        @endphp
+
+                        <div class="grid grid-cols-3 gap-3" id="property-type-choices">
+                            @foreach($sfChoices as $sfValue => [$sfLabel, $sfIcon, $sfHint])
+                                <label class="cursor-pointer">
+                                    <input type="radio" name="property_type" value="{{ $sfValue }}" class="sr-only peer"
+                                           {{ $sfSelected === $sfValue ? 'checked' : '' }}>
+                                    <div class="h-full px-3 py-3 text-center border-2 rounded-xl transition-colors
+                                                border-gray-300 text-gray-600
+                                                peer-checked:border-purple-500 peer-checked:bg-purple-50 peer-checked:text-purple-700">
+                                        <i class="fas {{ $sfIcon }} text-lg"></i>
+                                        <p class="text-sm font-semibold mt-1">{{ $sfLabel }}</p>
+                                        <p class="text-[11px] leading-tight mt-0.5 opacity-75">{{ $sfHint }}</p>
+                                    </div>
+                                </label>
+                            @endforeach
+                        </div>
+
+                        <p class="text-xs text-gray-500 mt-2">
+                            You can change this later in Settings. Narrowing it hides
+                            the other kind rather than deleting anything.
+                        </p>
+
+                        @error('property_type')
+                            <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+                        @enderror
+                    </div>
+
                     <div>
                         <label class="block text-sm font-medium text-gray-700 mb-2">
                             <i class="fas fa-user text-gray-400 mr-1"></i> Admin Name
