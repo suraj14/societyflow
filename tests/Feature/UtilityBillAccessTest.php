@@ -312,18 +312,14 @@ class UtilityBillAccessTest extends TestCase
     }
 
     /**
-     * A user pointing at an owner that no longer exists resolves to nothing,
-     * without raising.
+     * Deleting an owner detaches everything that pointed at it, and the
+     * resolver then finds nothing for that user.
      *
-     * Note what this asserts, because it is not what one would assume:
-     * `users.owner_id` carries NO foreign key in the live schema (only
-     * `society_id` does), so deleting an owner leaves users.owner_id
-     * dangling rather than nulling it. `flats.owner_id` does have its
-     * constraint and is cleared. The resolver therefore looks up a dead
-     * owner id, finds no flats, and correctly returns an empty set - but
-     * the dangling column is a real gap, tracked as P1-7's neighbour in
-     * docs/TODO.md. This test pins the safe behaviour so that gap cannot
-     * quietly become a wrong-owner match later.
+     * This test previously asserted the opposite for users.owner_id: the
+     * column had no foreign key, so a deleted owner left a dangling id
+     * behind. 2026_09_15_000001 added the constraint it was always meant to
+     * have, so both sides now clear. Ownership of the *account* is untouched
+     * - only the link goes.
      */
     public function test_resolver_survives_an_owner_record_that_no_longer_exists(): void
     {
@@ -349,17 +345,14 @@ class UtilityBillAccessTest extends TestCase
             'status'     => 'active',
         ]);
 
-        $deadOwnerId = $owner->id;
         $owner->delete();
 
-        // flats.owner_id has its constraint, so the flat is released.
+        // Both foreign keys are ON DELETE SET NULL.
         $this->assertNull($flat->fresh()->owner_id, 'the flat is released with its owner');
+        $this->assertNull($user->fresh()->owner_id, 'the account link is cleared, not left dangling');
 
-        // users.owner_id has none, so it still holds the dead id.
-        $this->assertSame($deadOwnerId, $user->fresh()->owner_id);
-
-        // What matters: that dangling id resolves to nothing, not to
-        // whichever owner or user happens to reuse that number later.
+        // The account itself survives; it simply owns nothing now.
+        $this->assertDatabaseHas('users', ['id' => $user->id]);
         $this->assertSame([], UserFlatResolver::flatIdsFor($user->fresh()));
     }
 }
