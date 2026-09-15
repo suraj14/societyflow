@@ -263,12 +263,12 @@ class ReportController extends Controller
 
                 $utilityBilled = UtilityBill::where('flat_id', $flat->id)
                     ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('amount');
+                    ->sum('bill_amount');
 
                 $utilityPaid = UtilityBill::where('flat_id', $flat->id)
                     ->where('status', 'paid')
                     ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('amount');
+                    ->sum('bill_amount');
             }
 
             $totalPaid = $maintenancePaid + $utilityPaid;
@@ -349,12 +349,12 @@ class ReportController extends Controller
 
                 $utilityBilled = UtilityBill::where('flat_id', $villa->id)
                     ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('amount');
+                    ->sum('bill_amount');
 
                 $utilityPaid = UtilityBill::where('flat_id', $villa->id)
                     ->where('status', 'paid')
                     ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('amount');
+                    ->sum('bill_amount');
             }
 
             $totalPaid = $maintenancePaid + $utilityPaid;

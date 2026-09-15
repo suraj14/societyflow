@@ -24,6 +24,17 @@ class SocietyPublicIdTest extends TestCase
 
     // ------------------------------------------------------------ the column
 
+    /** Index names present on societies, whichever engine is running. */
+    private function societyIndexNames(): \Illuminate\Support\Collection
+    {
+        if (DB::getDriverName() === 'sqlite') {
+            return collect(DB::select("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='societies'"))
+                ->pluck('name');
+        }
+
+        return collect(DB::select('SHOW INDEX FROM societies'))->pluck('Key_name')->unique()->values();
+    }
+
     public function test_the_column_is_unique_and_not_nullable(): void
     {
         $this->assertTrue(Schema::hasColumn('societies', 'public_id'));
@@ -32,22 +43,36 @@ class SocietyPublicIdTest extends TestCase
             $column = collect(DB::select('PRAGMA table_info(societies)'))->firstWhere('name', 'public_id');
             $this->assertNotNull($column);
             $this->assertSame(1, (int) $column->notnull, 'public_id must be NOT NULL');
+        } else {
+            // MySQL/MariaDB: assert the shape explicitly rather than trusting
+            // that the migration's ALTER ... MODIFY did what it intended.
+            $column = DB::selectOne(
+                'SELECT COLUMN_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH, COLUMN_KEY
+                 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+                ['societies', 'public_id']
+            );
 
-            $indexes = collect(DB::select("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='societies'"))
-                ->pluck('name');
-            $this->assertTrue($indexes->contains('societies_public_id_unique'));
+            $this->assertNotNull($column, 'public_id is missing');
+            $this->assertSame('varchar(26)', strtolower($column->COLUMN_TYPE));
+            $this->assertSame('NO', $column->IS_NULLABLE, 'public_id must be NOT NULL');
+            $this->assertSame(26, (int) $column->CHARACTER_MAXIMUM_LENGTH);
+            $this->assertSame('UNI', $column->COLUMN_KEY, 'public_id must carry a unique key');
         }
+
+        $this->assertTrue(
+            $this->societyIndexNames()->contains('societies_public_id_unique'),
+            'the unique index on public_id is missing'
+        );
     }
 
-    /** The rebuild must not have cost societies its existing structure. */
-    public function test_the_rebuild_preserved_the_existing_indexes(): void
+    /**
+     * Adding the column must not cost societies its existing indexes - on
+     * SQLite the table is rebuilt, which is exactly where they could vanish.
+     */
+    public function test_the_existing_indexes_survive(): void
     {
-        if (DB::getDriverName() !== 'sqlite') {
-            $this->markTestSkipped('index names checked on sqlite');
-        }
-
-        $indexes = collect(DB::select("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='societies'"))
-            ->pluck('name');
+        $indexes = $this->societyIndexNames();
 
         foreach ([
             'societies_slug_unique',
@@ -57,7 +82,7 @@ class SocietyPublicIdTest extends TestCase
             'societies_subscription_plan_id_status_index',
             'societies_property_type_index',
         ] as $index) {
-            $this->assertTrue($indexes->contains($index), "index {$index} was lost in the rebuild");
+            $this->assertTrue($indexes->contains($index), "index {$index} was lost");
         }
     }
 

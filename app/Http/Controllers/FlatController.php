@@ -172,8 +172,15 @@ class FlatController extends BaseController
             'total_bills' => $flat->maintenanceBills()->count(),
             'paid_bills' => $flat->maintenanceBills()->where('status', 'paid')->count(),
             'pending_bills' => $flat->maintenanceBills()->where('status', 'pending')->count(),
-            'total_paid' => $flat->maintenanceBills()->where('status', 'paid')->sum('amount'),
-            'total_pending' => $flat->maintenanceBills()->where('status', 'pending')->sum('amount'),
+            // maintenance_bills has no `amount` column - it carries
+            // total_amount / paid_amount / balance_amount. Summing `amount`
+            // was a hard 500 on MySQL and silently returned 0 on SQLite,
+            // which quotes identifiers with double quotes and so read the
+            // unknown name as the string literal 'amount'. balance_amount
+            // matches Flat::getPendingDues(), the existing convention for
+            // money still owed.
+            'total_paid' => $flat->maintenanceBills()->where('status', 'paid')->sum('paid_amount'),
+            'total_pending' => $flat->maintenanceBills()->where('status', 'pending')->sum('balance_amount'),
         ];
 
         return view('flats.show', compact('flat', 'stats'));

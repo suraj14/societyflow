@@ -45,9 +45,16 @@ class GuardGateTest extends TestCase
         static $n = 0;
         $flat = $this->makeFlat($society, $this->buildingFor($society), 'A-' . (++$n));
 
+        // host_user_id is set by every real registration path. It is also
+        // required here on MySQL, where the column is NOT NULL: the visitors
+        // repair migration declares it nullable, but only its SQLite branch
+        // rebuilds the table, so MySQL kept the original NOT NULL. The
+        // divergence is filed as P1-15; this fixture simply behaves the way
+        // the application does.
         return Visitor::create(array_merge([
             'society_id'          => $society->id,
             'flat_id'             => $flat->id,
+            'host_user_id'        => $this->guard->id,
             'visitor_name'        => 'Test Visitor',
             'visitor_phone'       => '9876543210',
             'visitor_type'        => 'guest',

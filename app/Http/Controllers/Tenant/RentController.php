@@ -70,7 +70,11 @@ class RentController extends Controller
             ->get();
         
         // Calculate statistics
-        $totalRent = $rentRecords->sum('amount');
+        // total_amount, not amount: MaintenanceBill has no `amount`
+        // attribute, so this summed nothing and every tenant saw a rent
+        // total of 0. A collection sum fails silently rather than erroring,
+        // which is why no engine caught it.
+        $totalRent = $rentRecords->sum('total_amount');
         $totalPaid = $rentRecords->sum(function($bill) {
             return $bill->payments->sum('amount');
         });

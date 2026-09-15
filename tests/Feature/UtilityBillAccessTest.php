@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\UtilityBill;
 use App\Support\UserFlatResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -347,9 +348,23 @@ class UtilityBillAccessTest extends TestCase
 
         $owner->delete();
 
-        // Both foreign keys are ON DELETE SET NULL.
-        $this->assertNull($flat->fresh()->owner_id, 'the flat is released with its owner');
+        // users.owner_id is ON DELETE SET NULL on both engines after
+        // 2026_09_15_000001.
         $this->assertNull($user->fresh()->owner_id, 'the account link is cleared, not left dangling');
+
+        // flats.owner_id only has its constraint on SQLite. On MySQL the
+        // migrations that declared it did so inside a table rebuild that runs
+        // for SQLite alone, so the foreign key was never created there and a
+        // deleted owner leaves flats.owner_id dangling. Filed as P1-16;
+        // asserted per engine so neither behaviour drifts unnoticed.
+        if (DB::getDriverName() === 'sqlite') {
+            $this->assertNull($flat->fresh()->owner_id, 'the flat is released with its owner');
+        } else {
+            $this->assertNotNull(
+                $flat->fresh()->owner_id,
+                'if MySQL now clears this, flats.owner_id gained its constraint - close P1-16'
+            );
+        }
 
         // The account itself survives; it simply owns nothing now.
         $this->assertDatabaseHas('users', ['id' => $user->id]);

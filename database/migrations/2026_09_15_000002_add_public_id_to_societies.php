@@ -96,7 +96,11 @@ return new class extends Migration
 
         $this->addUniqueIndexIfMissing();
 
-        DB::statement('ALTER TABLE societies MODIFY public_id CHAR(' . self::LENGTH . ') NOT NULL');
+        // VARCHAR, not CHAR, to match what $table->string() produced on the
+        // way in and what SQLite ends up with - the two engines should not
+        // disagree about the column type. No charset is named, so the column
+        // keeps the table's default rather than silently changing collation.
+        DB::statement('ALTER TABLE societies MODIFY public_id VARCHAR(' . self::LENGTH . ') NOT NULL');
     }
 
     public function down(): void
