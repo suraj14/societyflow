@@ -83,7 +83,11 @@ class ProfileApiController extends Controller
                 // Same society capability object the login response carries,
                 // so a session restored from /profile branches identically.
                 'society'        => $society ? array_merge(
-                    ['id' => $society->id, 'name' => $society->name],
+                    [
+                        'id'        => $society->id,
+                        'public_id' => $society->public_id,
+                        'name'      => $society->name,
+                    ],
                     $society->propertyConfig()
                 ) : null,
                 'property_type'  => $society?->propertyType()->value,

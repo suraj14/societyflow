@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PropertyType;
 use App\Enums\SocietyPropertyType;
+use App\Models\Concerns\HasPublicId;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -13,8 +14,13 @@ use Illuminate\Support\Str;
 
 class Society extends Model
 {
-    use HasFactory;
+    use HasFactory, HasPublicId;
 
+    /**
+     * public_id is deliberately absent from $fillable: it is assigned once
+     * by HasPublicId on create and must never be settable from request
+     * input, or the identifier stops being stable.
+     */
     protected $fillable = [
         'admin_id',
         'subscription_plan_id',

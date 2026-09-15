@@ -231,8 +231,15 @@ class AuthApiController extends Controller
             // Kept as a nested object AND mirrored into the flat keys above's
             // sibling `property_type` so older builds that do not know about
             // `society` keep working.
+            // `public_id` is the identifier to quote in URLs and support
+            // tickets. The numeric `id` stays because shipped builds parse
+            // it; removing it would break them without a coordinated release.
             'society'       => $society ? array_merge(
-                ['id' => $society->id, 'name' => $society->name],
+                [
+                    'id'        => $society->id,
+                    'public_id' => $society->public_id,
+                    'name'      => $society->name,
+                ],
                 $society->propertyConfig()
             ) : null,
             'property_type' => $society?->propertyType()->value,

@@ -319,12 +319,12 @@ class SocietyPropertyTypeTest extends TestCase
         $superAdmin = $this->makeUserWithRole($society, 'Super Admin', ['society_id' => null]);
 
         $this->actingAs($superAdmin)
-            ->get("/super-admin/societies/{$society->id}/edit")
+            ->get("/super-admin/societies/{$society->public_id}/edit")
             ->assertOk()
             ->assertSee('Property Type', false);
 
         $this->actingAs($superAdmin)
-            ->put("/super-admin/societies/{$society->id}", $this->societyPayload($society, [
+            ->put("/super-admin/societies/{$society->public_id}", $this->societyPayload($society, [
                 'property_type' => 'villa',
             ]))
             ->assertSessionHasNoErrors()
@@ -339,7 +339,7 @@ class SocietyPropertyTypeTest extends TestCase
         $superAdmin = $this->makeUserWithRole($society, 'Super Admin', ['society_id' => null]);
 
         $this->actingAs($superAdmin)
-            ->put("/super-admin/societies/{$society->id}", $this->societyPayload($society, [
+            ->put("/super-admin/societies/{$society->public_id}", $this->societyPayload($society, [
                 'property_type' => 'penthouse',
             ]))
             ->assertSessionHasErrors('property_type');

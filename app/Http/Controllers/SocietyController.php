@@ -16,8 +16,17 @@ class SocietyController extends BaseController
      */
     public function index()
     {
-        $societies = Society::latest()->paginate(10);
-        
+        // Scope by default, exempt Super Admin explicitly. This listed every
+        // society in the system to any Admin.
+        $user = auth()->user();
+
+        $societies = Society::when(
+                !$user->hasRole('Super Admin'),
+                fn ($query) => $query->where('id', $user->society_id)
+            )
+            ->latest()
+            ->paginate(10);
+
         return view('societies.index', compact('societies'));
     }
 
@@ -58,6 +67,12 @@ class SocietyController extends BaseController
      */
     public function show(Society $society)
     {
+        // Resolving the identifier is not authorisation. Route-model binding
+        // returns whatever row the URL names, so an Admin could read and
+        // edit any other society simply by changing it - a ULID makes that
+        // unguessable but still has to be refused.
+        $this->authorizeSocietyId($society->id);
+
         $society->load(['buildings', 'residents']);
         
         $stats = [
@@ -75,6 +90,8 @@ class SocietyController extends BaseController
      */
     public function edit(Society $society)
     {
+        $this->authorizeSocietyId($society->id);
+
         return view('societies.edit', compact('society'));
     }
 
@@ -83,6 +100,8 @@ class SocietyController extends BaseController
      */
     public function update(Request $request, Society $society)
     {
+        $this->authorizeSocietyId($society->id);
+
         return $this->handleFormSubmission(function() use ($request, $society) {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
@@ -106,6 +125,8 @@ class SocietyController extends BaseController
      */
     public function destroy(Society $society)
     {
+        $this->authorizeSocietyId($society->id);
+
         // Check if society has buildings
         if ($society->buildings()->count() > 0) {
             return redirect()->route('societies.index')
