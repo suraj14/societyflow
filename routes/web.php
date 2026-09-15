@@ -60,6 +60,14 @@ Route::get('/logout', function () {
     return redirect()->route('login');
 });
 
+// Return from an impersonated admin session. Deliberately NOT under
+// role:Super Admin - the active session holds the borrowed admin's role
+// while impersonating, so a role gate here would lock the Super Admin out
+// of their own "return" button. ImpersonationController::stop checks the
+// session flag instead.
+Route::post('/impersonation/stop', [App\Http\Controllers\SuperAdmin\ImpersonationController::class, 'stop'])
+    ->middleware(['auth'])->name('impersonation.stop');
+
 // Super Admin Routes
 Route::prefix('super-admin')->name('super-admin.')->middleware(['auth', 'role:Super Admin'])->group(function () {
     Route::get('/dashboard', [SuperAdminDashboardController::class, 'index'])->name('dashboard');
@@ -73,7 +81,10 @@ Route::prefix('super-admin')->name('super-admin.')->middleware(['auth', 'role:Su
     Route::post('societies/{society}/reset-admin-password', [SuperAdminSocietyController::class, 'resetAdminPassword'])->name('societies.reset-admin-password');
     Route::post('societies/{society}/assign-admin', [SuperAdminSocietyController::class, 'assignAdmin'])->name('societies.assign-admin');
     Route::delete('societies/{society}/remove-admin', [SuperAdminSocietyController::class, 'removeAdmin'])->name('societies.remove-admin');
-    
+
+    // Login as Society Admin
+    Route::post('societies/{society}/login-as', [App\Http\Controllers\SuperAdmin\ImpersonationController::class, 'start'])->name('societies.login-as');
+
     // Packages Management
     Route::resource('packages', PackageController::class);
     
@@ -252,6 +263,7 @@ Route::middleware(['auth', 'role:Super Admin|Admin|Society Admin', 'restrict.sta
 Route::middleware(['auth', 'restrict.staff'])->group(function () {
     Route::resource('payments', PaymentController::class);
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt'])->name('payments.receipt');
+    Route::get('bills/{bill}/upi-link', [PaymentController::class, 'upiLink'])->name('bills.upi-link');
     // Route::resource('utility-bills', UtilityBillController::class);
     // Route::patch('utility-bills/{utilityBill}/payment', [UtilityBillController::class, 'addPayment'])->name('utility-bills.add-payment');
 });

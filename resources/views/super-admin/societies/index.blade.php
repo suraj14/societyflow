@@ -162,10 +162,19 @@
                                                class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                                 <i class="fas fa-eye mr-2"></i>View
                                             </a>
-                                            <a href="{{ route('super-admin.societies.edit', $society) }}" 
+                                            <a href="{{ route('super-admin.societies.edit', $society) }}"
                                                class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                                 <i class="fas fa-edit mr-2"></i>Edit
                                             </a>
+                                            @if($society->admin_id)
+                                            <form action="{{ route('super-admin.societies.login-as', $society) }}" method="POST" class="inline">
+                                                @csrf
+                                                <button type="submit"
+                                                        class="block w-full text-left px-4 py-2 text-sm text-amber-700 hover:bg-gray-100">
+                                                    <i class="fas fa-user-secret mr-2"></i>Login as Admin
+                                                </button>
+                                            </form>
+                                            @endif
                                             <form action="{{ route('super-admin.societies.destroy', $society) }}" method="POST" class="inline">
                                                 @csrf
                                                 @method('DELETE')

@@ -34,10 +34,18 @@
                     </div>
                 </div>
                 <div class="flex space-x-2">
-                    <a href="{{ route('super-admin.societies.edit', $society) }}" 
+                    <a href="{{ route('super-admin.societies.edit', $society) }}"
                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                         <i class="fas fa-edit mr-2"></i>Edit
                     </a>
+                    @if($society->admin_id)
+                        <form action="{{ route('super-admin.societies.login-as', $society) }}" method="POST" class="inline">
+                            @csrf
+                            <button type="submit" class="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600">
+                                <i class="fas fa-user-secret mr-2"></i>Login as Admin
+                            </button>
+                        </form>
+                    @endif
                     @if($society->status === 'inactive')
                         <form action="{{ route('super-admin.societies.approve', $society) }}" method="POST" class="inline">
                             @csrf

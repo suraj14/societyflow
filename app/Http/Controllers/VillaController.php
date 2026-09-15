@@ -120,8 +120,14 @@ class VillaController extends BaseController
             abort(404);
         }
 
+        // Route-model binding resolves any flat id; nothing here checked the
+        // villa belonged to the viewer's own society, so any Admin could
+        // read another society's villa - including its residents, visitors
+        // and complaints - just by guessing the id.
+        $this->authorizeSocietyAccess($villa);
+
         $villa->load(['society', 'villaArea', 'ownerModel', 'residents', 'visitors', 'complaints', 'facilityBookings']);
-        
+
         return view('villas.show', compact('villa'));
     }
 
@@ -130,6 +136,8 @@ class VillaController extends BaseController
         if (!$villa->isVilla()) {
             abort(404);
         }
+
+        $this->authorizeSocietyAccess($villa);
 
         $user = auth()->user();
         
@@ -154,6 +162,8 @@ class VillaController extends BaseController
         if (!$villa->isVilla()) {
             abort(404);
         }
+
+        $this->authorizeSocietyAccess($villa);
 
         $user = auth()->user();
 
@@ -197,11 +207,19 @@ class VillaController extends BaseController
         $oldOwnerId = $villa->owner_id;
         $villa->update($validated);
 
-        // Assign Villa Owner role to new owner
+        // Assign Villa Owner role to new owner.
+        //
+        // villa.owner_id is a foreign key to owners.id, never users.id (see
+        // 4e35ffa) - User::find($villa->owner_id) read an owners.id as a
+        // users.id and, because the two id spaces overlap, could silently
+        // grant "Villa Owner" to an unrelated person who happened to share
+        // that number. The login account is reached through the Owner
+        // record, which may not have one (villaOwnerUser can be null).
         if ($villa->owner_id && $villa->owner_id !== $oldOwnerId) {
-            $owner = User::find($villa->owner_id);
-            if ($owner && !$owner->hasRole('Villa Owner')) {
-                $owner->assignRole('Villa Owner');
+            $owner = \App\Models\Owner::find($villa->owner_id);
+            $ownerUser = $owner?->user;
+            if ($ownerUser && !$ownerUser->hasRole('Villa Owner')) {
+                $ownerUser->assignRole('Villa Owner');
             }
         }
 
@@ -214,6 +232,8 @@ class VillaController extends BaseController
         if (!$villa->isVilla()) {
             abort(404);
         }
+
+        $this->authorizeSocietyAccess($villa);
 
         $villa->delete();
 

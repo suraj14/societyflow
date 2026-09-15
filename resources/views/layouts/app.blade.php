@@ -70,6 +70,7 @@
     </style>
 </head>
 <body class="bg-gray-100 font-sans antialiased">
+    @include('partials.impersonation-banner')
     <div class="flex h-screen overflow-hidden" x-data="{ sidebarOpen: true, mobileMenuOpen: false }">
         
         <!-- Desktop Sidebar -->

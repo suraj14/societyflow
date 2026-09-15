@@ -11,9 +11,12 @@ use App\Models\VillaArea;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use App\Http\Controllers\Concerns\AuthorizesSocietyAccess;
 
 class FacilityBookingController extends Controller
 {
+    use AuthorizesSocietyAccess;
+
     public function index(Request $request)
     {
         // Check if user has permission to view bookings
@@ -421,6 +424,12 @@ class FacilityBookingController extends Controller
 
     public function show(FacilityBooking $facilityBooking)
     {
+        // Nothing here checked society membership, so any signed-in user of
+        // any role in any society could view any other society's booking by
+        // id - it is not gated by manage_facilities the way edit/update/
+        // destroy are, so this was the widest-reach of the four.
+        $this->authorizeSocietyAccess($facilityBooking);
+
         $facilityBooking->load(['facility', 'user', 'flat.building', 'society']);
         return view('facility-bookings.show', compact('facilityBooking'));
     }
@@ -428,7 +437,12 @@ class FacilityBookingController extends Controller
     public function edit(FacilityBooking $facilityBooking)
     {
         $user = auth()->user();
-        
+
+        // The manage_facilities bypass below is a role permission, not
+        // scoped to one society, so an Admin holding it could otherwise
+        // reach any society's booking by id.
+        $this->authorizeSocietyAccess($facilityBooking);
+
         // Users can edit their own booking details, but only admin can edit status
         // Allow: Users with book_facility permission, Admins, Villa Owners, Apartment Owners
         if (!$user->can('book_facility') && !$user->can('manage_facilities') && 
@@ -577,7 +591,9 @@ class FacilityBookingController extends Controller
     public function update(Request $request, FacilityBooking $facilityBooking)
     {
         $user = auth()->user();
-        
+
+        $this->authorizeSocietyAccess($facilityBooking);
+
         // Users can update their own booking details, but only admin can update status
         // Allow: Users with book_facility permission, Admins, Villa Owners, Apartment Owners
         if (!$user->can('book_facility') && !$user->can('manage_facilities') && 
@@ -673,6 +689,8 @@ class FacilityBookingController extends Controller
 
     public function destroy(FacilityBooking $facilityBooking)
     {
+        $this->authorizeSocietyAccess($facilityBooking);
+
         // Users can delete their own bookings, admin can delete any booking
         if (!auth()->user()->can('manage_facilities') && $facilityBooking->user_id !== auth()->id()) {
             abort(403, 'You can only delete your own bookings.');

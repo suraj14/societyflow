@@ -482,6 +482,40 @@ class PaymentController extends Controller
     }
 
     /**
+     * A UPI deep link for one bill (brief §12).
+     *
+     * The amount, UPI id and payee name are all resolved server-side by
+     * UpiPaymentService from the bill and the society's stored settings -
+     * this endpoint accepts nothing from the caller except which bill.
+     * Opening the returned link only pre-fills the resident's UPI app; it
+     * does not create or touch any Payment record, so it cannot mark
+     * anything paid.
+     */
+    public function upiLink(\App\Models\MaintenanceBill $bill, \App\Services\UpiPaymentService $upi)
+    {
+        $this->authorizeSocietyAccess($bill);
+
+        $user = auth()->user();
+
+        // Admin/Accountant may generate a link for any bill in their own
+        // society (already enforced above); anyone else must be paying
+        // their own bill.
+        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Accountant'])) {
+            $ownFlatIds = \App\Support\UserFlatResolver::flatIdsFor($user);
+
+            abort_unless(in_array($bill->flat_id, $ownFlatIds, true), 403, 'This is not your bill.');
+        }
+
+        try {
+            $link = $upi->buildLink($bill);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['success' => true, 'link' => $link]);
+    }
+
+    /**
      * Show printable payment receipt
      */
     public function receipt(Payment $payment)

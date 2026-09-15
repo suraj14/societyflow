@@ -10,6 +10,7 @@ use App\Models\Building;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use App\Traits\HandlesFormSubmissions;
 
 class ResidentController extends BaseController
@@ -145,6 +146,11 @@ class ResidentController extends BaseController
      */
     public function show(Resident $resident)
     {
+        // Route-model binding resolves any id in the table; nothing here
+        // checked the resident belonged to the viewer's own society, so any
+        // signed-in Admin could read another society's resident by id.
+        $this->authorizeSocietyAccess($resident);
+
         $resident->load(['flat.building', 'society']);
 
         return view('residents.show', compact('resident'));
@@ -175,13 +181,21 @@ class ResidentController extends BaseController
      */
     public function update(Request $request, Resident $resident)
     {
+        // Must belong to the current user's society before anything else.
+        $this->authorizeSocietyAccess($resident);
+
         return $this->handleFormSubmission(function() use ($request, $resident) {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
                 'email' => 'required|email|unique:residents,email,' . $resident->id,
                 'phone' => 'required|string|max:15',
-                'society_id' => 'required|exists:societies,id',
-                'flat_id' => 'required|exists:flats,id',
+                // flat_id is scoped to the resident's own society below -
+                // exists:flats,id alone only proves the flat is real
+                // *somewhere*, not that it is this resident's society's.
+                'flat_id' => [
+                    'required',
+                    Rule::exists('flats', 'id')->where('society_id', $resident->society_id),
+                ],
                 'move_in_date' => 'required|date',
                 'monthly_rent' => 'nullable|numeric|min:0',
                 'security_deposit' => 'nullable|numeric|min:0',
@@ -202,12 +216,14 @@ class ResidentController extends BaseController
                 }
             }
 
-            // Update resident (keep existing type)
+            // Update resident (keep existing type). society_id is never
+            // taken from the request - the previous code trusted
+            // $validated['society_id'] outright, which let this form
+            // reassign a resident to any society whose id a client posted.
             $resident->update([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'phone' => $validated['phone'],
-                'society_id' => $validated['society_id'],
                 'flat_id' => $validated['flat_id'],
                 'move_in_date' => $validated['move_in_date'],
                 'monthly_rent' => $validated['monthly_rent'] ?? 0,
@@ -224,6 +240,8 @@ class ResidentController extends BaseController
      */
     public function destroy(Resident $resident)
     {
+        $this->authorizeSocietyAccess($resident);
+
         // Update flat status to vacant
         $flat = Flat::find($resident->flat_id);
         if ($flat) {
