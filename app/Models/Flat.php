@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasOneThrough;
 
 class Flat extends Model
 {
@@ -84,9 +85,28 @@ class Flat extends Model
         return $this->belongsTo(VillaArea::class);
     }
 
-    public function ownerUser(): BelongsTo
+    /**
+     * The owner's login account.
+     *
+     * owner_id is a foreign key to owners.id, so this has to travel through
+     * the Owner record - users.owner_id points back at it. It used to be
+     * belongsTo(User::class, 'owner_id'), which read an owners.id as if it
+     * were a users.id: both tables are integer-keyed from 1, so it silently
+     * returned whichever unrelated user happened to share that number.
+     *
+     * An owner with no login account yields null, which is legitimate -
+     * owners are created before their account in some flows.
+     */
+    public function ownerUser(): HasOneThrough
     {
-        return $this->belongsTo(User::class, 'owner_id');
+        return $this->hasOneThrough(
+            User::class,     // what we want
+            Owner::class,    // what we go through
+            'id',            // owners.id ...
+            'owner_id',      // ... users.owner_id
+            'owner_id',      // flats.owner_id ...
+            'id'             // ... matches owners.id
+        );
     }
 
     public function residents(): HasMany

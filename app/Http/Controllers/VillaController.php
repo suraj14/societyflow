@@ -6,12 +6,15 @@ use App\Models\Flat;
 use App\Models\VillaArea;
 use App\Models\Society;
 use App\Models\User;
+use App\Http\Controllers\Concerns\ResolvesPropertyOwner;
+use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 
 class VillaController extends BaseController
 {
-    use HandlesFormSubmissions;
+    use HandlesFormSubmissions, ResolvesPropertyOwner, ResolvesSocietyPropertyType;
+
     public function index()
     {
         // Get user's society_id for data isolation
@@ -58,11 +61,15 @@ class VillaController extends BaseController
     public function store(Request $request)
     {
         $user = auth()->user();
-        
+
+        // Resolve the society before validating, so the villa area and owner
+        // must belong to it rather than merely existing somewhere.
+        $societyId = $this->resolveSocietyIdForWrite($request, $user);
+
         // Validation rules
         $rules = [
-            'villa_area_id' => 'required|exists:villa_areas,id',
-            'owner_id' => 'nullable|exists:owners,id',
+            'villa_area_id' => ['required', $this->existsInSociety('villa_areas', $societyId)],
+            'owner_id' => ['nullable', $this->existsInSociety('owners', $societyId)],
             'flat_number' => 'required|string|max:50',
             'villa_name' => 'nullable|string|max:255',
             'plot_area' => 'nullable|numeric|min:0',
@@ -113,7 +120,7 @@ class VillaController extends BaseController
             abort(404);
         }
 
-        $villa->load(['society', 'villaArea', 'ownerUser', 'residents', 'visitors', 'complaints', 'facilityBookings']);
+        $villa->load(['society', 'villaArea', 'ownerModel', 'residents', 'visitors', 'complaints', 'facilityBookings']);
         
         return view('villas.show', compact('villa'));
     }
@@ -149,11 +156,14 @@ class VillaController extends BaseController
         }
 
         $user = auth()->user();
-        
+
+        // The villa is already its own society's; the area and owner must match.
+        $societyId = (int) $villa->society_id;
+
         // Validation rules
         $rules = [
-            'villa_area_id' => 'required|exists:villa_areas,id',
-            'owner_id' => 'nullable|exists:owners,id',
+            'villa_area_id' => ['required', $this->existsInSociety('villa_areas', $societyId)],
+            'owner_id' => ['nullable', $this->existsInSociety('owners', $societyId)],
             'flat_number' => 'required|string|max:50',
             'villa_name' => 'nullable|string|max:255',
             'plot_area' => 'nullable|numeric|min:0',

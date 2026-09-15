@@ -85,7 +85,7 @@ class VillaAreaController extends BaseController
     public function show(VillaArea $villaArea)
     {
         // Policy authorization is handled by __construct
-        $villaArea->load(['society', 'villas.ownerUser']);
+        $villaArea->load(['society', 'villas.ownerModel']);
         return view('villa-areas.show', compact('villaArea'));
     }
 

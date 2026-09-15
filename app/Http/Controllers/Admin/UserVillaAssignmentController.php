@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\BaseController;
+use App\Http\Controllers\Concerns\ResolvesPropertyOwner;
+use App\Models\Owner;
 use App\Models\User;
 use App\Models\Flat;
 use App\Models\VillaArea;
@@ -12,6 +14,8 @@ use Carbon\Carbon;
 
 class UserVillaAssignmentController extends BaseController
 {
+    use ResolvesPropertyOwner;
+
     public function index()
     {
         // Only admin and super admin can access this
@@ -59,25 +63,40 @@ class UserVillaAssignmentController extends BaseController
         
         $user = User::findOrFail($request->user_id);
         $villa = Flat::findOrFail($request->villa_id);
-        
+
         // Verify user is a villa owner
         if (!$user->hasRole('Villa Owner')) {
             return back()->with('error', 'User must have Villa Owner role to be assigned a villa.');
         }
-        
+
         // Verify villa is available
         if ($villa->owner_id) {
             return back()->with('error', 'This villa is already assigned to another owner.');
         }
-        
+
         // Verify villa belongs to the same society
         if ($villa->society_id !== $this->getSocietyId()) {
             return back()->with('error', 'Villa must belong to the same society.');
         }
-        
+
+        // Verify it is actually a villa. Without this the villa screen would
+        // happily take an apartment's id and record it as a villa.
+        if (!$villa->isVilla()) {
+            return back()->with('error', 'Selected unit is not a villa.');
+        }
+
+        // Resolve the owner record. flats.owner_id is a foreign key to
+        // owners.id, so writing $user->id here attributes the villa to
+        // whichever owner happens to share that integer.
+        $owner = $this->resolveOwnerFor($user);
+
+        if (!$owner instanceof Owner) {
+            return $owner; // a redirect carrying the reason
+        }
+
         // Assign villa to user
         $villa->update([
-            'owner_id' => $user->id,
+            'owner_id' => $owner->id,
             'status' => 'occupied'
         ]);
         
@@ -151,16 +170,32 @@ class UserVillaAssignmentController extends BaseController
         if ($newVilla->owner_id) {
             return back()->with('error', 'The new villa is already assigned to another owner.');
         }
-        
+
+        // The destination gets the same scrutiny as a fresh assignment:
+        // route-model ids are client input on a transfer too.
+        if ($newVilla->society_id !== $this->getSocietyId()) {
+            return back()->with('error', 'Villa must belong to the same society.');
+        }
+
+        if (!$newVilla->isVilla()) {
+            return back()->with('error', 'Selected unit is not a villa.');
+        }
+
+        $owner = $this->resolveOwnerFor($currentUser);
+
+        if (!$owner instanceof Owner) {
+            return $owner;
+        }
+
         // Unassign current villa
         $currentVilla->update([
             'owner_id' => null,
             'status' => 'vacant'
         ]);
-        
+
         // Assign new villa
         $newVilla->update([
-            'owner_id' => $currentUser->id,
+            'owner_id' => $owner->id,
             'status' => 'occupied'
         ]);
         

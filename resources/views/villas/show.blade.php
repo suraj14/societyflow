@@ -48,11 +48,18 @@
                             {{ ucfirst(str_replace('_', ' ', $villa->status)) }}
                         </span>
                     </div>
-                    @if($villa->ownerUser)
+                    {{--
+                        The owner is the Owner record, which is always present
+                        when owner_id is set. ownerUser is only their login
+                        account, and an owner can exist without one - reading
+                        the name from there showed "no owner" for a villa that
+                        certainly has one.
+                    --}}
+                    @if($villa->ownerModel)
                     <div>
                         <p class="text-sm text-gray-500">Owner</p>
-                        <p class="font-medium text-gray-800">{{ $villa->ownerUser->name }}</p>
-                        <p class="text-xs text-gray-500">{{ $villa->ownerUser->email }}</p>
+                        <p class="font-medium text-gray-800">{{ $villa->ownerModel->name }}</p>
+                        <p class="text-xs text-gray-500">{{ $villa->ownerModel->email ?? $villa->ownerModel->phone }}</p>
                     </div>
                     @endif
                     @if($villa->maintenance_amount)

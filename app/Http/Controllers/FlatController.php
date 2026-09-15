@@ -5,12 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\Flat;
 use App\Models\Building;
 use App\Models\Society;
+use App\Http\Controllers\Concerns\ResolvesPropertyOwner;
+use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 
 class FlatController extends BaseController
 {
-    use HandlesFormSubmissions;
+    use HandlesFormSubmissions, ResolvesPropertyOwner, ResolvesSocietyPropertyType;
+
     public function apiIndex()
     {
         $user = auth()->user();
@@ -114,10 +117,15 @@ class FlatController extends BaseController
     {
         return $this->handleFormSubmission(function () use ($request) {
             $user = auth()->user();
-            
+
+            // Resolve the society before validating, so the building and owner
+            // must belong to it. A bare exists: rule only proves the row is
+            // real, not that it is this society's.
+            $societyId = $this->resolveSocietyIdForWrite($request, $user);
+
             // Validation rules
             $rules = [
-                'building_id' => 'required|exists:buildings,id',
+                'building_id' => ['required', $this->existsInSociety('buildings', $societyId)],
                 'flat_number' => 'required|string|max:10',
                 'floor' => 'required|integer|min:0|max:100',
                 'type' => 'required|in:1BHK,2BHK,3BHK,4BHK,5BHK,Studio,Penthouse,Shop,Office',
@@ -126,7 +134,7 @@ class FlatController extends BaseController
                 'maintenance_amount' => 'nullable|numeric|min:0',
                 'status' => 'required|in:vacant,occupied,on_rent,maintenance',
                 'description' => 'nullable|string',
-                'owner_id' => 'nullable|exists:owners,id',
+                'owner_id' => ['nullable', $this->existsInSociety('owners', $societyId)],
             ];
             
             // Only Super Admin can select society, others use their own society
@@ -199,9 +207,13 @@ class FlatController extends BaseController
 
         $user = auth()->user();
 
+        // The flat is already pinned to its own society by
+        // authorizeSocietyAccess above; the building and owner must match it.
+        $societyId = (int) $flat->society_id;
+
         // Validation rules
         $rules = [
-            'building_id' => 'required|exists:buildings,id',
+            'building_id' => ['required', $this->existsInSociety('buildings', $societyId)],
             'flat_number' => 'required|string|max:10',
             'floor' => 'required|integer|min:0|max:100',
             'type' => 'required|in:1BHK,2BHK,3BHK,4BHK,5BHK,Studio,Penthouse,Shop,Office',
@@ -210,7 +222,7 @@ class FlatController extends BaseController
             'maintenance_amount' => 'nullable|numeric|min:0',
             'status' => 'required|in:vacant,occupied,on_rent,maintenance',
             'description' => 'nullable|string',
-            'owner_id' => 'nullable|exists:owners,id',
+            'owner_id' => ['nullable', $this->existsInSociety('owners', $societyId)],
         ];
         
         // Only Super Admin can select society, others use their own society

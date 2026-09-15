@@ -105,7 +105,7 @@
                                         <p class="text-xs text-gray-500">{{ $villa->flat_number }}</p>
                                     </td>
                                     <td class="px-6 py-4 text-sm text-gray-600">
-                                        {{ $villa->ownerUser->name ?? 'Not Assigned' }}
+                                        {{ $villa->ownerModel->name ?? 'Not Assigned' }}
                                     </td>
                                     <td class="px-6 py-4">
                                         <span class="px-2 py-1 text-xs rounded-full {{ $villa->status === 'occupied' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700' }}">

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\BaseController;
+use App\Http\Controllers\Concerns\ResolvesPropertyOwner;
+use App\Models\Owner;
 use App\Models\User;
 use App\Models\Flat;
 use App\Models\Building;
@@ -12,6 +14,8 @@ use Carbon\Carbon;
 
 class UserApartmentAssignmentController extends BaseController
 {
+    use ResolvesPropertyOwner;
+
     public function index()
     {
         // Only admin and super admin can access this
@@ -80,9 +84,18 @@ class UserApartmentAssignmentController extends BaseController
             return back()->with('error', 'Selected unit is not an apartment.');
         }
         
+        // Resolve the owner record. flats.owner_id is a foreign key to
+        // owners.id, so writing $user->id here attributes the apartment to
+        // whichever owner happens to share that integer.
+        $owner = $this->resolveOwnerFor($user);
+
+        if (!$owner instanceof Owner) {
+            return $owner; // a redirect carrying the reason
+        }
+
         // Assign apartment to user
         $apartment->update([
-            'owner_id' => $user->id,
+            'owner_id' => $owner->id,
             'status' => 'occupied'
         ]);
         
@@ -161,16 +174,28 @@ class UserApartmentAssignmentController extends BaseController
         if (!$newApartment->isApartment()) {
             return back()->with('error', 'Selected unit is not an apartment.');
         }
-        
+
+        // The destination gets the same society check as a fresh assignment;
+        // a transfer carries a client-supplied id too.
+        if ($newApartment->society_id !== $this->getSocietyId()) {
+            return back()->with('error', 'Apartment must belong to the same society.');
+        }
+
+        $owner = $this->resolveOwnerFor($currentUser);
+
+        if (!$owner instanceof Owner) {
+            return $owner;
+        }
+
         // Unassign current apartment
         $currentApartment->update([
             'owner_id' => null,
             'status' => 'vacant'
         ]);
-        
+
         // Assign new apartment
         $newApartment->update([
-            'owner_id' => $currentUser->id,
+            'owner_id' => $owner->id,
             'status' => 'occupied'
         ]);
         

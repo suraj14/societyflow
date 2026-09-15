@@ -786,14 +786,20 @@ class FacilityBookingController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
         
-        $flat->load('ownerUser');
+        // The owner is the Owner record - flats.owner_id points at owners.id.
+        // ownerUser is only their login account, which may not exist, so the
+        // identity comes from the owner and the account id is reported
+        // alongside it rather than standing in for it.
+        $flat->load(['ownerModel', 'ownerUser']);
+
         return response()->json([
             'id' => $flat->id,
             'flat_number' => $flat->flat_number,
-            'owner' => $flat->ownerUser ? [
-                'id' => $flat->ownerUser->id,
-                'name' => $flat->ownerUser->name,
-                'email' => $flat->ownerUser->email
+            'owner' => $flat->ownerModel ? [
+                'id' => $flat->ownerModel->id,
+                'name' => $flat->ownerModel->name,
+                'email' => $flat->ownerModel->email,
+                'user_id' => $flat->ownerUser?->id,
             ] : null
         ]);
     }
