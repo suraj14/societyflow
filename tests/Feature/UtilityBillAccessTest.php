@@ -233,4 +233,133 @@ class UtilityBillAccessTest extends TestCase
 
         $this->assertNotContains($flat->id, UserFlatResolver::flatIdsFor($unrelated));
     }
+
+    /**
+     * A flat with no owner_id belongs to nobody.
+     *
+     * Most unset owner_id values are exactly this - a unit nobody owns yet,
+     * not a link waiting to be repaired. The resolver must not hand such a
+     * flat to a user merely because they own something else nearby.
+     */
+    public function test_resolver_does_not_claim_an_unowned_flat(): void
+    {
+        $society  = $this->makeSociety();
+        $building = $this->makeBuilding($society);
+
+        $owner = Owner::create([
+            'society_id' => $society->id,
+            'name'       => 'Real Owner',
+            'email'      => 'realowner' . uniqid() . '@test.local',
+            'status'     => 'active',
+        ]);
+
+        $owned   = $this->makeFlat($society, $building, '401');
+        $unowned = $this->makeFlat($society, $building, '402');
+        $owned->update(['owner_id' => $owner->id]);
+
+        $user = User::create([
+            'society_id' => $society->id,
+            'owner_id'   => $owner->id,
+            'name'       => 'Real Owner',
+            'email'      => 'realuser' . uniqid() . '@test.local',
+            'password'   => bcrypt('x'),
+            'status'     => 'active',
+        ]);
+
+        $resolved = UserFlatResolver::flatIdsFor($user);
+
+        $this->assertContains($owned->id, $resolved);
+        $this->assertNotContains($unowned->id, $resolved, 'an unowned flat must stay unowned');
+        $this->assertNull($unowned->fresh()->owner_id);
+    }
+
+    /**
+     * An owner need not have a login account, and the flat is still owned.
+     *
+     * This is why display reads the Owner record: ownerUser is null here,
+     * but the property plainly has an owner.
+     */
+    public function test_a_flat_owned_by_an_accountless_owner_is_still_owned(): void
+    {
+        $society  = $this->makeSociety();
+        $building = $this->makeBuilding($society);
+        $flat     = $this->makeFlat($society, $building, '403');
+
+        $owner = Owner::create([
+            'society_id' => $society->id,
+            'name'       => 'No Account Owner',
+            'email'      => 'noaccount' . uniqid() . '@test.local',
+            'status'     => 'active',
+        ]);
+
+        $flat->update(['owner_id' => $owner->id]);
+        $flat = $flat->fresh();
+
+        $this->assertSame($owner->id, $flat->owner_id);
+        $this->assertSame('No Account Owner', $flat->ownerModel->name);
+        $this->assertNull($flat->ownerUser, 'this owner deliberately has no login account');
+
+        // And nobody resolves it, because no user is linked to that owner.
+        $bystander = User::create([
+            'society_id' => $society->id,
+            'name'       => 'Bystander',
+            'email'      => 'bystander' . uniqid() . '@test.local',
+            'password'   => bcrypt('x'),
+            'status'     => 'active',
+        ]);
+
+        $this->assertNotContains($flat->id, UserFlatResolver::flatIdsFor($bystander));
+    }
+
+    /**
+     * A user pointing at an owner that no longer exists resolves to nothing,
+     * without raising.
+     *
+     * Note what this asserts, because it is not what one would assume:
+     * `users.owner_id` carries NO foreign key in the live schema (only
+     * `society_id` does), so deleting an owner leaves users.owner_id
+     * dangling rather than nulling it. `flats.owner_id` does have its
+     * constraint and is cleared. The resolver therefore looks up a dead
+     * owner id, finds no flats, and correctly returns an empty set - but
+     * the dangling column is a real gap, tracked as P1-7's neighbour in
+     * docs/TODO.md. This test pins the safe behaviour so that gap cannot
+     * quietly become a wrong-owner match later.
+     */
+    public function test_resolver_survives_an_owner_record_that_no_longer_exists(): void
+    {
+        $society  = $this->makeSociety();
+        $building = $this->makeBuilding($society);
+        $flat     = $this->makeFlat($society, $building, '404');
+
+        $owner = Owner::create([
+            'society_id' => $society->id,
+            'name'       => 'Doomed Owner',
+            'email'      => 'doomed' . uniqid() . '@test.local',
+            'status'     => 'active',
+        ]);
+
+        $flat->update(['owner_id' => $owner->id]);
+
+        $user = User::create([
+            'society_id' => $society->id,
+            'owner_id'   => $owner->id,
+            'name'       => 'Doomed Owner',
+            'email'      => 'doomeduser' . uniqid() . '@test.local',
+            'password'   => bcrypt('x'),
+            'status'     => 'active',
+        ]);
+
+        $deadOwnerId = $owner->id;
+        $owner->delete();
+
+        // flats.owner_id has its constraint, so the flat is released.
+        $this->assertNull($flat->fresh()->owner_id, 'the flat is released with its owner');
+
+        // users.owner_id has none, so it still holds the dead id.
+        $this->assertSame($deadOwnerId, $user->fresh()->owner_id);
+
+        // What matters: that dangling id resolves to nothing, not to
+        // whichever owner or user happens to reuse that number later.
+        $this->assertSame([], UserFlatResolver::flatIdsFor($user->fresh()));
+    }
 }

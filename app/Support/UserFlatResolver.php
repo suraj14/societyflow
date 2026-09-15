@@ -21,13 +21,28 @@ use App\Models\User;
  * saw an empty bill list and a zero dashboard on mobile. Collecting the
  * rules here means every caller resolves the same set.
  *
- * The ownership fallback exists because flats.owner_id is unpopulated for
- * the large majority of rows in real data (106 of 119 in the development
- * database), so ownership frequently has to be matched through the
- * denormalised building_id/flat_no and villa_area_id/villa_no fields the
- * owners table carries. That fallback is a workaround for unlinked data,
- * not the intended model: backfilling flats.owner_id is what actually
- * fixes it. See `php artisan owners:backfill-flat-links`.
+ * The ownership fallback exists because flats.owner_id is unset on most
+ * rows (108 of 121 in the development database), so ownership sometimes has
+ * to be matched through the denormalised building_id/flat_no and
+ * villa_area_id/villa_no fields the owners table carries. That fallback is
+ * a read-time heuristic, not the intended model - renaming a unit detaches
+ * its resident from their bills and visitors.
+ *
+ * An unset flats.owner_id does NOT mean the link is broken. Most of those
+ * rows are simply properties nobody owns yet: vacant units, or units whose
+ * owner has never been entered. Only a subset represent a real owner who
+ * was never linked, and the two cases are indistinguishable from the data
+ * alone - deciding between them needs a person who knows the estate.
+ *
+ * There is NO automatic backfill. `php artisan owners:backfill-flat-links`
+ * was referenced here but never existed, and nothing else fills this column
+ * in bulk; ownership is set when an owner is created against a unit or
+ * assigned through the admin screens. Any future backfill must be driven by
+ * records of actual ownership, never inferred from matching addresses,
+ * names, email addresses or coincident ids - `flats.owner_id` points at
+ * `owners.id`, and those id spaces overlap with `users.id`, so guessing
+ * attributes property to the wrong person without raising an error. Tracked
+ * as P1-7 in docs/TODO.md.
  *
  * Every branch stays scoped to the user's own society.
  */

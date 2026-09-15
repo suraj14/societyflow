@@ -104,11 +104,15 @@ work and are not closed by it.
   visitor notifies nobody on mobile — the resident must open the app to
   see a pending approval. Web Push (VAPID) is the only working channel.
 - **Ownership resolution is partly heuristic.** `flats.owner_id` is unset
-  for the large majority of rows (106 of 119 in development), so
-  `UserFlatResolver` falls back to matching the owner record's recorded
-  building/flat or villa area/number against the flat. Renaming a unit
-  detaches a resident from their bills and visitors. Backfilling
-  `flats.owner_id` is the real fix.
+  on most rows (108 of 121 in development), so `UserFlatResolver` falls
+  back to matching the owner record's recorded building/flat or villa
+  area/number against the flat. Renaming a unit detaches a resident from
+  their bills and visitors. **There is no automatic backfill command** —
+  an earlier note pointed at `owners:backfill-flat-links`, which was never
+  built. Note also that an unset `owner_id` usually means the unit has no
+  owner yet rather than a broken link; only a person who knows the estate
+  can tell the two apart, so a backfill must come from records of actual
+  ownership and never from matching addresses or names (P1-7).
 - **Three overlapping identity models.** `residents` (legacy), `owners`
   and `tenants` all describe a person attached to a unit, plus
   `users.owner_id` / `users.tenant_id`. Consolidating them is the largest
