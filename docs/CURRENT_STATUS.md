@@ -2,17 +2,16 @@
 
 Update this after every major task. Keep it short; link, don't paste.
 
-**Last updated:** 2026-09-15
+**Last updated:** 2026-09-16
 
 ## Branch and commit
 
 - Branch: `production-readiness` (`main` untouched at `2f65516`)
-- Latest verified commit: `530a492` — impersonation, cross-society auth audit, UPI links
+- Latest verified commit: `c5914c0` — assignment-screen nav gating, instant guard check-in/out
 - Working tree: clean
 - **Note:** several commits between `6aa8512` and `530a492` (public_id, MySQL
-  parity fixes, owner_id FK fixes) landed before this file was last updated —
-  see `git log 6aa8512..530a492 --oneline` for the full list; this section
-  covers only the most recent task in detail.
+  parity fixes, owner_id FK fixes) landed before this file was updated —
+  see `git log 6aa8512..530a492 --oneline` for the full list.
 
 ## Backend
 
@@ -95,11 +94,53 @@ Tests: 33 new (`ImpersonationTest` 11, `CrossSocietyAuthorizationGapsTest` 13,
 `UpiPaymentTest` 9), all green on SQLite and MariaDB 10.4.27. Full suite: 380
 passing / 1031 assertions (SQLite).
 
+## Follow-up task (2026-09-16)
+
+A further brief asked for full property-type UX / role-based UI / repeated-
+field removal / instant updates across every module / Flutter parity in one
+pass. Audited what prior sessions already covered (owner/tenant creation,
+visitor forms, registration, complaint forms already read `property_type`
+from the society) before building anything new. Delivered:
+
+- **ResidentController investigated per explicit ask, not deleted.** Its
+  data model is active (Owner/Villa/Tenant assignment controllers still
+  write a `Resident` row; dashboards and `UserFlatResolver` read it) but its
+  own CRUD screens are orphaned — the index route is dead (redirected to
+  `/owners`) and both live nav files link only to that index. Documented in
+  the controller's own docblock rather than touched further; authorization
+  was already fixed in the prior session.
+- **Found and fixed a real orphaned-feature gap**: `admin/{apartment,villa,
+  tenant}-assignments` are fully built, tested, society-scoped screens with
+  no live link anywhere — only `partials/sidebar.blade.php`, which no
+  layout actually includes. Wired into the live sidebar's existing
+  property-type-gated groups.
+- **One complete instant-update slice** (Phase 4 asked for 15 actions
+  across every module; built and fully tested one rather than 15 shallow
+  attempts): Guard check-in/check-out now respond with JSON when asked,
+  patching counters and removing the visitor card without a page reload,
+  with the button disabled on tap to prevent double-submission. A plain
+  form POST is unaffected (progressive enhancement). Found seven pre-existing
+  "instant update" JS files in `public/js/` that are included by **no**
+  view — dead code from an earlier, apparently abandoned attempt at this
+  same feature; left untouched rather than wired in unvetted.
+- Browser click-through verification of the no-reload behaviour was
+  **blocked by a persistent Chromium crash** in this environment (four
+  attempts, different flags, confirmed unrelated to the app). Correctness
+  rests on 16 passing Guard tests instead — a real gap, not glossed over.
+
+Tests: `GuardInstantUpdateTest` (6, new) + one new
+`PropertyTypeNavigationTest` case. Full suite: 387 passing / 1062 assertions
+(SQLite); the 54 tests across this session's changed areas pass on MariaDB
+10.4.27 too.
+
 ## Next recommended task
 
-Pick up the untouched sections of the master prompt one at a time — Razorpay
-or Cashfree next (need live sandbox credentials), or the instant-update UI
-pass (large surface, better done module-by-module than in one sweep).
-P0-3 (MySQL) is closed; see `docs/SCHEMA_PARITY.md` for the constraint-parity
-follow-ups that remain open (P1-15 host_user_id, P1-17 tenant delete rules,
-P1-18 flat-number uniqueness, P1-19 NOT NULL-without-default columns).
+Pick up the untouched sections one at a time — Razorpay or Cashfree (need
+live sandbox credentials), or the remaining 13 of 15 instant-update actions
+(module-by-module, not in one sweep). Also worth a look: the seven orphaned
+`instant-*`/`universal-instant-refresh` JS files in `public/js/` — either
+finish and wire them in, or remove them; right now they're dead weight of
+unknown correctness. P0-3 (MySQL) is closed; see `docs/SCHEMA_PARITY.md` for
+the constraint-parity follow-ups still open (P1-15 host_user_id, P1-17
+tenant delete rules, P1-18 flat-number uniqueness, P1-19 NOT NULL-without-
+default columns).
