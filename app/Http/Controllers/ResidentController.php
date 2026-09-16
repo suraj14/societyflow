@@ -13,6 +13,37 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use App\Traits\HandlesFormSubmissions;
 
+/**
+ * The standalone "Resident" CRUD screens - superseded, but not dead code.
+ *
+ * Investigated rather than assumed. Two things are true at once:
+ *
+ *  1. The `residents` table is very much ALIVE. Owner/Tenant/Villa
+ *     assignment (Admin\User{Apartment,Villa,Tenant}AssignmentController)
+ *     write a Resident row as part of assigning a property, dashboards read
+ *     it, and UserFlatResolver falls back to it. It is the "legacy" person
+ *     model CLAUDE.md §5 documents, kept for backward compatibility and
+ *     still load-bearing - it must not be deleted or ignored.
+ *
+ *  2. This standalone CONTROLLER's index route is dead: routes/web.php
+ *     registers `Route::resource('residents', ...)` but a later
+ *     `Route::redirect('/residents', '/owners')` (comment: "Phase 8 refactor
+ *     - Residents deprecated") intercepts the bare index path first, so
+ *     ResidentController::index() itself is unreachable. Both live
+ *     navigation partials (layouts/navigation.blade.php,
+ *     partials/sidebar.blade.php) link only to residents.index, so no UI
+ *     path leads anywhere else in this controller either - create/show/
+ *     edit/update/destroy are reachable only by a direct URL that nothing
+ *     in the app links to.
+ *
+ * Net effect: orphaned UI over an active data model. Left in place rather
+ * than removed, per "preserve existing data and explain its relationship
+ * before making any change" - Owner/Tenant creation is the supported path
+ * for adding a resident today, and this file is not it. Authorization was
+ * confirmed and fixed separately (show/update/destroy previously had none
+ * at all); a reachable-by-URL screen still had to be safe on its own,
+ * dead navigation link or not.
+ */
 class ResidentController extends BaseController
 {
     use HandlesFormSubmissions;

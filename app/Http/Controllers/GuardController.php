@@ -36,13 +36,14 @@ class GuardController extends BaseController
         return (int) $societyId;
     }
 
-    /** Today's gate. */
-    public function dashboard()
+    /**
+     * Today's four gate counters, one grouped query rather than four counts.
+     * Shared by the dashboard render and the check-in/check-out JSON
+     * response, so a fetch()-based update and a full page load can never
+     * disagree about the numbers.
+     */
+    private function todaysStats(int $societyId): array
     {
-        $societyId = $this->societyId();
-        $society   = auth()->user()->society;
-
-        // One grouped query for the counters rather than four counts.
         $counts = Visitor::where('society_id', $societyId)
             ->whereDate('expected_entry_time', today())
             ->selectRaw('approval_status, entry_status, COUNT(*) as total')
@@ -62,6 +63,16 @@ class GuardController extends BaseController
                 $stats['waiting'] += $row->total;
             }
         }
+
+        return $stats;
+    }
+
+    /** Today's gate. */
+    public function dashboard()
+    {
+        $societyId = $this->societyId();
+        $society   = auth()->user()->society;
+        $stats     = $this->todaysStats($societyId);
 
         $relations = ['flat.building', 'flat.villaArea'];
 
@@ -217,17 +228,27 @@ class GuardController extends BaseController
         return trim(($building ? $building . ' / ' : '') . 'Flat ' . $flat->flat_number);
     }
 
-    /** Visitor arrives. */
-    public function checkIn(Visitor $visitor)
+    /**
+     * Visitor arrives.
+     *
+     * Responds with JSON when the caller asks for it (the gate dashboard's
+     * fetch() call does), so the card can be removed and the counters
+     * updated in place - a guard checks visitors in and out rapidly, and a
+     * full page reload after every tap is exactly the friction brief §18
+     * asks to remove. A plain form POST still gets the original
+     * redirect-with-flash behaviour, so nothing that already worked
+     * changes for a client with JavaScript disabled.
+     */
+    public function checkIn(Request $request, Visitor $visitor)
     {
         $this->authorizeGateAccess($visitor);
 
         if ($visitor->approval_status !== 'allowed') {
-            return back()->with('error', 'This visitor has not been approved yet.');
+            return $this->gateActionResponse($request, false, 'This visitor has not been approved yet.');
         }
 
         if ($visitor->entry_status !== 'pending') {
-            return back()->with('error', 'This visitor is already checked in.');
+            return $this->gateActionResponse($request, false, 'This visitor is already checked in.');
         }
 
         $visitor->update([
@@ -235,16 +256,16 @@ class GuardController extends BaseController
             'actual_entry_time' => now(),
         ]);
 
-        return back()->with('success', $visitor->visitor_name . ' checked in.');
+        return $this->gateActionResponse($request, true, $visitor->visitor_name . ' checked in.', $visitor);
     }
 
-    /** Visitor leaves. */
-    public function checkOut(Visitor $visitor)
+    /** Visitor leaves. See checkIn() for why this responds with JSON. */
+    public function checkOut(Request $request, Visitor $visitor)
     {
         $this->authorizeGateAccess($visitor);
 
         if ($visitor->entry_status !== 'entered') {
-            return back()->with('error', 'This visitor is not currently inside.');
+            return $this->gateActionResponse($request, false, 'This visitor is not currently inside.');
         }
 
         $visitor->update([
@@ -252,7 +273,26 @@ class GuardController extends BaseController
             'actual_exit_time' => now(),
         ]);
 
-        return back()->with('success', $visitor->visitor_name . ' checked out.');
+        return $this->gateActionResponse($request, true, $visitor->visitor_name . ' checked out.', $visitor);
+    }
+
+    /**
+     * One response shape for both actions, on both paths (JSON and
+     * redirect), so success and failure look the same to every caller.
+     */
+    private function gateActionResponse(Request $request, bool $success, string $message, ?Visitor $visitor = null)
+    {
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success'    => $success,
+                'message'    => $message,
+                'visitor_id' => $visitor?->id,
+                'status'     => $visitor?->entry_status,
+                'stats'      => $this->todaysStats($this->societyId()),
+            ], $success ? 200 : 422);
+        }
+
+        return back()->with($success ? 'success' : 'error', $message);
     }
 
     /** Recent gate activity. */

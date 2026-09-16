@@ -209,6 +209,13 @@
                                         <a href="{{ route('flats.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('flats.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                             Apartments
                                         </a>
+                                        {{-- Assign an existing owner to an existing apartment. The
+                                             screen itself was already built, tested and society-scoped
+                                             - it simply had no live link anywhere, only a reference in
+                                             an unused sidebar file nothing renders. --}}
+                                        <a href="{{ route('admin.apartment-assignments.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.apartment-assignments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
+                                            Owner Assignments
+                                        </a>
                                     </div>
                                 </div>
                                 @endif
@@ -230,12 +237,15 @@
                                         <a href="{{ route('villas.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('villas.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                             Villas
                                         </a>
+                                        <a href="{{ route('admin.villa-assignments.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.villa-assignments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
+                                            Owner Assignments
+                                        </a>
                                     </div>
                                 </div>
                                 @endif
 
                                 <!-- Tenant Group -->
-                                <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') ? 'true' : 'false' }} }">
+                                <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') || request()->routeIs('admin.tenant-assignments.*') ? 'true' : 'false' }} }">
                                     <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
                                         <div class="flex items-center">
                                             <i class="fas fa-key w-5 text-center"></i>
@@ -249,6 +259,9 @@
                                         </a>
                                         <a href="{{ route('admin.rents.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.rents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                             Rent
+                                        </a>
+                                        <a href="{{ route('admin.tenant-assignments.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.tenant-assignments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
+                                            Tenant Assignments
                                         </a>
                                     </div>
                                 </div>

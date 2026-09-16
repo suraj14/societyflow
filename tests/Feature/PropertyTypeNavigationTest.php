@@ -98,4 +98,33 @@ class PropertyTypeNavigationTest extends TestCase
         // And the guard itself resolves permissively for a null society.
         $this->assertNull($superAdmin->society);
     }
+
+    /**
+     * Owner/tenant assignment ("assign an existing user to an existing
+     * property", distinct from creating one) links were built, tested and
+     * society-scoped, but had no live navigation path anywhere - only an
+     * unused sidebar partial nothing renders referenced them. Wired into
+     * the live sidebar's existing property-type-gated groups.
+     */
+    public function test_assignment_links_follow_the_same_property_type_gate(): void
+    {
+        $villaHtml = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Villa))
+            ->get('/dashboard')->assertOk()->getContent();
+
+        $this->assertStringContainsString('villa-assignments', $villaHtml);
+        $this->assertStringNotContainsString('apartment-assignments', $villaHtml);
+        $this->assertStringContainsString('tenant-assignments', $villaHtml);
+
+        $apartmentHtml = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Apartment))
+            ->get('/dashboard')->assertOk()->getContent();
+
+        $this->assertStringContainsString('apartment-assignments', $apartmentHtml);
+        $this->assertStringNotContainsString('villa-assignments', $apartmentHtml);
+
+        $mixedHtml = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Both))
+            ->get('/dashboard')->assertOk()->getContent();
+
+        $this->assertStringContainsString('apartment-assignments', $mixedHtml);
+        $this->assertStringContainsString('villa-assignments', $mixedHtml);
+    }
 }
