@@ -68,19 +68,10 @@
                         @enderror
                     </div>
 
-                    <div>
-                        <label for="property_type" class="block text-sm font-medium text-gray-700 mb-2">
-                            Visiting Apartment / Villa <span class="text-red-500">*</span>
-                        </label>
-                        <select name="property_type" id="property_type" required onchange="handlePropertyTypeChange()"
-                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('property_type') border-red-500 @enderror">
-                            <option value="">Select Property Type</option>
-@include('partials.property-type-options')
-                        </select>
-                        @error('property_type')
-                            <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                        @enderror
-                    </div>
+                    @include('partials.property-type-field', [
+                        'sfLabel'    => 'Visiting Property',
+                        'sfOnChange' => 'handlePropertyTypeChange()',
+                    ])
                 </div>
 
                 <!-- Apartment Selection -->

@@ -179,19 +179,30 @@
                                 $initialOptions = $propertyTypeOptions[$currentSocietyId]
                                     ?? (count($propertyTypeOptions) === 1 ? reset($propertyTypeOptions) : []);
                             @endphp
+                            @php
+                                // Super Admin can switch society live (the selector above is
+                                // Super-Admin-only), so the visible <select> and its JS-driven
+                                // society switch stay untouched for that role - hiding it would
+                                // mean rebuilding that dynamic behaviour for a fixed value that
+                                // is about to change under it. For everyone else the society is
+                                // fixed for the life of this form, so a society with exactly one
+                                // supported type never needs a choice at all.
+                                $sfSingleType = !auth()->user()->hasRole('Super Admin') && count($initialOptions) === 1;
+                            @endphp
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Property Type</label>
                                 <select name="property_type" id="property_type"
                                         data-options='@json($propertyTypeOptions)'
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 {{ $sfSingleType ? 'hidden' : '' }}">
                                     <option value="">Select Property Type</option>
                                     @foreach($initialOptions as $value => $label)
-                                        <option value="{{ $value }}" {{ old('property_type') === $value ? 'selected' : '' }}>{{ $label }}</option>
+                                        <option value="{{ $value }}" {{ old('property_type', $sfSingleType ? $value : null) === $value ? 'selected' : '' }}>{{ $label }}</option>
                                     @endforeach
                                 </select>
-                                @if(count($initialOptions) === 1)
-                                    <p class="text-xs text-gray-500 mt-1">
-                                        This society contains {{ strtolower(reset($initialOptions)) }}s only.
+                                @if($sfSingleType)
+                                    <p class="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 flex items-center gap-2">
+                                        <i class="fas fa-{{ reset($initialOptions) === 'Villa' ? 'house-user' : 'building' }} text-gray-400"></i>
+                                        Property type: {{ reset($initialOptions) }}
                                     </p>
                                 @endif
                                 @error('property_type')

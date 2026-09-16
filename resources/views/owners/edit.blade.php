@@ -213,17 +213,28 @@
                         
                         <div class="space-y-4">
                             <!-- Property Type -->
+                            @php
+                                // Exactly one supported type: no real choice, so the select is
+                                // hidden and the value shown as plain text. If the owner's stored
+                                // value is one the society no longer supports, the controller adds
+                                // a second, flagged option - count() is then 2, and the dropdown
+                                // stays visible so the admin can actually see and resolve that.
+                                $sfSingleType = count($propertyTypeOptions) === 1;
+                            @endphp
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Property Type</label>
                                 <select name="property_type" id="property_type"
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 {{ $sfSingleType ? 'hidden' : '' }}">
                                     <option value="">Select Property Type</option>
                                     @foreach($propertyTypeOptions as $sfValue => $sfLabel)
                                         <option value="{{ $sfValue }}" {{ old('property_type', $owner->property_type) === $sfValue ? 'selected' : '' }}>{{ $sfLabel }}</option>
                                     @endforeach
                                 </select>
-                                @if(count($propertyTypeOptions) === 1)
-                                    <p class="text-gray-500 text-sm mt-1">This society contains {{ Str::lower(reset($propertyTypeOptions)) }}s only.</p>
+                                @if($sfSingleType)
+                                    <p class="px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 flex items-center gap-2">
+                                        <i class="fas fa-{{ reset($propertyTypeOptions) === 'Villa' ? 'house-user' : 'building' }} text-gray-400"></i>
+                                        Property type: {{ reset($propertyTypeOptions) }}
+                                    </p>
                                 @endif
                                 @error('property_type')
                                     <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
