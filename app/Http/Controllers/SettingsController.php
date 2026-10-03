@@ -115,7 +115,13 @@ class SettingsController extends Controller
             'society_name' => 'required|string|max:255',
             'society_phone' => 'nullable|string|max:15',
             'society_email' => 'nullable|email|max:255',
-            'society_address' => 'nullable|string',
+            // societies.address is a NOT NULL column - this used to be
+            // 'nullable', so clearing the field (or Laravel's own
+            // ConvertEmptyStringsToNull middleware turning "" into null)
+            // crashed the whole request with an uncaught QueryException
+            // (a 500, not a validation error) instead of telling the admin
+            // what was wrong.
+            'society_address' => 'required|string',
             'society_country' => 'nullable|string|max:2',
         ]);
 
@@ -127,6 +133,17 @@ class SettingsController extends Controller
                 'address' => $validated['society_address'],
                 'country' => $validated['society_country'],
             ]);
+
+            // The sidebar/header branding text is a *separate* SystemSetting
+            // ('app'.'app_name', read through ThemeHelper's own cache) that
+            // this form never touched - so saving a new Society Name here
+            // correctly updated societies.name, but the header kept showing
+            // whatever app_name had been seeded with, which looked like the
+            // save had no real effect. Keep them in sync by default; the
+            // App Settings tab's own "Display Name" field can still be used
+            // afterward to deliberately diverge from the official name.
+            SystemSetting::set('app', 'app_name', $validated['society_name'], 'string', $user->society_id);
+            \App\Helpers\ThemeHelper::clearCache($user->society_id);
         }
 
         return back()->with('success', 'Society information updated successfully!');
@@ -158,6 +175,15 @@ class SettingsController extends Controller
         } else {
             // Admin settings
             $validated = $request->validate([
+                // The sidebar/header branding text - a real SystemSetting
+                // ('app'.'app_name', scoped per society) that ThemeHelper
+                // already reads and caches, but until now only Super Admin
+                // could ever write it (and only the global row, never a
+                // specific society's). This is the field admins actually
+                // meant when they expected "Society Name" to change what
+                // the sidebar shows - that field only ever updated the
+                // Society model's own `name` column, a separate concept.
+                'app_name' => 'nullable|string|max:255',
                 'default_language' => 'required|string|max:10',
                 'default_currency' => 'required|string|max:10',
                 'timezone' => 'required|string|max:50',
@@ -166,12 +192,27 @@ class SettingsController extends Controller
                 'auto_approve_residents' => 'nullable|boolean',
             ]);
 
+            if (!empty($validated['app_name'])) {
+                SystemSetting::set('app', 'app_name', $validated['app_name'], 'string', $societyId);
+            }
             SystemSetting::set('app', 'default_language', $validated['default_language'], 'string', $societyId);
             SystemSetting::set('app', 'default_currency', $validated['default_currency'], 'string', $societyId);
             SystemSetting::set('app', 'timezone', $validated['timezone'], 'string', $societyId);
+            // The society's calendar (App\Support\SocietyClock reads
+            // societies.timezone): "today", month boundaries, overdue and
+            // access-pass hours all follow this. The SystemSetting row above
+            // is kept for the settings page's own read-back.
+            if ($societyId && in_array($validated['timezone'], timezone_identifiers_list(), true)) {
+                \App\Models\Society::whereKey($societyId)->update(['timezone' => $validated['timezone']]);
+            }
             SystemSetting::set('app', 'date_format', $validated['date_format'], 'string', $societyId);
             SystemSetting::set('app', 'enable_email_notifications', $request->boolean('enable_email_notifications'), 'boolean', $societyId);
             SystemSetting::set('app', 'auto_approve_residents', $request->boolean('auto_approve_residents'), 'boolean', $societyId);
+
+            // app_name is read through ThemeHelper's own 1-hour cache layer,
+            // not through $settings['app'] directly - without this, the
+            // sidebar would keep showing the old name for up to an hour.
+            \App\Helpers\ThemeHelper::clearCache($societyId);
         }
 
         return back()->with('success', 'App settings updated successfully!');
@@ -771,6 +812,10 @@ class SettingsController extends Controller
 
         // Store the permissions configuration
         SystemSetting::set('permissions', 'module_permissions', $permissions, 'json', $societyId);
+
+        if ($request->wantsJson()) {
+            return response()->json(['success' => true, 'message' => 'Role permissions updated successfully!']);
+        }
 
         return back()->with('success', 'Role permissions updated successfully!');
     }

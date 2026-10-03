@@ -5,110 +5,84 @@
 
 @section('content')
 <div class="container mx-auto px-4 py-6">
-    <!-- Header -->
     <div class="mb-6">
         <h1 class="text-3xl font-bold text-gray-900">Maintenance Report</h1>
-        <p class="text-gray-600 mt-1">Maintenance Report Description</p>
+        <p class="text-gray-600 mt-1">Track maintenance billing and collections for the selected period.</p>
     </div>
 
-    <!-- Report Form -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-        <form id="filterForm" method="POST" action="{{ route('reports.download-maintenance') }}" class="space-y-6">
-            @csrf
+    @if($errors->any())
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
+            <ul class="list-disc list-inside text-sm">
+                @foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach
+            </ul>
+        </div>
+    @endif
+    @if(session('error'))
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">{{ session('error') }}</div>
+    @endif
 
-            <!-- Report Type Selection -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-3">Report Type</label>
-                <div class="space-y-3">
-                    <div class="flex items-center">
-                        <input type="radio" id="monthly" name="report_type" value="monthly" 
-                               {{ $reportType === 'monthly' ? 'checked' : '' }} 
-                               class="h-4 w-4 text-blue-600 cursor-pointer"
-                               onchange="toggleMonthDropdown()">
-                        <label for="monthly" class="ml-3 cursor-pointer">
-                            <span class="font-medium text-gray-900">Monthly</span>
-                            <span class="text-gray-600 text-sm">Detailed monthly breakdown</span>
-                        </label>
-                    </div>
-                    <div class="flex items-center">
-                        <input type="radio" id="annually" name="report_type" value="annually" 
-                               {{ $reportType === 'annually' ? 'checked' : '' }} 
-                               class="h-4 w-4 text-blue-600 cursor-pointer"
-                               onchange="toggleMonthDropdown()">
-                        <label for="annually" class="ml-3 cursor-pointer">
-                            <span class="font-medium text-gray-900">Annually</span>
-                            <span class="text-gray-600 text-sm">Year-over-year analysis</span>
-                        </label>
-                    </div>
-                </div>
-            </div>
+    @include('reports._period-filter', [
+        'filterRoute'   => route('reports.maintenance'),
+        'downloadRoute' => route('reports.download-maintenance'),
+    ])
 
-            <!-- Month Dropdown (visible only when Monthly selected) -->
-            <div id="monthContainer" class="{{ $reportType === 'monthly' ? '' : 'hidden' }}">
-                <label for="month" class="block text-sm font-medium text-gray-700 mb-2">Month</label>
-                <select name="month" id="month" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                    @php
-                        $months = [
-                            1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April',
-                            5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
-                            9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
-                        ];
-                    @endphp
-                    @foreach($months as $num => $name)
-                        <option value="{{ $num }}" {{ $month == $num ? 'selected' : '' }}>{{ $name }}</option>
-                    @endforeach
-                </select>
-            </div>
-
-            <!-- Year Dropdown (always visible) -->
-            <div>
-                <label for="year" class="block text-sm font-medium text-gray-700 mb-2">Year</label>
-                <select name="year" id="year" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                    @php
-                        $currentYear = now()->year;
-                        for ($y = $currentYear - 5; $y <= $currentYear; $y++) {
-                            echo "<option value=\"$y\" " . ($year == $y ? 'selected' : '') . ">$y</option>";
-                        }
-                    @endphp
-                </select>
-            </div>
-
-            <!-- Download Button -->
-            <div class="flex justify-end">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
-                    <i class="fas fa-download mr-2"></i>
-                    Download PDF
-                </button>
-            </div>
-        </form>
-
-        <!-- Period Display -->
-        <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p class="text-sm text-blue-800">
-                <strong>Report Period:</strong>
-                @if($reportType === 'monthly')
-                    @php
-                        $monthName = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][$month] ?? 'Unknown';
-                    @endphp
-                    {{ $monthName }} {{ $year }}
-                @else
-                    Year {{ $year }}
-                @endif
-            </p>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+            <p class="text-gray-500 text-sm font-medium">Maintenance Billed</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">₹{{ number_format($data['billed'], 2) }}</p>
+            <p class="text-xs text-gray-500 mt-1">Bills dated {{ $period->label() }}</p>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+            <p class="text-gray-500 text-sm font-medium">Maintenance Collected</p>
+            <p class="text-2xl font-bold text-green-700 mt-1">₹{{ number_format($data['total_maintenance'], 2) }}</p>
+            <p class="text-xs text-gray-500 mt-1">{{ $data['count'] }} {{ \Illuminate\Support\Str::plural('payment', $data['count']) }} received in {{ $period->label() }}</p>
+        </div>
+        <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+            <p class="text-gray-500 text-sm font-medium">Outstanding on these bills</p>
+            <p class="text-2xl font-bold text-red-700 mt-1">₹{{ number_format($data['outstanding'], 2) }}</p>
+            <p class="text-xs text-gray-500 mt-1">Still unpaid on bills dated {{ $period->label() }}</p>
         </div>
     </div>
-</div>
 
-<script>
-function toggleMonthDropdown() {
-    const monthContainer = document.getElementById('monthContainer');
-    const reportType = document.querySelector('input[name="report_type"]:checked').value;
-    
-    if (reportType === 'monthly') {
-        monthContainer.classList.remove('hidden');
-    } else {
-        monthContainer.classList.add('hidden');
-    }
-}
-</script>
+    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-base font-semibold text-gray-900">Maintenance Payments &middot; {{ $period->label() }}</h2>
+        </div>
+        @if($data['payments']->isEmpty())
+            <div class="p-10 text-center text-gray-500">
+                <i class="fas fa-inbox text-3xl mb-2 block opacity-50"></i>
+                No maintenance payments recorded for {{ $period->label() }}.
+            </div>
+        @else
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs">
+                        <tr>
+                            <th class="px-6 py-3">Date</th>
+                            <th class="px-6 py-3">Receipt</th>
+                            <th class="px-6 py-3">Property</th>
+                            <th class="px-6 py-3">Method</th>
+                            <th class="px-6 py-3 text-right">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @foreach($data['payments'] as $payment)
+                            <tr>
+                                <td class="px-6 py-3 whitespace-nowrap">{{ $payment->payment_date?->format('d M Y') }}</td>
+                                <td class="px-6 py-3">{{ $payment->receipt_number ?: $payment->payment_id }}</td>
+                                <td class="px-6 py-3">{{ $payment->flat?->property_type === 'villa' ? 'Villa ' . $payment->flat->flat_number : ($payment->flat?->flat_number ?? '—') }}</td>
+                                <td class="px-6 py-3">{{ ucfirst($payment->payment_method) }}</td>
+                                <td class="px-6 py-3 text-right font-semibold">₹{{ number_format($payment->amount, 2) }}</td>
+                            </tr>
+                        @endforeach
+                        <tr class="bg-gray-100 font-bold border-t-2 border-gray-300">
+                            <td class="px-6 py-3" colspan="4">Total collected</td>
+                            <td class="px-6 py-3 text-right">₹{{ number_format($data['total_maintenance'], 2) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </div>
+</div>
 @endsection

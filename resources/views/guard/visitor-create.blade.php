@@ -17,6 +17,7 @@
 
     <form method="POST" action="{{ route('guard.visitors.store') }}" class="space-y-4">
         @csrf
+        @include('partials.idempotency')
 
         {{--
             One search box for every property type. The guard types a flat

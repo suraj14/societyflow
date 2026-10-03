@@ -75,7 +75,10 @@ class DashboardStatsTest extends TestCase
 
         $this->assertSame(2, $stats['visitors_today'], 'visitors_today did not count by expected_entry_time');
         $this->assertEquals(1500, $stats['monthly_revenue'], 'monthly_revenue did not sum successful payments for this month');
-        $this->assertEquals(9999, $stats['pending_dues']);
+        // Pending Dues is the outstanding balance on unpaid bills, not the sum
+        // of unverified (pending) payments - a resident claiming to have paid
+        // 9999 is not 9999 owed. No bill exists here, so nothing is due.
+        $this->assertEquals(0, $stats['pending_dues']);
     }
 
     /**

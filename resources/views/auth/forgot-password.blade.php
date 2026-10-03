@@ -59,12 +59,6 @@
                     <p class="text-gray-500 mt-2">No worries! Enter your email and we'll send you a reset link.</p>
                 </div>
 
-                @if(session('success'))
-                    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 flex items-center">
-                        <i class="fas fa-check-circle mr-2"></i>
-                        {{ session('success') }}
-                    </div>
-                @endif
 
                 <form method="POST" action="{{ route('password.email') }}" class="space-y-5">
                     @csrf

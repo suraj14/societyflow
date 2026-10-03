@@ -32,7 +32,7 @@ class DashboardApiController extends Controller
         // Visitors today for this user
         $visitorsToday = Visitor::where('society_id', $societyId)
             ->where('host_user_id', $user->id)
-            ->whereDate('expected_entry_time', today())
+            ->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())
             ->count();
 
         // Open complaints by this user

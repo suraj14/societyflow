@@ -53,12 +53,15 @@
         @yield('content')
     </main>
 
-    {{-- Thumb-reachable navigation: the three things a guard does. --}}
+    {{-- Thumb-reachable navigation: the things a guard does. Scan first -
+         "scan, verify, move on" is the primary action, not a Register
+         Visitor form (brief: THE GUARD SHOULD SCAN, VERIFY AND MOVE ON). --}}
     <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 z-20">
-        <div class="grid grid-cols-3">
+        <div class="grid grid-cols-4">
             @php
                 $sfNav = [
                     ['route' => 'guard.dashboard',        'icon' => 'fa-door-open',   'label' => 'Gate'],
+                    ['route' => 'guard.scan',             'icon' => 'fa-qrcode',      'label' => 'Scan QR'],
                     ['route' => 'guard.visitors.create',  'icon' => 'fa-user-plus',   'label' => 'New Visitor'],
                     ['route' => 'guard.history',          'icon' => 'fa-clock-rotate-left', 'label' => 'History'],
                 ];
@@ -75,5 +78,17 @@
     </nav>
 
     @stack('scripts')
+    <script>
+    // Double-submit guard (same as layouts/app.blade.php).
+    document.addEventListener('submit', function (e) {
+        var f = e.target;
+        if (!(f instanceof HTMLFormElement) || e.defaultPrevented || f.hasAttribute('data-allow-resubmit')) return;
+        if (f.dataset.sfSubmitted === '1') { e.preventDefault(); return; }
+        f.dataset.sfSubmitted = '1';
+        var buttons = f.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])');
+        setTimeout(function () { buttons.forEach(function (b) { b.disabled = true; }); }, 0);
+        setTimeout(function () { f.dataset.sfSubmitted = ''; buttons.forEach(function (b) { b.disabled = false; }); }, 8000);
+    }, false);
+    </script>
 </body>
 </html>

@@ -186,6 +186,35 @@
                             </div>
                         </div>
                     @endif
+
+                    {{-- Occupancy: renting the property does not remove the owner's
+                         access or hide the property - it stays visible with who is
+                         currently occupying it. --}}
+                    @php $sfActiveTenant = $unit->activeTenant; @endphp
+                    <div class="mt-6">
+                        <div class="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <p class="text-blue-100 text-sm font-medium uppercase tracking-wide">Status</p>
+                                    <p class="text-xl font-bold">{{ \App\Support\PropertyOccupancy::label($unit->occupancyState()) }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-blue-100 text-sm font-medium uppercase tracking-wide">Current Tenant</p>
+                                    <p class="text-xl font-bold">{{ $sfActiveTenant->name ?? '—' }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-blue-100 text-sm font-medium uppercase tracking-wide">Rent</p>
+                                    <p class="text-xl font-bold">
+                                        @if($sfActiveTenant && $sfActiveTenant->monthly_rent)
+                                            ₹{{ number_format($sfActiveTenant->monthly_rent) }}/mo
+                                        @else
+                                            Rent not configured
+                                        @endif
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 @endif
                 
                 <!-- Quick Stats -->

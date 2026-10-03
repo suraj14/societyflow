@@ -10,6 +10,7 @@
 
         <form action="{{ route('tenants.store') }}" method="POST" class="space-y-6">
             @csrf
+            @include('partials.idempotency')
 
             <div class="grid grid-cols-2 gap-6">
                 <x-form-field label="Name" name="name" type="text" required />

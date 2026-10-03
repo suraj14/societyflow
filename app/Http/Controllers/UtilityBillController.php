@@ -37,10 +37,12 @@ class UtilityBillController extends BaseController
         // foreign key to owners.id, not users.id, so it matched whichever
         // unrelated owner happened to share that id, or nothing at all.
         // UserFlatResolver resolves all three attachment paths correctly.
-        if (!$user->hasAnyRole(['Super Admin', 'Admin'])) {
+        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Accountant'])) {
             $query->whereIn('flat_id', \App\Support\UserFlatResolver::flatIdsFor($user));
         }
-        // Admin and Super Admin see all bills in their society
+        // Admin, Super Admin and Accountant see all bills in their society -
+        // Accountant has no flat of their own, so the resident scope above
+        // would otherwise show them zero bills, not their own.
 
         $bills = $query
             // Grouped: an ungrouped orWhere binds at the top level of the
@@ -109,7 +111,7 @@ class UtilityBillController extends BaseController
             }
         }
         // For owners - auto-populate their properties (apartments and/or villas)
-        elseif ($user->hasRole('Villa Owner') || $user->hasRole('Apartment Owner')) {
+        elseif ($user->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner'])) {
             // Get user's owned villas
             $villas = collect();
             

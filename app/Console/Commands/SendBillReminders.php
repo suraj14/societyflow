@@ -26,8 +26,10 @@ class SendBillReminders extends Command
     public function handle()
     {
         $days = (int) $this->option('days');
-        $reminderDate = Carbon::now()->addDays($days)->format('Y-m-d');
-        $today = Carbon::now()->format('Y-m-d');
+        // Due dates are calendar dates on the societies' clock (IST), not
+        // the storage clock.
+        $reminderDate = \App\Support\SocietyClock::now()->addDays($days)->format('Y-m-d');
+        $today = \App\Support\SocietyClock::now()->format('Y-m-d');
 
         $this->info("Sending bill reminders for bills due on or before {$reminderDate}...");
 

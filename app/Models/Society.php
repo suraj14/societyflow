@@ -31,6 +31,7 @@ class Society extends Model
         'city',
         'state',
         'country',
+        'timezone',
         'pincode',
         'phone',
         'email',
@@ -64,6 +65,16 @@ class Society extends Model
     | Rows written before this column existed default to Both, which hides
     | nothing, so these accessors are always safe to call.
     */
+
+    /**
+     * The IANA timezone this society's calendar runs on (never null; rows
+     * without one use the configured default, Asia/Kolkata). Use
+     * App\Support\SocietyClock for "now"/"today"/month boundaries.
+     */
+    public function clockTimezone(): string
+    {
+        return \App\Support\SocietyClock::timezoneFor($this);
+    }
 
     /** Never null, even for rows predating the column. */
     public function propertyType(): SocietyPropertyType

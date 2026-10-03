@@ -31,10 +31,13 @@ class ServerDiscovery {
 
   /// The currently resolved base URL (available after resolveBaseUrl() completes).
   static String get currentBaseUrl =>
-      overrideBaseUrl ?? _resolvedUrl ?? ApiConfig.devFallbackUrl;
+      overrideBaseUrl ?? _resolvedUrl ?? ApiConfig.baseUrl;
 
   static Future<String> resolveBaseUrl() async {
     if (overrideBaseUrl != null) return overrideBaseUrl!;
+    // An explicit --dart-define=API_BASE_URL wins over everything, including
+    // the subnet scan: the developer said where the server is.
+    if (ApiConfig.hasOverride) return ApiConfig.overrideUrl;
     if (ApiConfig.useProduction) return ApiConfig.prodUrl;
     if (_resolvedUrl != null) return _resolvedUrl!;
 

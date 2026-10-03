@@ -19,6 +19,7 @@
 
             <form action="{{ route('owners.store') }}" method="POST" class="p-6" enctype="multipart/form-data">
                 @csrf
+                @include('partials.idempotency')
 
                 <div class="space-y-6">
                     <!-- Basic Information -->

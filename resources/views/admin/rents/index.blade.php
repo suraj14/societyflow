@@ -10,30 +10,16 @@
             <h1 class="text-3xl font-bold text-gray-900">Rent Management</h1>
             <p class="text-gray-600 mt-1">Manage all tenant rent records</p>
         </div>
-        <a href="{{ route('admin.rents.create') }}" 
+        @unless(auth()->user()->hasRole('Accountant'))
+        <a href="{{ route('admin.rents.create') }}"
            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
             <i class="fas fa-plus mr-2"></i>
             Create Rent Record
         </a>
+        @endunless
     </div>
 
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg" role="alert">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-3"></i>
-                <p class="font-medium">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg" role="alert">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-3"></i>
-                <p class="font-medium">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
     <!-- Rent Statistics -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -174,30 +160,32 @@
                                                 <i class="fas fa-receipt"></i>
                                             </a>
                                         @endif
+                                        @unless(auth()->user()->hasRole('Accountant'))
                                         @if($rent->status !== 'paid')
-                                            <button onclick="openPaymentModal({{ $rent->id }}, '{{ $rent->flat->flat_number ?? $rent->flat->villa_name }}', {{ $rent->maintenance_amount }})" 
+                                            <button onclick="openPaymentModal({{ $rent->id }}, '{{ $rent->flat->flat_number ?? $rent->flat->villa_name }}', {{ $rent->maintenance_amount }})"
                                                     class="text-green-600 hover:text-green-900 transition-colors"
                                                     title="Add Payment">
                                                 <i class="fas fa-plus-circle"></i>
                                             </button>
                                         @endif
-                                        <a href="{{ route('admin.rents.edit', $rent) }}" 
+                                        <a href="{{ route('admin.rents.edit', $rent) }}"
                                            class="text-indigo-600 hover:text-indigo-900 transition-colors"
                                            title="Edit Rent">
                                             <i class="fas fa-edit"></i>
                                         </a>
-                                        <form action="{{ route('admin.rents.destroy', $rent) }}" 
-                                              method="POST" 
+                                        <form action="{{ route('admin.rents.destroy', $rent) }}"
+                                              method="POST"
                                               class="inline-block"
                                               onsubmit="return confirm('Are you sure you want to delete this rent record?');">
                                             @csrf
                                             @method('DELETE')
-                                            <button type="submit" 
+                                            <button type="submit"
                                                     class="text-red-600 hover:text-red-900 transition-colors"
                                                     title="Delete Rent">
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         </form>
+                                        @endunless
                                     </div>
                                 </td>
                             </tr>
@@ -212,12 +200,20 @@
                     <i class="fas fa-money-bill-wave text-gray-400 text-2xl"></i>
                 </div>
                 <h3 class="text-lg font-medium text-gray-900 mb-2">No rent records found</h3>
-                <p class="text-gray-500 mb-6">Get started by creating your first rent record.</p>
-                <a href="{{ route('admin.rents.create') }}" 
+                <p class="text-gray-500 mb-6">
+                    @unless(auth()->user()->hasRole('Accountant'))
+                        Get started by creating your first rent record.
+                    @else
+                        No rent records to display yet.
+                    @endunless
+                </p>
+                @unless(auth()->user()->hasRole('Accountant'))
+                <a href="{{ route('admin.rents.create') }}"
                    class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
                     <i class="fas fa-plus mr-2"></i>
                     Create Your First Rent Record
                 </a>
+                @endunless
             </div>
         @endif
     </div>
@@ -237,7 +233,9 @@
             <form id="paymentForm" enctype="multipart/form-data">
                 @csrf
                 <input type="hidden" id="rentId" name="rent_id">
-                
+                {{-- One token per opened modal: a double click or a retried request replays it and the server returns the payment it already recorded. --}}
+                <input type="hidden" id="idempotencyKey" name="idempotency_key">
+
                 <!-- Unit Info -->
                 <div class="mb-4 p-3 bg-blue-50 rounded-lg">
                     <p class="text-sm text-blue-800">
@@ -285,6 +283,7 @@
                         <option value="cheque">Cheque</option>
                         <option value="online">Online Payment</option>
                         <option value="upi">UPI</option>
+                        <option value="card">Card</option>
                     </select>
                 </div>
                 
@@ -335,6 +334,7 @@
 <script>
 function openPaymentModal(rentId, unitInfo, rentAmount) {
     document.getElementById('rentId').value = rentId;
+    document.getElementById('idempotencyKey').value = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(36).slice(2));
     document.getElementById('unitInfo').textContent = unitInfo;
     document.getElementById('rentAmount').textContent = rentAmount;
     document.getElementById('payment_amount').value = rentAmount;

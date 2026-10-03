@@ -52,11 +52,14 @@ class VillaArea extends Model
 
     public function getOccupiedVillasCount(): int
     {
-        return $this->villas()->where('status', 'occupied')->count();
+        return $this->villas()->count() - $this->getVacantVillasCount();
     }
 
     public function getVacantVillasCount(): int
     {
-        return $this->villas()->where('status', 'vacant')->count();
+        // Canonical occupancy, not the stored status column.
+        $states = \App\Support\PropertyOccupancy::statesFor($this->villas()->get());
+
+        return collect($states)->where('state', \App\Support\PropertyOccupancy::VACANT)->count();
     }
 }

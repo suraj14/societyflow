@@ -4,9 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Visitor;
 use App\Models\Flat;
-use App\Models\Society;
+use App\Support\VisitorPropertyScope;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 
@@ -15,60 +16,23 @@ class VisitorController extends BaseController
     use HandlesFormSubmissions;
     public function index(Request $request)
     {
-        // Get user's society_id for data isolation
-        $societyId = auth()->user()->society_id;
-        
+        $user = auth()->user();
+
         // If user has no society_id, deny access (except Super Admin)
-        if (!$societyId && !auth()->user()->hasRole('Super Admin')) {
+        if (!$user->society_id && !$user->hasRole('Super Admin')) {
             abort(403, 'Access denied: No society assigned.');
         }
 
-        $query = Visitor::with(['flat.building', 'host']);
-        
-        // Apply society filter (Super Admin sees all, others see only their society)
-        if ($societyId) {
-            $query->where('society_id', $societyId);
-        }
+        // Admin/Staff/Guard see the whole society; tenants and owners see
+        // only their own properties (and visitors they registered).
+        $query = VisitorPropertyScope::scopeQuery(
+            Visitor::with(['flat.building', 'flat.villaArea', 'host']),
+            $user
+        );
 
-        // Role-based filtering: Admin/Staff/Guard see all society visitors, others see only their own
-        $user = auth()->user();
-        if (!$user->hasRole(['Admin', 'Super Admin', 'Staff', 'Guard'])) {
-            // Get all flat IDs this user is associated with
-            $allFlatIds = collect();
-
-            // Via residents table (Tenant, Resident)
-            $residentFlatIds = $user->flats()->pluck('flats.id');
-            $allFlatIds = $allFlatIds->merge($residentFlatIds);
-
-            // Via owner record (Villa Owner, Apartment Owner)
-            if ($user->owner_id) {
-                $owner = \App\Models\Owner::find($user->owner_id);
-                if ($owner) {
-                    // Find flat by villa area + villa number
-                    if ($owner->villa_area_id && $owner->villa_no) {
-                        $flatIds = Flat::where('villa_area_id', $owner->villa_area_id)
-                            ->where('flat_number', $owner->villa_no)
-                            ->pluck('id');
-                        $allFlatIds = $allFlatIds->merge($flatIds);
-                    }
-                    // Find flat by building + flat number
-                    if ($owner->building_id && $owner->flat_no) {
-                        $flatIds = Flat::where('building_id', $owner->building_id)
-                            ->where('flat_number', $owner->flat_no)
-                            ->pluck('id');
-                        $allFlatIds = $allFlatIds->merge($flatIds);
-                    }
-                }
-            }
-
-            $allFlatIds = $allFlatIds->unique()->values()->toArray();
-
-            $query->where(function ($q) use ($user, $allFlatIds) {
-                $q->where('host_user_id', $user->id);
-                if (!empty($allFlatIds)) {
-                    $q->orWhereIn('flat_id', $allFlatIds);
-                }
-            });
+        // Property filter
+        if ($request->filled('flat_id')) {
+            $query->where('flat_id', (int) $request->flat_id);
         }
 
         // Search filter
@@ -112,7 +76,7 @@ class VisitorController extends BaseController
         if ($request->filled('date_filter')) {
             switch ($request->date_filter) {
                 case 'today':
-                    $query->whereDate('expected_entry_time', today());
+                    $query->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds());
                     break;
                 case 'yesterday':
                     $query->whereDate('expected_entry_time', today()->subDay());
@@ -128,49 +92,12 @@ class VisitorController extends BaseController
 
         $visitors = $query->latest()->paginate(15);
 
-        // Stats should also be filtered by role and society
-        $statsQuery = Visitor::query();
-        if ($societyId) {
-            $statsQuery->where('society_id', $societyId);
-        }
-
-        // Apply same role-based filtering to stats
-        if (!$user->hasRole(['Admin', 'Super Admin', 'Staff', 'Guard'])) {
-            $statsFlatIds = collect();
-            $residentFlatIds = $user->flats()->pluck('flats.id');
-            $statsFlatIds = $statsFlatIds->merge($residentFlatIds);
-
-            if ($user->owner_id) {
-                $owner = \App\Models\Owner::find($user->owner_id);
-                if ($owner) {
-                    if ($owner->villa_area_id && $owner->villa_no) {
-                        $statsFlatIds = $statsFlatIds->merge(
-                            Flat::where('villa_area_id', $owner->villa_area_id)
-                                ->where('flat_number', $owner->villa_no)->pluck('id')
-                        );
-                    }
-                    if ($owner->building_id && $owner->flat_no) {
-                        $statsFlatIds = $statsFlatIds->merge(
-                            Flat::where('building_id', $owner->building_id)
-                                ->where('flat_number', $owner->flat_no)->pluck('id')
-                        );
-                    }
-                }
-            }
-
-            $statsFlatIds = $statsFlatIds->unique()->values()->toArray();
-
-            $statsQuery->where(function ($q) use ($user, $statsFlatIds) {
-                $q->where('host_user_id', $user->id);
-                if (!empty($statsFlatIds)) {
-                    $q->orWhereIn('flat_id', $statsFlatIds);
-                }
-            });
-        }
+        // Stats use the same visibility scope as the list
+        $statsQuery = VisitorPropertyScope::scopeQuery(Visitor::query(), $user);
 
         $stats = [
             'total' => $statsQuery->count(),
-            'today' => (clone $statsQuery)->whereDate('expected_entry_time', today())->count(),
+            'today' => (clone $statsQuery)->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())->count(),
             'pending' => (clone $statsQuery)->where('approval_status', 'pending')->count(),
             'allowed' => (clone $statsQuery)->where('approval_status', 'allowed')->count(),
             'denied' => (clone $statsQuery)->where('approval_status', 'denied')->count(),
@@ -178,54 +105,81 @@ class VisitorController extends BaseController
             'checked_out' => (clone $statsQuery)->where('entry_status', 'exited')->count(),
         ];
 
-        // Flats dropdown should also be filtered by society
-        $flatsQuery = Flat::with('building');
-        if ($societyId) {
-            $flatsQuery->where('society_id', $societyId);
-        }
-        $flats = $flatsQuery->get();
+        // Property filter options: the whole society for Admin/Staff/Guard,
+        // only the user's own properties for tenants and owners.
+        $properties = VisitorPropertyScope::labelledOptions(VisitorPropertyScope::selectableFlats($user));
 
-        return view('visitors.index', compact('visitors', 'stats', 'flats'));
+        // Which rows this user may Allow/Deny from the list.
+        $canApproveAny = $user->hasRole(['Admin', 'Staff', 'Super Admin']);
+        $approvableFlatIds = VisitorPropertyScope::isSocietyWide($user)
+            ? []
+            : VisitorPropertyScope::residentFlatIds($user);
+
+        return view('visitors.index', compact('visitors', 'stats', 'properties', 'canApproveAny', 'approvableFlatIds'));
     }
 
+    /**
+     * Admin/Staff pick any property in their society; a tenant or owner with
+     * one property never picks anything - the destination is already known
+     * and is shown read-only. Villa Area is never asked for: the property
+     * itself identifies the destination.
+     */
     public function create()
     {
-        $flats = Flat::with('building')->get();
-        $societies = Society::where('status', 'active')->get();
-        return view('visitors.create', compact('flats', 'societies'));
+        $user = auth()->user();
+        $flats = VisitorPropertyScope::selectableFlats($user);
+
+        if ($flats->isEmpty() && !VisitorPropertyScope::isSocietyWide($user)) {
+            return redirect()->route('visitors.index')
+                ->with('error', 'No property is assigned to your account yet. Please contact your society admin.');
+        }
+
+        $fixedProperty = (!VisitorPropertyScope::isSocietyWide($user) && $flats->count() === 1)
+            ? $flats->first()
+            : null;
+
+        $properties = $fixedProperty ? [] : VisitorPropertyScope::labelledOptions($flats);
+        $fixedPropertyLabel = $fixedProperty ? VisitorPropertyScope::unitLabel($fixedProperty) : null;
+        $isResident = !VisitorPropertyScope::isSocietyWide($user);
+
+        return view('visitors.create', compact('properties', 'fixedProperty', 'fixedPropertyLabel', 'isResident'));
     }
 
     public function store(Request $request)
     {
-        return $this->handleFormSubmission(function () use ($request) {
-            $validated = $request->validate([
-                'flat_id' => 'required|exists:flats,id',
-                'visitor_name' => 'required|string|max:255',
-                'visitor_phone' => 'required|string|max:15',
-                'visitor_type' => 'required|in:guest,delivery,cab,service,other',
-                'purpose' => 'nullable|string|max:500',
-                'expected_count' => 'nullable|integer|min:1|max:50',
-                'vehicle_number' => 'nullable|string|max:20',
-                'expected_entry_time' => 'required|date',
-                'in_time' => 'required|date_format:H:i',
-                'expected_exit_time' => 'nullable|date|after_or_equal:expected_entry_time',
-                'out_time' => 'nullable|date_format:H:i',
-                'photo' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
-            ]);
+        $user = auth()->user();
 
-            $flat = Flat::findOrFail($validated['flat_id']);
+        $validated = $request->validate([
+            'flat_id' => 'nullable|integer',
+            'visitor_name' => 'required|string|max:255',
+            'visitor_phone' => 'required|string|max:15',
+            'visitor_type' => 'required|in:guest,delivery,cab,service,other',
+            'purpose' => 'nullable|string|max:500',
+            'expected_count' => 'nullable|integer|min:1|max:50',
+            'vehicle_number' => 'nullable|string|max:20',
+            'expected_entry_time' => 'required|date',
+            'in_time' => 'required|date_format:H:i',
+            'expected_exit_time' => 'nullable|date|after_or_equal:expected_entry_time',
+            'out_time' => 'nullable|date_format:H:i',
+            'photo' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
+        ]);
 
-            // Verify user belongs to the same society as the flat
-            if ($flat->society_id !== auth()->user()->society_id && !auth()->user()->hasRole('Super Admin')) {
-                abort(403, 'Access denied: You can only register visitors for properties in your society.');
-            }
+        // Resolved and authorised before the transaction wrapper, which
+        // would otherwise swallow a 403 into a generic error redirect.
+        $flat = $this->resolveDestination($user, $validated['flat_id'] ?? null);
 
+        // A tenant or owner inviting their own guest is pre-approved (the
+        // Visitor model issues the gate QR token on approval); anything an
+        // Admin/Staff member registers still waits for the resident.
+        $isResident = !VisitorPropertyScope::isSocietyWide($user);
+
+        return $this->handleFormSubmission(function () use ($request, $validated, $flat, $user, $isResident) {
             // Combine date and time for entry
             $entryDateTime = $validated['expected_entry_time'] . ' ' . $validated['in_time'];
             
             // Combine date and time for exit if provided
             $exitDateTime = null;
-            if ($validated['expected_exit_time'] && $validated['out_time']) {
+            if (!empty($validated['expected_exit_time']) && !empty($validated['out_time'])) {
                 $exitDateTime = $validated['expected_exit_time'] . ' ' . $validated['out_time'];
             }
 
@@ -247,41 +201,81 @@ class VisitorController extends BaseController
 
             $visitor = Visitor::create([
                 'society_id' => $flat->society_id,
-                'flat_id' => $validated['flat_id'],
-                'host_user_id' => auth()->id(),
+                'flat_id' => $flat->id,
+                'host_user_id' => $user->id,
                 'visitor_name' => $validated['visitor_name'],
                 'visitor_phone' => $validated['visitor_phone'],
                 'visitor_type' => $validated['visitor_type'],
-                'purpose' => $validated['purpose'],
+                'purpose' => $validated['purpose'] ?? null,
                 'expected_count' => $validated['expected_count'] ?? 1,
-                'vehicle_number' => $validated['vehicle_number'],
+                'vehicle_number' => $validated['vehicle_number'] ?? null,
                 'expected_entry_time' => $entryDateTime,
                 'expected_exit_time' => $exitDateTime,
                 'photo' => $photoPath,
-                'approval_status' => 'pending',
+                'approval_status' => $isResident ? 'allowed' : 'pending',
+                'approved_by' => $isResident ? $user->id : null,
                 'entry_status' => 'pending',
             ]);
-            
-            \Illuminate\Support\Facades\Log::info('Visitor created successfully', [
-                'visitor_id' => $visitor->id,
-                'visitor_name' => $visitor->visitor_name,
-                'user_id' => auth()->id(),
-                'session_id' => session()->getId(),
-            ]);
-            
+
             return $visitor;
-        }, 'Visitor registered successfully.', 'visitors.index', false);
+        }, $isResident
+            ? 'Visitor invited and pre-approved. Security can verify them at the gate.'
+            : 'Visitor registered successfully.', 'visitors.index', false);
+    }
+
+    /**
+     * The property a new visitor is going to, resolved server-side.
+     *
+     * A tenant/owner with a single property needs to submit nothing; any
+     * submitted flat_id - from any role - must be one the user may manage,
+     * so it cannot be swapped for a neighbour's or another society's unit.
+     */
+    private function resolveDestination(\App\Models\User $user, $flatId): Flat
+    {
+        if ($flatId === null && !VisitorPropertyScope::isSocietyWide($user)) {
+            $own = VisitorPropertyScope::residentFlatIds($user);
+
+            // No property at all: there is nothing this account may invite a
+            // visitor to, so this is a permission problem, not a form error.
+            if ($own === []) {
+                abort(403, 'No property is assigned to your account yet. Please contact your society admin.');
+            }
+
+            if (count($own) === 1) {
+                $flatId = $own[0];
+            }
+        }
+
+        if ($flatId === null) {
+            throw ValidationException::withMessages(['flat_id' => 'Please select the property being visited.']);
+        }
+
+        $flat = Flat::find((int) $flatId);
+
+        if (!$flat) {
+            throw ValidationException::withMessages(['flat_id' => 'The selected property does not exist.']);
+        }
+
+        if (!VisitorPropertyScope::canManageFlat($user, $flat)) {
+            abort(403, 'Access denied: You can only register visitors for your own property.');
+        }
+
+        return $flat;
     }
 
     public function show(Visitor $visitor)
     {
-        // Verify visitor belongs to user's society
-        if ($visitor->society_id !== auth()->user()->society_id && !auth()->user()->hasRole('Super Admin')) {
-            abort(403, 'Access denied: This visitor does not belong to your society.');
+        // Admin/Staff/Guard: any visitor in their society. Tenants/owners:
+        // visitors to their own property, or ones they registered.
+        if (!VisitorPropertyScope::canViewVisitor(auth()->user(), $visitor)) {
+            abort(403, 'Access denied: This visitor is not for your property.');
         }
 
-        $visitor->load(['flat.building', 'host', 'society', 'logs.user']);
-        return view('visitors.show', compact('visitor'));
+        $visitor->load(['flat.building', 'flat.villaArea', 'host', 'society', 'logs.user']);
+        $canDecide = $visitor->entry_status === 'pending'
+            && $this->approvalRole($visitor) !== null;
+
+        return view('visitors.show', compact('visitor', 'canDecide'));
     }
 
     public function edit(Visitor $visitor)
@@ -465,16 +459,38 @@ class VisitorController extends BaseController
             ->with('success', 'Visitor status updated successfully.');
     }
 
-    public function allow(Visitor $visitor)
+    /**
+     * Who may Allow/Deny this visitor:
+     *   'staff'    - Admin/Staff/Super Admin, any visitor in their society;
+     *   'resident' - a tenant/owner, only visitors to their own property;
+     *   null       - nobody else (Guard records the decision, it doesn't make it).
+     */
+    private function approvalRole(Visitor $visitor): ?string
     {
-        // Verify visitor belongs to user's society
-        if ($visitor->society_id !== auth()->user()->society_id && !auth()->user()->hasRole('Super Admin')) {
-            abort(403, 'Access denied: This visitor does not belong to your society.');
+        $user = auth()->user();
+
+        if ($user->hasRole(['Admin', 'Staff', 'Super Admin'])) {
+            return VisitorPropertyScope::canManageVisitor($user, $visitor) ? 'staff' : null;
         }
 
-        // Only Admin and Staff can approve visitors
-        if (!auth()->user()->hasRole(['Admin', 'Staff', 'Super Admin'])) {
-            abort(403, 'Access denied: Only administrators and staff can approve visitors.');
+        if (!VisitorPropertyScope::isSocietyWide($user) && VisitorPropertyScope::canManageVisitor($user, $visitor)) {
+            return 'resident';
+        }
+
+        return null;
+    }
+
+    public function allow(Visitor $visitor)
+    {
+        $role = $this->approvalRole($visitor);
+
+        if ($role === null) {
+            abort(403, 'Access denied: You can only approve visitors for your own property.');
+        }
+
+        if ($role === 'resident' && $visitor->entry_status !== 'pending') {
+            return redirect()->route('visitors.index')
+                ->with('error', 'This visitor has already arrived; the decision can no longer be changed.');
         }
 
         $visitor->update([
@@ -491,23 +507,26 @@ class VisitorController extends BaseController
 
     public function deny(Request $request, Visitor $visitor)
     {
-        // Verify visitor belongs to user's society
-        if ($visitor->society_id !== auth()->user()->society_id && !auth()->user()->hasRole('Super Admin')) {
-            abort(403, 'Access denied: This visitor does not belong to your society.');
+        $role = $this->approvalRole($visitor);
+
+        if ($role === null) {
+            abort(403, 'Access denied: You can only deny visitors for your own property.');
         }
 
-        // Only Admin and Staff can deny visitors
-        if (!auth()->user()->hasRole(['Admin', 'Staff', 'Super Admin'])) {
-            abort(403, 'Access denied: Only administrators and staff can deny visitors.');
+        if ($role === 'resident' && $visitor->entry_status !== 'pending') {
+            return redirect()->route('visitors.index')
+                ->with('error', 'This visitor has already arrived; the decision can no longer be changed.');
         }
 
+        // Staff must record why; a resident turning away their own visitor
+        // need not explain themselves.
         $validated = $request->validate([
-            'reason' => 'required|string|max:500',
+            'reason' => ($role === 'staff' ? 'required' : 'nullable') . '|string|max:500',
         ]);
 
         $visitor->update([
             'approval_status' => 'denied',
-            'rejection_reason' => $validated['reason'],
+            'rejection_reason' => $validated['reason'] ?? 'Denied by resident',
         ]);
 
         // Send visitor denial email
@@ -522,38 +541,13 @@ class VisitorController extends BaseController
      */
     public function stats(): \Illuminate\Http\JsonResponse
     {
-        $user = auth()->user();
-        $societyId = $user->society_id;
-
-        $base = Visitor::query();
-        if ($societyId) $base->where('society_id', $societyId);
-
-        if (!$user->hasRole(['Admin', 'Super Admin', 'Staff', 'Guard'])) {
-            $flatIds = collect();
-            $flatIds = $flatIds->merge($user->flats()->pluck('flats.id'));
-            if ($user->owner_id) {
-                $owner = \App\Models\Owner::find($user->owner_id);
-                if ($owner) {
-                    if ($owner->villa_area_id && $owner->villa_no) {
-                        $flatIds = $flatIds->merge(Flat::where('villa_area_id', $owner->villa_area_id)->where('flat_number', $owner->villa_no)->pluck('id'));
-                    }
-                    if ($owner->building_id && $owner->flat_no) {
-                        $flatIds = $flatIds->merge(Flat::where('building_id', $owner->building_id)->where('flat_number', $owner->flat_no)->pluck('id'));
-                    }
-                }
-            }
-            $flatIds = $flatIds->unique()->values()->toArray();
-            $base->where(function ($q) use ($user, $flatIds) {
-                $q->where('host_user_id', $user->id);
-                if (!empty($flatIds)) $q->orWhereIn('flat_id', $flatIds);
-            });
-        }
+        $base = VisitorPropertyScope::scopeQuery(Visitor::query(), auth()->user());
 
         return response()->json([
             'success' => true,
             'stats' => [
                 'total'       => (clone $base)->count(),
-                'today'       => (clone $base)->whereDate('expected_entry_time', today())->count(),
+                'today'       => (clone $base)->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())->count(),
                 'pending'     => (clone $base)->where('approval_status', 'pending')->count(),
                 'allowed'     => (clone $base)->where('approval_status', 'allowed')->count(),
                 'denied'      => (clone $base)->where('approval_status', 'denied')->count(),

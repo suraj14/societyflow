@@ -45,11 +45,9 @@
                     </div>
                     <div>
                         <p class="text-sm text-gray-500">Status</p>
-                        <span class="px-2 py-1 text-xs rounded-full 
-                            {{ $flat->status === 'occupied' ? 'bg-green-100 text-green-700' : '' }}
-                            {{ $flat->status === 'vacant' ? 'bg-yellow-100 text-yellow-700' : '' }}
-                            {{ $flat->status === 'maintenance' || $flat->status === 'under_maintenance' ? 'bg-red-100 text-red-700' : '' }}">
-                            {{ ucfirst(str_replace('_', ' ', $flat->status)) }}
+                        @php $sfState = $flat->occupancyState(); @endphp
+                        <span class="px-2 py-1 text-xs rounded-full {{ \App\Support\PropertyOccupancy::badgeClass($sfState) }}">
+                            {{ \App\Support\PropertyOccupancy::label($sfState) }}
                         </span>
                     </div>
                     @if($flat->maintenance_amount)

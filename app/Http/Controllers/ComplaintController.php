@@ -22,12 +22,11 @@ class ComplaintController extends BaseController
         $query = Complaint::with(['society', 'createdBy', 'category', 'flat.building'])
                           ->where('society_id', $societyId);
 
-        // Role-based filtering
-        if ($user->hasRole('Admin')) {
-            // Admin can see all complaints in their society
-            // No additional filtering needed
-        } else {
-            // Other roles can only see their own complaints
+        // Society staff (Admin, Staff) see every complaint in their society -
+        // the same set show()/edit() already let them open. Residents see
+        // only what they raised.
+        $isStaff = $user->hasAnyRole(['Super Admin', 'Admin', 'Staff']);
+        if (!$isStaff) {
             $query->where('created_by', $user->id);
         }
 
@@ -66,26 +65,21 @@ class ComplaintController extends BaseController
                                       ->orderBy('name')
                                       ->get();
 
-        // Statistics based on user role
-        if ($user->hasRole('Admin')) {
-            // Admin sees all society statistics
-            $stats = [
-                'total_complaints' => Complaint::where('society_id', $societyId)->count(),
-                'open_complaints' => Complaint::where('society_id', $societyId)->where('status', 'open')->count(),
-                'in_progress_complaints' => Complaint::where('society_id', $societyId)->where('status', 'in_progress')->count(),
-                'resolved_complaints' => Complaint::where('society_id', $societyId)->where('status', 'resolved')->count(),
-                'high_priority' => Complaint::where('society_id', $societyId)->where('priority', 'high')->where('status', '!=', 'resolved')->count(),
-            ];
-        } else {
-            // Other roles see only their own statistics
-            $stats = [
-                'total_complaints' => Complaint::where('society_id', $societyId)->where('created_by', $user->id)->count(),
-                'open_complaints' => Complaint::where('society_id', $societyId)->where('created_by', $user->id)->where('status', 'open')->count(),
-                'in_progress_complaints' => Complaint::where('society_id', $societyId)->where('created_by', $user->id)->where('status', 'in_progress')->count(),
-                'resolved_complaints' => Complaint::where('society_id', $societyId)->where('created_by', $user->id)->where('status', 'resolved')->count(),
-                'high_priority' => Complaint::where('society_id', $societyId)->where('created_by', $user->id)->where('priority', 'high')->where('status', '!=', 'resolved')->count(),
-            ];
-        }
+        // Statistics over the same set the list shows, from one grouped
+        // query. "High priority" = high or urgent and still unresolved
+        // (open / in progress) - the same rule as Complaint::scopeOpenTickets.
+        $base = Complaint::where('society_id', $societyId)
+            ->when(!$isStaff, fn ($q) => $q->where('created_by', $user->id));
+
+        $byStatus = (clone $base)->selectRaw('status, COUNT(*) as c')->groupBy('status')->pluck('c', 'status');
+
+        $stats = [
+            'total_complaints' => (int) $byStatus->sum(),
+            'open_complaints' => (int) ($byStatus['open'] ?? 0),
+            'in_progress_complaints' => (int) ($byStatus['in_progress'] ?? 0),
+            'resolved_complaints' => (int) ($byStatus['resolved'] ?? 0),
+            'high_priority' => (clone $base)->openTickets()->whereIn('priority', ['high', 'urgent'])->count(),
+        ];
 
         return view('complaints.index', compact('complaints', 'categories', 'stats'));
     }
@@ -103,7 +97,7 @@ class ComplaintController extends BaseController
         
         // Get properties for owners
         $properties = collect();
-        if ($user->hasRole('Villa Owner') || $user->hasRole('Apartment Owner')) {
+        if ($user->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner'])) {
             // Get owned flats
             $ownedFlats = \App\Models\Flat::where('owner_id', $user->owner_id)
                                           ->where('society_id', $societyId)
@@ -160,24 +154,24 @@ class ComplaintController extends BaseController
             // Determine flat_id based on user role
             $flatId = null;
             
-            if ($user->hasRole('Tenant')) {
-                // Tenant: get their assigned flat
-                $tenant = \App\Models\Tenant::where('user_id', $user->id)->first();
-                $flatId = $tenant ? $tenant->flat_id : null;
-            } elseif ($user->hasRole('Villa Owner') || $user->hasRole('Apartment Owner')) {
-                // Owner: use provided flat_id or get their first property
-                if ($request->flat_id) {
-                    $flatId = $request->flat_id;
-                } else {
-                    // Get first owned flat
-                    $ownedFlat = \App\Models\Flat::where('owner_id', $user->owner_id)
-                                                 ->where('society_id', $societyId)
-                                                 ->first();
-                    $flatId = $ownedFlat ? $ownedFlat->id : null;
-                }
-            } else {
-                // Admin/other: use provided flat_id if any
+            // Residents (owner or tenant) file against a property they
+            // actually occupy or own - resolved by the one resolver the rest
+            // of the app uses, never by trusting the submitted flat_id. A
+            // single property is auto-resolved; with several, the submitted
+            // one must be among theirs.
+            if ($user->hasAnyRole(['Super Admin', 'Admin', 'Staff'])) {
                 $flatId = $request->flat_id;
+            } else {
+                $own = \App\Support\UserFlatResolver::flatIdsFor($user);
+
+                if ($request->filled('flat_id')) {
+                    if (!in_array((int) $request->flat_id, $own, true)) {
+                        abort(403, 'You can only raise a complaint for your own property.');
+                    }
+                    $flatId = (int) $request->flat_id;
+                } else {
+                    $flatId = count($own) === 1 ? $own[0] : null;
+                }
             }
 
             // Validate category belongs to user's society
@@ -290,8 +284,15 @@ class ComplaintController extends BaseController
                 'title' => 'required|string|max:255',
                 'description' => 'required|string',
                 'priority' => 'required|in:low,medium,high,urgent',
-                'status' => 'required|in:open,in_progress,resolved,closed',
+                'status' => ['required', Rule::in(Complaint::STATUSES)],
             ]);
+
+            // A resident may edit the text of their own complaint, but the
+            // status is the society's to change (open -> in progress ->
+            // resolved -> closed), not the reporter's.
+            if (!Auth::user()->hasAnyRole(['Super Admin', 'Admin', 'Staff'])) {
+                $validated['status'] = $complaint->status;
+            }
 
             $oldStatus = $complaint->status;
 
@@ -300,6 +301,7 @@ class ComplaintController extends BaseController
             // society_id, created_by, assigned_to and flat_id - moving a
             // complaint into another society or reassigning its author.
             $complaint->update($validated);
+            $complaint->syncResolutionTimestamp($oldStatus);
 
             // Dispatch event if status changed
             if ($oldStatus !== $complaint->status) {
@@ -345,14 +347,30 @@ class ComplaintController extends BaseController
         }
     }
 
+    /**
+     * Post an update (and optionally a status change). The reporter may
+     * comment on their own complaint; only society staff may change status.
+     *
+     * Was unauthenticated beyond `auth` - any signed-in user could post to,
+     * or change the status of, any complaint in any society by id.
+     */
     public function addUpdate(Request $request, Complaint $complaint)
     {
+        $this->authorizeComplaintManagement($complaint);
+
+        $isStaff = Auth::user()->hasAnyRole(['Super Admin', 'Admin', 'Staff']);
+
         $request->validate([
             'message' => 'required|string',
             'type' => 'required|in:comment,status_change,assignment',
+            'status' => ['nullable', Rule::in(Complaint::STATUSES)],
             'images' => 'nullable|array|max:3',
             'images.*' => 'image|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
+
+        if ($request->filled('status') && !$isStaff) {
+            abort(403, 'Only society staff can change a complaint\'s status.');
+        }
 
         $attachments = [];
         if ($request->hasFile('images')) {
@@ -364,23 +382,39 @@ class ComplaintController extends BaseController
 
         $complaint->addUpdate(Auth::user(), $request->message, $request->type, $attachments);
 
-        // Update complaint status if provided
-        if ($request->filled('status')) {
+        if ($request->filled('status') && $request->status !== $complaint->status) {
+            $oldStatus = $complaint->status;
             $complaint->update(['status' => $request->status]);
+            $complaint->syncResolutionTimestamp($oldStatus);
+            \App\Events\TicketUpdated::dispatch($complaint);
         }
 
         return back()->with('success', 'Update added successfully!');
     }
 
+    /**
+     * Assign to a staff member of the same society. Society staff only; the
+     * assignee must belong to the complaint's society (was `exists:users,id`,
+     * accepting any user from any society).
+     */
     public function assign(Request $request, Complaint $complaint)
     {
+        $this->authorizeSocietyAccess($complaint);
+
+        if (!Auth::user()->hasAnyRole(['Super Admin', 'Admin', 'Staff'])) {
+            abort(403, 'Only society staff can assign complaints.');
+        }
+
         $request->validate([
-            'assigned_to' => 'required|exists:users,id',
+            'assigned_to' => [
+                'required',
+                Rule::exists('users', 'id')->where('society_id', $complaint->society_id),
+            ],
             'message' => 'nullable|string',
         ]);
 
-        $user = User::find($request->assigned_to);
-        $complaint->assignTo($user, $request->message);
+        $assignee = User::findOrFail($request->assigned_to);
+        $complaint->assignTo($assignee, $request->message, Auth::user());
 
         return back()->with('success', 'Complaint assigned successfully!');
     }

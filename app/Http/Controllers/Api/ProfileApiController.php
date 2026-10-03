@@ -43,6 +43,22 @@ class ProfileApiController extends Controller
             }
         }
 
+        // Tenant created from Admin -> Tenants: tenants row only (see
+        // AuthApiController::formatUser for the same fallback).
+        if (!$flat) {
+            $tenantFlatId = \App\Support\UserFlatResolver::tenantFlatIds($user)[0] ?? null;
+            if ($tenantFlatId) {
+                $flat = \App\Models\Flat::with(['building', 'villaArea'])->find($tenantFlatId);
+                if ($flat?->property_type === 'villa') {
+                    $villaNumber = $flat->flat_number;
+                    $villaArea   = $flat->villaArea?->name;
+                    $building    = null;
+                } else {
+                    $building = $flat?->building;
+                }
+            }
+        }
+
         // Get family members from Owner record
         $familyMembers = [];
         if ($user->owner_id) {

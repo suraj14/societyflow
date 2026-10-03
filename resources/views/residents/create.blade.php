@@ -25,6 +25,7 @@
         
         <form action="{{ route('residents.store') }}" method="POST" class="px-6 py-6">
             @csrf
+            @include('partials.idempotency')
             
             <div class="space-y-6">
                 <!-- Personal Information -->
@@ -112,17 +113,13 @@
                         <input type="hidden" name="society_id" value="{{ $societyId }}">
                         @endif
                         
-                        <!-- Select Apartment/Villa Type -->
+                        <!-- Property Type: real choice only in a mixed society. -->
                         <div class="md:col-span-2">
-                            <label for="property_type_select" class="block text-sm font-medium text-gray-700 mb-2">
-                                Select Apartment/Villa <span class="text-red-500">*</span>
-                            </label>
-                            <select id="property_type_select" 
-                                    onchange="updatePropertyTypeSelection()"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Property Type</option>
-@include('partials.property-type-options')
-                            </select>
+                            @include('partials.property-type-field', [
+                                'sfFieldName' => 'property_type_select',
+                                'sfLabel' => 'Select Apartment/Villa',
+                                'sfOnChange' => 'updatePropertyTypeSelection()',
+                            ])
                         </div>
 
                         <!-- Apartment Selection Flow -->
@@ -260,10 +257,14 @@
                     <div class="flex items-start">
                         <i class="fas fa-info-circle text-blue-600 mt-1 mr-3"></i>
                         <div>
-                            <h4 class="text-sm font-medium text-blue-900 mb-1">Default Login Credentials</h4>
+                            <h4 class="text-sm font-medium text-blue-900 mb-1">No login account is created here</h4>
                             <p class="text-sm text-blue-700">
-                                A user account will be created automatically with the default password: <strong>password</strong>
-                                <br>The resident can change this password after first login.
+                                This saves a contact/occupancy record only - it does not create a
+                                login. If this person needs to sign in, use
+                                <a href="{{ route('owners.create') }}" class="underline font-medium">Add Owner</a>
+                                or
+                                <a href="{{ route('admin.tenants.create') }}" class="underline font-medium">Add Tenant</a>
+                                instead, which create both the record and the account together.
                             </p>
                         </div>
                     </div>

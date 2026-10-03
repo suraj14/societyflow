@@ -20,29 +20,31 @@
         <div class="bg-white rounded-lg shadow-md overflow-hidden">
             <form action="{{ route('payments.store') }}" method="POST" enctype="multipart/form-data" class="p-6 space-y-6" id="payment-form">
                 @csrf
+                @include('partials.idempotency')
 
-                <!-- Property Type Selection -->
-                <div>
-                    <label for="property_type" class="block text-sm font-medium text-gray-700 mb-2">
-                        Property Type <span class="text-red-500">*</span>
-                    </label>
-                    @if(!$propertyType)
-                        <select name="property_type" id="property_type" 
-                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('property_type') border-red-500 @enderror"
-                                required onchange="handlePropertyTypeChange()">
-                            <option value="">Select Property Type</option>
-@include('partials.property-type-options')
-                        </select>
-                        @error('property_type')
-                            <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
-                        @enderror
-                    @else
+                <!-- Property Type -->
+                @if(!$propertyType)
+                    {{-- Admin/unknown case: the reusable component itself hides the
+                         select and shows a read-only line when the society only
+                         supports one type - the same "ask only what the system
+                         doesn't know" rule the resident branch below already follows. --}}
+                    @include('partials.property-type-field', [
+                        'sfOnChange' => 'handlePropertyTypeChange()',
+                    ])
+                @else
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Property Type</label>
                         <div class="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-700">
-                            {{ ucfirst($propertyType) }}
+                            {{ $propertyType === 'mixed' ? 'Apartment & Villa' : ucfirst($propertyType) }}
                         </div>
-                        <input type="hidden" name="property_type" value="{{ $propertyType }}">
-                    @endif
-                </div>
+                        @if($propertyType !== 'mixed')
+                            {{-- 'mixed' is a display label, not a PropertyType. Submitting it
+                                 fails the in:apartment,villa rule and the owner cannot correct a
+                                 hidden field. The chosen unit below determines the real type. --}}
+                            <input type="hidden" name="property_type" value="{{ $propertyType }}">
+                        @endif
+                    </div>
+                @endif
 
                 <!-- Pre-populated Properties for Owners -->
                 @if($propertyType && $properties->count() > 0)
@@ -56,9 +58,9 @@
                                 Property <span class="text-red-500">*</span>
                             @endif
                         </label>
-                        <select name="flat_id" id="flat_id" 
+                        <select name="flat_id" id="flat_id"
                                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('flat_id') border-red-500 @enderror"
-                                required>
+                                required onchange="loadOutstandingBills(this.value)">
                             @if($propertyType === 'villa')
                                 <option value="">Select Villa</option>
                             @elseif($propertyType === 'apartment')
@@ -115,8 +117,9 @@
                         <label for="apartment_flat_id" class="block text-sm font-medium text-gray-700 mb-2">
                             Flat Number <span class="text-red-500">*</span>
                         </label>
-                        <select name="flat_id" id="apartment_flat_id" 
-                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <select name="flat_id" id="apartment_flat_id"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                onchange="loadOutstandingBills(this.value)">
                             <option value="">Select Flat Number</option>
                         </select>
                         @error('flat_id')
@@ -147,14 +150,32 @@
                         <label for="villa_flat_id" class="block text-sm font-medium text-gray-700 mb-2">
                             Villa Number <span class="text-red-500">*</span>
                         </label>
-                        <select name="flat_id" id="villa_flat_id" 
-                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <select name="flat_id" id="villa_flat_id"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                onchange="loadOutstandingBills(this.value)">
                             <option value="">Select Villa Number</option>
                         </select>
                         @error('flat_id')
                             <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
                         @enderror
                     </div>
+                </div>
+
+                <!-- Select Bill: once a property is known, its own unpaid/partial
+                     bills are the source of truth for bill type, amount and due
+                     date - the admin picks the bill instead of retyping its
+                     details. Optional: an ad-hoc payment not tied to a
+                     generated bill still falls back to manual entry below. -->
+                <div id="bill-select-wrapper" style="display: none;">
+                    <label for="maintenance_bill_id" class="block text-sm font-medium text-gray-700 mb-2">
+                        Select Bill
+                    </label>
+                    <select id="maintenance_bill_id" name="maintenance_bill_id"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            onchange="applySelectedBill()">
+                        <option value="">Enter details manually</option>
+                    </select>
+                    <p class="text-sm text-gray-500 mt-1">Selecting a bill fills in its type, amount and due date below.</p>
                 </div>
 
                 <!-- Bill Type -->
@@ -429,18 +450,98 @@ function handlePropertyTypeChange() {
     }
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
-    const propertyTypeSelect = document.getElementById('property_type');
-    if (!propertyTypeSelect) return;
-    
-    const propertyType = propertyTypeSelect.value;
-    if (propertyType === 'apartment') {
-        document.getElementById('apartment-selection').style.display = 'block';
-        loadBuildings();
-    } else if (propertyType === 'villa') {
-        document.getElementById('villa-selection').style.display = 'block';
-        loadVillaAreas();
+// Firing on page load for a pre-selected single-type society is handled by
+// partials/property-type-field.blade.php itself (its own sfOnChange trigger),
+// so this file doesn't need a second DOMContentLoaded listener for it.
+
+// Bill-first: once a property is known, fetch its unpaid/partial bills and
+// let picking one auto-fill type/amount/due-date instead of retyping them.
+let outstandingBills = [];
+
+async function loadOutstandingBills(flatId) {
+    const wrapper = document.getElementById('bill-select-wrapper');
+    const billSelect = document.getElementById('maintenance_bill_id');
+    outstandingBills = [];
+    billSelect.innerHTML = '<option value="">Enter details manually</option>';
+
+    if (!flatId) {
+        wrapper.style.display = 'none';
+        return;
+    }
+
+    try {
+        const response = await fetch(`{{ route('api.payments.outstanding-bills') }}?flat_id=${flatId}`, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+            }
+        });
+        if (!response.ok) return;
+
+        outstandingBills = await response.json();
+        if (!Array.isArray(outstandingBills) || outstandingBills.length === 0) {
+            wrapper.style.display = 'none';
+            return;
+        }
+
+        outstandingBills.forEach(bill => {
+            const option = document.createElement('option');
+            option.value = bill.id;
+            option.textContent = `${bill.label} - ₹${bill.outstanding_amount}`;
+            billSelect.appendChild(option);
+        });
+        wrapper.style.display = 'block';
+
+        // Only one outstanding bill: there is no real choice, so pick it and
+        // fill the form the same as if the admin had picked it themselves.
+        if (outstandingBills.length === 1) {
+            billSelect.value = outstandingBills[0].id;
+            applySelectedBill();
+        }
+    } catch (error) {
+        wrapper.style.display = 'none';
+    }
+}
+
+function applySelectedBill() {
+    const billSelect = document.getElementById('maintenance_bill_id');
+    const bill = outstandingBills.find(b => String(b.id) === billSelect.value);
+
+    if (!bill) return;
+
+    const billTypeSelect = document.getElementById('bill_type');
+    // The bill's own type may not be one of the dropdown's preset options
+    // (a custom bill type entered elsewhere) - add it rather than silently
+    // leaving the field unselected.
+    if (![...billTypeSelect.options].some(o => o.value === bill.bill_type)) {
+        const option = document.createElement('option');
+        option.value = bill.bill_type;
+        option.textContent = bill.bill_type;
+        billTypeSelect.appendChild(option);
+    }
+    billTypeSelect.value = bill.bill_type;
+
+    document.getElementById('amount').value = bill.outstanding_amount;
+    if (bill.due_date) {
+        document.getElementById('due_date').value = bill.due_date;
+    }
+}
+
+// A resident/owner with exactly one property never needs to pick it - the
+// server already listed only their own unit(s) as options above.
+document.addEventListener('DOMContentLoaded', function () {
+    const flatSelect = document.getElementById('flat_id');
+    if (!flatSelect) return;
+
+    if (!flatSelect.value) {
+        const options = Array.from(flatSelect.options).filter(o => o.value !== '');
+        if (options.length === 1) {
+            flatSelect.value = options[0].value;
+        }
+    }
+    if (flatSelect.value) {
+        loadOutstandingBills(flatSelect.value);
     }
 });
 

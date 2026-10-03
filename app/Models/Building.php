@@ -54,12 +54,15 @@ class Building extends Model
 
     public function getOccupiedFlatsCount(): int
     {
-        return $this->flats()->where('status', 'occupied')->count();
+        return $this->flats()->count() - $this->getVacantFlatsCount();
     }
 
     public function getVacantFlatsCount(): int
     {
-        return $this->flats()->where('status', 'vacant')->count();
+        // Canonical occupancy, not the stored status column.
+        $states = \App\Support\PropertyOccupancy::statesFor($this->flats()->get());
+
+        return collect($states)->where('state', \App\Support\PropertyOccupancy::VACANT)->count();
     }
 
     public function getOccupancyRate(): float

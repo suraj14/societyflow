@@ -17,23 +17,7 @@
         </a>
     </div>
 
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-3"></i>
-                <p class="font-medium">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-3"></i>
-                <p class="font-medium">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
     <!-- Filters -->
     <div class="bg-white rounded-lg shadow-md p-6 mb-6">

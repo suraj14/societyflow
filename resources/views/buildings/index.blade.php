@@ -15,17 +15,7 @@
         </a>
     </div>
 
-    @if(session('success'))
-        <x-alert type="success" autoDismiss="true">
-            {{ session('success') }}
-        </x-alert>
-    @endif
 
-    @if(session('error'))
-        <x-alert type="error" autoDismiss="false">
-            {{ session('error') }}
-        </x-alert>
-    @endif
 
     @if($buildings->isEmpty())
         <div class="bg-white rounded-lg shadow">

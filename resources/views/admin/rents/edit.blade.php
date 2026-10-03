@@ -131,19 +131,22 @@
 
                     <!-- Status -->
                     <div>
-                        <label for="status" class="block text-sm font-medium text-gray-700 mb-2">Payment Status *</label>
-                        <select id="status" 
-                                name="status" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                                required>
-                            @php
-                                $currentStatus = old('status', trim($rent->status ?? 'pending'));
-                            @endphp
-                            <option value="pending" {{ $currentStatus === 'pending' ? 'selected' : '' }}>Pending</option>
-                            <option value="paid" {{ $currentStatus === 'paid' ? 'selected' : '' }}>Paid</option>
-                            <option value="partial" {{ $currentStatus === 'partial' ? 'selected' : '' }}>Partial</option>
-                            <option value="overdue" {{ $currentStatus === 'overdue' ? 'selected' : '' }}>Overdue</option>
-                        </select>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Payment Status</label>
+                        @php
+                            $statusClasses = [
+                                'paid' => 'bg-green-100 text-green-800',
+                                'partial' => 'bg-yellow-100 text-yellow-800',
+                                'overdue' => 'bg-red-100 text-red-800',
+                            ][$rent->status] ?? 'bg-gray-100 text-gray-800';
+                        @endphp
+                        <div class="flex items-center gap-3">
+                            <span class="inline-flex px-3 py-1 rounded-full text-sm font-medium {{ $statusClasses }}">{{ ucfirst($rent->status) }}</span>
+                            <span class="text-sm text-gray-600">Paid ₹{{ number_format($rent->paid_amount, 2) }} of ₹{{ number_format($rent->total_amount, 2) }}</span>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-1">
+                            Status is calculated from the payments recorded against this rent.
+                            To mark it paid, use <a href="{{ route('admin.rents.index') }}" class="text-blue-600 hover:underline">Add Payment</a> on the rent list.
+                        </p>
                     </div>
 
                     <!-- Payment Information -->
@@ -160,7 +163,7 @@
                                 @endforeach
                             </div>
                             <p class="text-sm text-green-700 mt-2">
-                                <strong>Total Paid:</strong> ₹{{ number_format($rent->payments->where('status', 'completed')->sum('amount'), 2) }}
+                                <strong>Total Paid:</strong> ₹{{ number_format($rent->payments->where('status', 'success')->sum('amount'), 2) }}
                             </p>
                         </div>
                     @endif

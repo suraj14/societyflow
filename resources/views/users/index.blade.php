@@ -17,23 +17,7 @@
         </button>
     </div>
 
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg" role="alert">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-3"></i>
-                <p class="font-medium">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg" role="alert">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-3"></i>
-                <p class="font-medium">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
     <!-- Filters -->
     <div class="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -121,6 +105,7 @@
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                                         @if($roleName == 'Super Admin') bg-purple-100 text-purple-800
                                         @elseif($roleName == 'Admin') bg-blue-100 text-blue-800
+                                        @elseif($roleName == 'Owner') bg-green-100 text-green-800
                                         @elseif($roleName == 'Villa Owner') bg-green-100 text-green-800
                                         @elseif($roleName == 'Apartment Owner') bg-yellow-100 text-yellow-800
                                         @elseif($roleName == 'Tenant') bg-indigo-100 text-indigo-800
@@ -157,7 +142,13 @@
                                         @endif
                                         
                                         @if($user->id !== auth()->id())
-                                            <button onclick="openDeleteConfirmation({{ $user->id }}, '{{ $user->name }}')" 
+                                            <button onclick="openResetPasswordModal({{ $user->id }})"
+                                                    class="text-gray-600 hover:text-gray-900 transition-colors"
+                                                    title="Reset Password">
+                                                <i class="fas fa-key"></i>
+                                            </button>
+
+                                            <button onclick="openDeleteConfirmation({{ $user->id }}, '{{ $user->name }}')"
                                                     class="text-red-600 hover:text-red-900 transition-colors"
                                                     title="Delete User">
                                                 <i class="fas fa-trash-alt"></i>
@@ -217,6 +208,45 @@
                 Delete
             </button>
         </div>
+    </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div id="resetPasswordModal" class="fixed inset-0 bg-gray-500 bg-opacity-75 z-50 hidden flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl max-w-sm w-full mx-4">
+        <form id="resetPasswordForm" method="POST" action="">
+            @csrf
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Reset Password</h3>
+            </div>
+            <div class="px-6 py-4 space-y-4">
+                <div class="text-sm text-gray-600 space-y-1">
+                    <p><span class="font-medium text-gray-800">User:</span> <span id="resetPasswordUserName"></span></p>
+                    <p><span class="font-medium text-gray-800">Role:</span> <span id="resetPasswordUserRole"></span></p>
+                    <p><span class="font-medium text-gray-800">Email:</span> <span id="resetPasswordUserEmail"></span></p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                    <input type="password" name="password" required minlength="8"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
+                    <input type="password" name="password_confirmation" required minlength="8"
+                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button type="button" onclick="closeResetPasswordModal()"
+                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+                    Cancel
+                </button>
+                <button type="submit"
+                        class="px-4 py-2 text-sm font-medium text-white bg-gray-800 border border-transparent rounded-lg hover:bg-gray-900">
+                    Reset Password
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -453,6 +483,26 @@ function confirmDelete() {
 
 function closeDeleteConfirmation() {
     document.getElementById('deleteConfirmationModal').classList.add('hidden');
+}
+
+// Reset Password modal
+function openResetPasswordModal(userId) {
+    const user = usersData.find(u => u.id === userId);
+    if (!user) return;
+
+    document.getElementById('resetPasswordUserName').textContent = user.name;
+    document.getElementById('resetPasswordUserRole').textContent = user.role || '-';
+    document.getElementById('resetPasswordUserEmail').textContent = user.email;
+
+    const form = document.getElementById('resetPasswordForm');
+    form.action = `/users/${userId}/reset-password`;
+    form.reset();
+
+    document.getElementById('resetPasswordModal').classList.remove('hidden');
+}
+
+function closeResetPasswordModal() {
+    document.getElementById('resetPasswordModal').classList.add('hidden');
 }
 
 // User data for JavaScript operations

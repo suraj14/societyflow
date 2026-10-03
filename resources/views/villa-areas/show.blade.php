@@ -98,6 +98,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">
+                            @php $sfOcc = \App\Support\PropertyOccupancy::statesFor($villaArea->villas); @endphp
                             @forelse($villaArea->villas as $villa)
                                 <tr class="hover:bg-gray-50">
                                     <td class="px-6 py-4">
@@ -105,11 +106,11 @@
                                         <p class="text-xs text-gray-500">{{ $villa->flat_number }}</p>
                                     </td>
                                     <td class="px-6 py-4 text-sm text-gray-600">
-                                        {{ $villa->ownerModel->name ?? 'Not Assigned' }}
+                                        {{ $sfOcc[$villa->id]['owner']->name ?? 'Not Assigned' }}
                                     </td>
                                     <td class="px-6 py-4">
-                                        <span class="px-2 py-1 text-xs rounded-full {{ $villa->status === 'occupied' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700' }}">
-                                            {{ ucfirst($villa->status) }}
+                                        <span class="px-2 py-1 text-xs rounded-full {{ \App\Support\PropertyOccupancy::badgeClass($sfOcc[$villa->id]['state']) }}">
+                                            {{ \App\Support\PropertyOccupancy::label($sfOcc[$villa->id]['state']) }}
                                         </span>
                                     </td>
                                     <td class="px-6 py-4">

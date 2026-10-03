@@ -188,7 +188,10 @@ class CrossSocietyAuthorizationGapsTest extends TestCase
     {
         [$societyA, , $adminA] = $this->twoSocietiesWithAdmins();
         $villa = $this->villaIn($societyA);
-        $this->makeRole('Villa Owner');
+        // 'Owner' is the canonical role VillaController::update() assigns
+        // now (see OwnerRoleNormalizationTest) - 'Villa Owner' is kept
+        // registered only for accounts not yet migrated.
+        $this->makeRole('Owner');
 
         // Pad the owners table so owners.id cannot coincide with any user id.
         for ($i = 0; $i < 5; $i++) {
@@ -227,7 +230,7 @@ class CrossSocietyAuthorizationGapsTest extends TestCase
         ])->assertRedirect(route('villas.index'));
 
         $this->assertSame($owner->id, $villa->fresh()->owner_id);
-        $this->assertTrue($ownerUser->fresh()->hasRole('Villa Owner'));
+        $this->assertTrue($ownerUser->fresh()->hasRole('Owner'));
     }
 
     // --------------------------------------------------------- facility bookings

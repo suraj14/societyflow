@@ -19,33 +19,27 @@
                 </a>
             @endif
             @if(auth()->user()->hasRole(['Admin', 'Super Admin']))
-                <a href="{{ route('visitors.create') }}" 
+                <a href="{{ route('visitors.create') }}"
                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
                     <i class="fas fa-plus mr-2"></i>
                     Add Visitor
+                </a>
+            @elseif(!empty($approvableFlatIds))
+                <a href="{{ route('visitors.create') }}"
+                   class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
+                    <i class="fas fa-user-plus mr-2"></i>
+                    Invite Visitor
                 </a>
             @endif
         </div>
     </div>
 
-    <!-- Success/Error Messages -->
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-3"></i>
-                <p class="font-medium">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
+    @php
+        $propertyLabel = fn ($flat) => $flat ? \App\Support\VisitorPropertyScope::unitLabel($flat) : '-';
+    @endphp
 
-    @if(session('error'))
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-3"></i>
-                <p class="font-medium">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
+    <!-- Success/Error Messages -->
+
 
     <!-- Statistics Cards -->
     <div class="grid grid-cols-1 md:grid-cols-7 gap-6 mb-6">
@@ -157,6 +151,17 @@
                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             </div>
             
+            @if(count($properties) > 1)
+                <div>
+                    <select name="flat_id" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">All Properties</option>
+                        @foreach($properties as $id => $label)
+                            <option value="{{ $id }}" {{ (string) request('flat_id') === (string) $id ? 'selected' : '' }}>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </div>
+            @endif
+
             <div>
                 <select name="visitor_type" class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                     <option value="">All Types</option>
@@ -193,7 +198,7 @@
                 <i class="fas fa-search mr-2"></i>Filter
             </button>
             
-            @if(request()->hasAny(['search', 'visitor_type', 'status', 'date_filter']))
+            @if(request()->hasAny(['search', 'flat_id', 'visitor_type', 'status', 'date_filter']))
                 <a href="{{ route('visitors.index') }}" class="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors">
                     Reset
                 </a>
@@ -210,15 +215,14 @@
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Visitor Name</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Mobile Number</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Apartment</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Property</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Host</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date of Visit</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">In Time</th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Out Time</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check-in</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Check-out</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                            @if(auth()->user()->hasRole(['Admin', 'Super Admin']))
-                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                            @endif
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
@@ -250,7 +254,10 @@
                                     <div class="text-sm text-gray-900">{{ $visitor->visitor_phone }}</div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
-                                    <div class="text-sm text-gray-900">{{ $visitor->flat->building->name ?? '' }} - {{ $visitor->flat->flat_number ?? '' }}</div>
+                                    <div class="text-sm text-gray-900">{{ $propertyLabel($visitor->flat) }}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div class="text-sm text-gray-900">{{ $visitor->host->name ?? '-' }}</div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     @php
@@ -268,15 +275,16 @@
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     <div class="text-sm text-gray-900">{{ \Carbon\Carbon::parse($visitor->expected_entry_time)->format('M d, Y') }}</div>
+                                    <div class="text-xs text-gray-500">{{ \Carbon\Carbon::parse($visitor->expected_entry_time)->format('h:i A') }}</div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     <div class="text-sm text-gray-900">
-                                        {{ $visitor->expected_entry_time ? \Carbon\Carbon::parse($visitor->expected_entry_time)->format('h:i A') : '-' }}
+                                        {{ $visitor->actual_entry_time ? $visitor->actual_entry_time->format('M d, h:i A') : '-' }}
                                     </div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     <div class="text-sm text-gray-900">
-                                        {{ $visitor->expected_exit_time ? \Carbon\Carbon::parse($visitor->expected_exit_time)->format('h:i A') : '-' }}
+                                        {{ $visitor->actual_exit_time ? $visitor->actual_exit_time->format('M d, h:i A') : '-' }}
                                     </div>
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
@@ -299,8 +307,10 @@
                                         }
                                     @endphp
                                     <div class="flex items-center space-x-2">
-                                        {{-- Status Dropdown for Admin/Staff only (when pending) --}}
-                                        @if($visitor->approval_status === 'pending' && auth()->user()->hasRole(['Admin', 'Staff', 'Super Admin']))
+                                        {{-- Allow/Deny: Admin/Staff for any pending visitor; a tenant/owner
+                                             only for pending visitors to their own property. --}}
+                                        @if($visitor->approval_status === 'pending' && $visitor->entry_status === 'pending'
+                                            && ($canApproveAny || in_array((int) $visitor->flat_id, $approvableFlatIds, true)))
                                             <div class="relative inline-block">
                                                 <button onclick="return toggleVisitorDropdown({{ $visitor->id }}, event);" 
                                                         id="visitorDropdownButton{{ $visitor->id }}"
@@ -318,7 +328,7 @@
                                                 <div id="visitorDropdown{{ $visitor->id }}" class="z-10 hidden absolute right-0 mt-2 bg-white divide-y divide-gray-100 rounded-lg shadow-lg w-44 border border-gray-200">
                                                     <ul class="py-2 text-sm text-gray-700">
                                                         <li>
-                                                            <button onclick="return changeVisitorStatusAction({{ $visitor->id }}, 'allow', '{{ addslashes($visitor->visitor_name) }}', '{{ addslashes(($visitor->flat->building->name ?? '') . ' - ' . ($visitor->flat->flat_number ?? '')) }}', event);" 
+                                                            <button onclick="return changeVisitorStatusAction({{ $visitor->id }}, 'allow', '{{ addslashes($visitor->visitor_name) }}', '{{ addslashes($propertyLabel($visitor->flat)) }}', event);" 
                                                                     class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
                                                                     type="button">
                                                                 <i class="fas fa-check text-green-600 mr-2"></i>
@@ -326,7 +336,7 @@
                                                             </button>
                                                         </li>
                                                         <li>
-                                                            <button onclick="return changeVisitorStatusAction({{ $visitor->id }}, 'deny', '{{ addslashes($visitor->visitor_name) }}', '{{ addslashes(($visitor->flat->building->name ?? '') . ' - ' . ($visitor->flat->flat_number ?? '')) }}', event);" 
+                                                            <button onclick="return changeVisitorStatusAction({{ $visitor->id }}, 'deny', '{{ addslashes($visitor->visitor_name) }}', '{{ addslashes($propertyLabel($visitor->flat)) }}', event);" 
                                                                     class="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
                                                                     type="button">
                                                                 <i class="fas fa-times text-red-600 mr-2"></i>
@@ -346,8 +356,13 @@
                                 </td>
                                 <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                     <div class="flex justify-end space-x-2">
-                                        {{-- Check-in/Check-out for allowed visitors (all roles) --}}
-                                        @if($visitor->approval_status === 'allowed' && $visitor->entry_status === 'pending')
+                                        <a href="{{ route('visitors.show', $visitor) }}"
+                                           class="text-gray-600 hover:text-gray-900 transition-colors" title="View">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+
+                                        {{-- Check-in/Check-out: Admin/Staff only (the controller enforces the same) --}}
+                                        @if($canApproveAny && $visitor->approval_status === 'allowed' && $visitor->entry_status === 'pending')
                                             <form action="{{ route('visitors.check-in', $visitor) }}" method="POST" class="inline-block">
                                                 @csrf
                                                 <button type="submit" class="text-blue-600 hover:text-blue-900 transition-colors" title="Check In">
@@ -355,7 +370,7 @@
                                                 </button>
                                             </form>
                                         @endif
-                                        @if($visitor->entry_status === 'entered')
+                                        @if($canApproveAny && $visitor->entry_status === 'entered')
                                             <form action="{{ route('visitors.check-out', $visitor) }}" method="POST" class="inline-block">
                                                 @csrf
                                                 <button type="submit" class="text-purple-600 hover:text-purple-900 transition-colors" title="Check Out">
@@ -398,10 +413,17 @@
                 <h3 class="text-lg font-medium text-gray-900 mb-2">No visitors found</h3>
                 @if(auth()->user()->hasRole(['Admin', 'Super Admin']))
                     <p class="text-gray-500 mb-6">Get started by adding a new visitor.</p>
-                    <a href="{{ route('visitors.create') }}" 
+                    <a href="{{ route('visitors.create') }}"
                        class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
                         <i class="fas fa-plus mr-2"></i>
                         Add Your First Visitor
+                    </a>
+                @elseif(!empty($approvableFlatIds))
+                    <p class="text-gray-500 mb-6">Expecting someone? Invite them so security can let them in.</p>
+                    <a href="{{ route('visitors.create') }}"
+                       class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
+                        <i class="fas fa-user-plus mr-2"></i>
+                        Invite Visitor
                     </a>
                 @else
                     <p class="text-gray-500">No visitors to manage at this time.</p>
@@ -429,11 +451,11 @@
                     </div>
                     
                     <div class="mb-4">
-                        <label for="reason" class="block text-sm font-medium text-gray-700 mb-2">Reason for Denial *</label>
-                        <textarea name="reason" id="reason" rows="3" 
-                                  class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500" 
+                        <label for="reason" class="block text-sm font-medium text-gray-700 mb-2">Reason for Denial {{ $canApproveAny ? '*' : '(optional)' }}</label>
+                        <textarea name="reason" id="reason" rows="3"
+                                  class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
                                   placeholder="Please provide a reason for denying this visitor..."
-                                  required></textarea>
+                                  @if($canApproveAny) required @endif></textarea>
                     </div>
                     
                     <div class="flex justify-end space-x-3">

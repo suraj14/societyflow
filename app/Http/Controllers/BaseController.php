@@ -146,7 +146,7 @@ class BaseController extends Controller
      */
     protected function isOwnerOrTenant()
     {
-        return auth()->user()?->hasAnyRole(['Villa Owner', 'Apartment Owner', 'Tenant']) ?? false;
+        return auth()->user()?->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner', 'Tenant']) ?? false;
     }
 
     /**

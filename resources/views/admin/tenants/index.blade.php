@@ -17,23 +17,7 @@
         </a>
     </div>
 
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg" role="alert">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-3"></i>
-                <p class="font-medium">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg" role="alert">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-3"></i>
-                <p class="font-medium">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
     <!-- Tenant Statistics -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -175,11 +159,20 @@
                                        class="text-blue-600 hover:text-blue-900 transition-colors">
                                         View
                                     </a>
-                                    <a href="{{ route('admin.tenants.edit', $tenant) }}" 
+                                    <a href="{{ route('admin.tenants.edit', $tenant) }}"
                                        class="text-indigo-600 hover:text-indigo-900 transition-colors">
                                         Edit
                                     </a>
-                                    <button type="button" 
+                                    @if($tenant->flat_id)
+                                        <form action="{{ route('admin.tenants.move-out', $tenant) }}" method="POST" class="inline"
+                                              onsubmit="return confirm('Move {{ $tenant->name }} out? The unit becomes vacant; the tenant record and their rent/payment history are kept.');">
+                                            @csrf
+                                            <button type="submit" class="text-amber-600 hover:text-amber-900 transition-colors">
+                                                Move Out
+                                            </button>
+                                        </form>
+                                    @endif
+                                    <button type="button"
                                             class="text-red-600 hover:text-red-900 transition-colors delete-tenant-btn"
                                             data-delete-url="{{ route('admin.tenants.destroy', $tenant) }}"
                                             data-tenant-name="{{ $tenant->name }}">

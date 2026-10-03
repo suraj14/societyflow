@@ -20,23 +20,7 @@
     </div>
 
     <!-- Success/Error Messages -->
-    @if(session('success'))
-        <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded-r-lg">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle text-green-500 mr-3"></i>
-                <p class="text-sm text-green-800">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle text-red-500 mr-3"></i>
-                <p class="text-sm text-red-800">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
     <!-- Tabs Navigation -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-200" x-data="{ activeTab: '{{ $tab }}' }">

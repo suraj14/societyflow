@@ -77,16 +77,9 @@
                             <div>
                                 <label class="block text-sm font-medium text-gray-500 mb-1">Status</label>
                                 <div>
-                                    @php
-                                        $statusColors = [
-                                            'available' => 'bg-green-100 text-green-800',
-                                            'occupied' => 'bg-blue-100 text-blue-800',
-                                            'maintenance' => 'bg-yellow-100 text-yellow-800',
-                                            'sold' => 'bg-gray-100 text-gray-800',
-                                        ];
-                                    @endphp
-                                    <span class="px-3 py-1 text-sm font-semibold rounded-full {{ $statusColors[$villa->status] ?? 'bg-gray-100 text-gray-800' }}">
-                                        {{ ucfirst($villa->status ?? 'N/A') }}
+                                    @php $sfState = $villa->occupancyState(); @endphp
+                                    <span class="px-3 py-1 text-sm font-semibold rounded-full {{ \App\Support\PropertyOccupancy::badgeClass($sfState) }}">
+                                        {{ \App\Support\PropertyOccupancy::label($sfState) }}
                                     </span>
                                 </div>
                             </div>

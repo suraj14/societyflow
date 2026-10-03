@@ -128,4 +128,73 @@ class UserManagementTest extends TestCase
 
         $this->assertDatabaseHas('users', ['id' => $target->id, 'name' => 'Renamed Person', 'status' => 'inactive']);
     }
+
+    // ------------------------------------------------- Super Admin escalation
+    //
+    // The create/edit forms rendered Role::all() unfiltered regardless of who
+    // was viewing, and store()/update() validated the submitted role only
+    // against `exists:roles,name` - so an Admin (a society-level role) could
+    // both see "Super Admin" in the dropdown AND successfully POST
+    // role=Super Admin, for a brand new account or an existing user in their
+    // own society, and grant platform-wide authority. Both the option list
+    // and the server-side validation are pinned here.
+
+    public function test_admin_does_not_see_super_admin_in_the_create_form(): void
+    {
+        $society = $this->makeSociety();
+        $admin   = $this->makeUserWithRole($society, 'Admin');
+
+        $html = $this->actingAs($admin)->get('/users/create')->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('>Super Admin<', $html);
+    }
+
+    public function test_admin_cannot_create_a_super_admin_by_forged_request(): void
+    {
+        $society = $this->makeSociety();
+        $admin   = $this->makeUserWithRole($society, 'Admin');
+
+        $response = $this->actingAs($admin)->post('/users', [
+            'name' => 'Sneaky Super', 'email' => 'sneakysuper@test.local',
+            'phone' => '9876500020', 'role' => 'Super Admin',
+        ]);
+
+        $response->assertSessionHasErrors('role');
+        $user = User::where('email', 'sneakysuper@test.local')->first();
+        $this->assertNull($user);
+    }
+
+    public function test_admin_cannot_promote_an_existing_user_to_super_admin(): void
+    {
+        $society = $this->makeSociety();
+        $admin   = $this->makeUserWithRole($society, 'Admin');
+        $target  = $this->makeUserWithRole($society, 'Staff');
+
+        $response = $this->actingAs($admin)->put("/users/{$target->id}", [
+            'name' => $target->name, 'phone' => '9876500021', 'role' => 'Super Admin', 'status' => 'active',
+        ]);
+
+        $response->assertSessionHasErrors('role');
+        $this->assertFalse($target->fresh()->hasRole('Super Admin'));
+        $this->assertTrue($target->fresh()->hasRole('Staff'));
+    }
+
+    /** Super Admin itself is unrestricted - the fix must not lock them out. */
+    public function test_super_admin_can_still_create_a_super_admin(): void
+    {
+        $society    = $this->makeSociety();
+        $superAdmin = $this->makeUserWithRole($society, 'Super Admin', ['society_id' => null]);
+
+        $html = $this->actingAs($superAdmin)->get('/users/create')->assertOk()->getContent();
+        $this->assertStringContainsString('>Super Admin<', $html);
+
+        $this->actingAs($superAdmin)->post('/users', [
+            'society_id' => $society->id,
+            'name' => 'New Super Admin', 'email' => 'newsuper@test.local',
+            'phone' => '9876500022', 'role' => 'Super Admin',
+        ])->assertRedirect(route('users.index'));
+
+        $user = User::where('email', 'newsuper@test.local')->firstOrFail();
+        $this->assertTrue($user->hasRole('Super Admin'));
+    }
 }

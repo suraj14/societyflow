@@ -106,18 +106,50 @@ class Tenant extends Model
     {
         parent::boot();
 
+        // A tenant who is placed in a unit is by definition not moved out.
+        // Move-out flows stamp move_out_date; re-assigning the same tenant
+        // afterwards used to leave that stale date behind, so the record
+        // said "active" and "moved out" at once.
+        static::saving(function ($tenant) {
+            if ($tenant->flat_id && $tenant->status === 'active' && $tenant->move_out_date !== null) {
+                $tenant->move_out_date = null;
+            }
+        });
+
         static::created(function ($tenant) {
-            // Update flat status to on_rent for tenant-occupied properties
-            if ($tenant->flat) {
-                $tenant->flat->update(['status' => 'on_rent']);
+            $tenant->flat?->updateStatus();
+        });
+
+        // Safety net for direct model updates that bypass the controllers'
+        // own explicit flat-status handling (Admin\TenantController,
+        // Admin\UserTenantAssignmentController already set this correctly
+        // themselves - this only catches anything else that changes
+        // flat_id/status without going through them, e.g. a factory, a
+        // console command, or code added later).
+        static::updated(function ($tenant) {
+            $flatIdChanged = $tenant->wasChanged('flat_id');
+            $statusChanged = $tenant->wasChanged('status');
+
+            if (!$flatIdChanged && !$statusChanged) {
+                return;
+            }
+
+            // Re-derive the stored status of the unit the tenant just
+            // entered and of the one it just left. The canonical rule
+            // decides (a unit with a tenant is on_rent; one without falls
+            // back to owner-occupied or vacant - not blindly "vacant").
+            $tenant->flat?->updateStatus();
+
+            if ($flatIdChanged) {
+                $previousFlatId = $tenant->getOriginal('flat_id');
+                if ($previousFlatId && (int) $previousFlatId !== (int) $tenant->flat_id) {
+                    \App\Models\Flat::find($previousFlatId)?->updateStatus();
+                }
             }
         });
 
         static::deleted(function ($tenant) {
-            // Update flat status to vacant
-            if ($tenant->flat) {
-                $tenant->flat->update(['status' => 'vacant']);
-            }
+            $tenant->flat?->updateStatus();
         });
     }
 }

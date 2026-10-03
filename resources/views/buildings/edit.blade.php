@@ -24,19 +24,26 @@
                 <div class="space-y-6">
                     <!-- Society -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Society *</label>
-                        <select name="society_id" required
-                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                            <option value="">Select Society</option>
-                            @foreach($societies as $society)
-                                <option value="{{ $society->id }}" {{ old('society_id', $building->society_id) == $society->id ? 'selected' : '' }}>
-                                    {{ $society->name }}
-                                </option>
-                            @endforeach
-                        </select>
-                        @error('society_id')
-                            <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
-                        @enderror
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Society</label>
+                        @if(auth()->user()->hasRole('Super Admin'))
+                            <select name="society_id" required
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="">Select Society</option>
+                                @foreach($societies as $society)
+                                    <option value="{{ $society->id }}" {{ old('society_id', $building->society_id) == $society->id ? 'selected' : '' }}>
+                                        {{ $society->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            @error('society_id')
+                                <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
+                            @enderror
+                        @else
+                            <div class="w-full px-4 py-2 border border-gray-200 rounded-lg bg-gray-50 text-gray-700">
+                                {{ auth()->user()->society->name ?? '—' }}
+                            </div>
+                            <input type="hidden" name="society_id" value="{{ auth()->user()->society_id }}">
+                        @endif
                     </div>
 
                     <!-- Building Name -->

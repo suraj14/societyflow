@@ -1,14 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <!-- Camera: Guard QR scanning (mobile_scanner) and complaint photo capture. -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Gallery access for complaint attachments on Android 12 and below only;
+         image_picker uses the system photo picker from 13 up, and
+         WRITE_EXTERNAL_STORAGE has had no effect since Android 10, so it is
+         not requested at all. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
 
+    <!-- Cleartext HTTP is NOT allowed in release builds: the production API is
+         HTTPS. The debug source set (src/debug/AndroidManifest.xml) re-enables
+         it for the LAN / emulator dev server. -->
     <application
         android:label="SocietyFlow"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true">
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

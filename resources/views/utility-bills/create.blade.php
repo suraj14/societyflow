@@ -20,6 +20,7 @@
         <div class="bg-white rounded-lg shadow-md overflow-hidden">
             <form action="{{ route('utility-bills.store') }}" method="POST" enctype="multipart/form-data" class="p-6 space-y-6">
                 @csrf
+                @include('partials.idempotency')
 
                 <!-- Apartment Number -->
                 @if($propertyType && $properties->count() > 0)

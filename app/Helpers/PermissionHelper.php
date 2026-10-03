@@ -62,12 +62,12 @@ class PermissionHelper
         // In Free Forever plan, all modules are available to all roles by default
         // But we still respect role-based permissions for what they can do within modules
         $defaults = [
-            'facilities' => ['Admin', 'Villa Owner', 'Apartment Owner', 'Tenant'],
-            'visitors' => ['Admin', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'],
-            'complaints' => ['Admin', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'],
-            'bills' => ['Admin', 'Villa Owner', 'Apartment Owner', 'Tenant'],
-            'services' => ['Admin', 'Villa Owner', 'Apartment Owner', 'Staff'],
-            'notices' => ['Admin', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'],
+            'facilities' => ['Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant'],
+            'visitors' => ['Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'],
+            'complaints' => ['Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'],
+            'bills' => ['Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant'],
+            'services' => ['Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Staff'],
+            'notices' => ['Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'],
             'reports' => ['Admin'], // Only Admin can access reports by default
             'advanced_settings' => ['Admin'], // Only Admin can access advanced settings
         ];
@@ -137,7 +137,7 @@ class PermissionHelper
      */
     public static function isOwnerType(): bool
     {
-        return Auth::check() && Auth::user()->hasAnyRole(['Villa Owner', 'Apartment Owner']);
+        return Auth::check() && Auth::user()->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner']);
     }
 
     /**
@@ -175,11 +175,11 @@ class PermissionHelper
             return 'admin.dashboard';
         }
 
-        if ($user->hasRole('Villa Owner')) {
+        if ($user->hasRole('Villa Owner') || ($user->hasRole('Owner') && !$user->hasRole('Apartment Owner') && $user->ownedVilla)) {
             return 'villa-owner.dashboard';
         }
 
-        if ($user->hasAnyRole(['Apartment Owner', 'Tenant'])) {
+        if ($user->hasAnyRole(['Owner', 'Apartment Owner', 'Tenant'])) {
             return 'owner.dashboard';
         }
 

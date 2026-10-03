@@ -45,7 +45,9 @@ class SmsService
         $templateId = self::getSetting('fast2sms_template_id', null, $societyId);
 
         if (empty($apiKey)) {
-            Log::info("Fast2SMS key not set — OTP for {$phone}: {$otp}");
+            // Never write the OTP itself to the log (CLAUDE.md §7); dev mode
+            // hands it back in the response instead.
+            Log::info("Fast2SMS key not set - OTP for {$phone} not sent (dev mode)");
             return ['success' => true, 'message' => 'dev_mode', 'otp' => $otp];
         }
 
@@ -95,7 +97,7 @@ class SmsService
         $templateId  = self::getSetting('bulksmsplans_template_id', '0', $societyId);
 
         if (empty($apiId) || empty($apiPassword)) {
-            Log::info("BulkSMSPlans not configured — OTP for {$phone}: {$otp}");
+            Log::info("BulkSMSPlans not configured - OTP for {$phone} not sent (dev mode)");
             return ['success' => true, 'message' => 'dev_mode', 'otp' => $otp];
         }
 

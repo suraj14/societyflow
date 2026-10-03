@@ -2,93 +2,31 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Financial Report</title>
+    <title>Financial Report - {{ $periodLabel }}</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            color: #333;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 20px;
-        }
-        .header h1 {
-            margin: 0;
-            color: #667eea;
-            font-size: 28px;
-        }
-        .header p {
-            margin: 5px 0;
-            color: #666;
-        }
-        .info-section {
-            margin-bottom: 20px;
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 5px;
-        }
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 10px;
-        }
-        .info-label {
-            font-weight: bold;
-            color: #667eea;
-        }
-        .info-value {
-            color: #333;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        thead {
-            background: #667eea;
-            color: white;
-        }
-        th {
-            padding: 12px;
-            text-align: left;
-            font-weight: bold;
-            font-size: 12px;
-            border: 1px solid #667eea;
-        }
-        td {
-            padding: 10px 12px;
-            border: 1px solid #ddd;
-            font-size: 12px;
-        }
-        tbody tr:nth-child(even) {
-            background: #f9f9f9;
-        }
-        tbody tr:hover {
-            background: #f0f4ff;
-        }
-        .total-row {
-            background: #f0f4ff;
-            font-weight: bold;
-            border-top: 2px solid #667eea;
-        }
-        .total-row td {
-            border: 1px solid #667eea;
-        }
-        .text-right {
-            text-align: right;
-        }
-        .footer {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 12px;
-            color: #999;
-            border-top: 1px solid #ddd;
-            padding-top: 20px;
-        }
+        body { font-family: DejaVu Sans, Arial, sans-serif; margin: 0; padding: 18px; color: #333; font-size: 11px; }
+        .header { text-align: center; margin-bottom: 18px; border-bottom: 2px solid #667eea; padding-bottom: 12px; }
+        .header h1 { margin: 0; color: #667eea; font-size: 22px; }
+        .header p { margin: 3px 0; color: #666; }
+        .meta { width: 100%; background: #f9f9f9; border-radius: 4px; margin-bottom: 14px; }
+        .meta td { padding: 6px 10px; }
+        .meta .k { font-weight: bold; color: #667eea; width: 20%; }
+        h2 { font-size: 13px; color: #333; margin: 18px 0 6px; border-left: 4px solid #667eea; padding-left: 8px; }
+        h2 .note { font-weight: normal; color: #777; font-size: 10px; }
+        table.data { width: 100%; border-collapse: collapse; margin-top: 4px; }
+        table.data th { background: #667eea; color: #fff; padding: 7px 8px; text-align: left; font-size: 10px; border: 1px solid #667eea; }
+        table.data td { padding: 6px 8px; border: 1px solid #ddd; font-size: 10.5px; }
+        table.data tr.total td { background: #f0f4ff; font-weight: bold; border-top: 2px solid #667eea; }
+        table.data tr.memo td { color: #777; font-size: 9.5px; }
+        .r { text-align: right; }
+        .overview { width: 100%; border-collapse: separate; border-spacing: 6px 0; margin: 0 -6px; }
+        .overview td { width: 25%; border: 1px solid #e5e7eb; border-radius: 4px; padding: 8px 10px; vertical-align: top; }
+        .overview .lbl { color: #666; font-size: 9.5px; }
+        .overview .val { font-size: 15px; font-weight: bold; margin-top: 3px; }
+        .green { color: #15803d; } .red { color: #b91c1c; } .orange { color: #c2410c; }
+        .empty { text-align: center; padding: 18px; color: #777; }
+        .warn { background: #fffbeb; border: 1px solid #fcd34d; padding: 6px 10px; margin-top: 4px; color: #92400e; font-size: 10px; }
+        .footer { margin-top: 28px; text-align: center; font-size: 9.5px; color: #999; border-top: 1px solid #ddd; padding-top: 10px; }
     </style>
 </head>
 <body>
@@ -97,86 +35,155 @@
         <p>{{ $society->name ?? 'Society' }}</p>
     </div>
 
-    <div class="info-section">
-        <div class="info-row">
-            <span class="info-label">Report Type:</span>
-            <span class="info-value">{{ ucfirst($reportType) }}</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Period:</span>
-            <span class="info-value">{{ $periodLabel }}</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Generated On:</span>
-            <span class="info-value">{{ now()->format('d M Y, H:i A') }}</span>
-        </div>
-    </div>
+    <table class="meta">
+        <tr><td class="k">Report Period</td><td>{{ $periodLabel }}</td><td class="k">Report Type</td><td>{{ $period->isMonthly() ? 'Monthly' : 'Annual' }}</td></tr>
+        <tr><td class="k">Generated On</td><td>{{ now()->format('d M Y, H:i') }}</td><td class="k">Generated By</td><td>{{ $generatedBy ?? '' }}</td></tr>
+    </table>
 
-    <table>
-        <thead>
-            <tr>
-                <th>Apartment</th>
-                <th class="text-right">Maintenance Billed</th>
-                <th class="text-right">Maintenance Paid</th>
-                <th class="text-right">Utility Billed</th>
-                <th class="text-right">Utility Paid</th>
-                <th class="text-right">Total Paid</th>
-                <th class="text-right">Total Dues</th>
-            </tr>
-        </thead>
+@if(!$report)
+    <p class="empty">No society selected.</p>
+
+@elseif($report['mode'] === 'society')
+    @php $o = $report['overview']; @endphp
+
+    <h2>Overview</h2>
+    <table class="overview">
+        <tr>
+            <td><div class="lbl">Total Income</div><div class="val green">₹{{ number_format($o['total_income'], 2) }}</div><div class="lbl">Maintenance ₹{{ number_format($o['maintenance_collected'], 2) }} &middot; Other ₹{{ number_format($o['other_income'], 2) }}</div></td>
+            <td><div class="lbl">Total Society Expenses</div><div class="val red">₹{{ number_format($o['total_society_expenses'], 2) }}</div><div class="lbl">Common expenses only</div></td>
+            <td><div class="lbl">Net Position</div><div class="val {{ $o['net_position'] < 0 ? 'red' : '' }}">{{ $o['net_position'] < 0 ? '−' : '' }}₹{{ number_format(abs($o['net_position']), 2) }}</div><div class="lbl">Income − society expenses</div></td>
+            <td><div class="lbl">Outstanding Dues</div><div class="val orange">₹{{ number_format($o['outstanding_dues'], 2) }}</div><div class="lbl">Unpaid maintenance, all bills to date</div></td>
+        </tr>
+    </table>
+
+    @if(!$report['has_data'])
+        <p class="empty"><strong>No financial data available for {{ $periodLabel }}.</strong><br>No transactions recorded for this period.</p>
+    @else
+
+    <h2>Income <span class="note">&middot; {{ $periodLabel }} &middot; payments received</span></h2>
+    <table class="data">
+        <thead><tr><th>Source</th><th class="r">Transactions</th><th class="r">Amount</th></tr></thead>
         <tbody>
-            @php
-                $currencySymbol = \App\Models\SystemSetting::get('currency', 'symbol', '₹', $society->id ?? null);
-                $totals = [
-                    'maintenance_billed' => 0,
-                    'maintenance_paid' => 0,
-                    'utility_billed' => 0,
-                    'utility_paid' => 0,
-                    'total_paid' => 0,
-                    'total_dues' => 0,
-                ];
-            @endphp
-            @forelse($data as $row)
-                @php
-                    $totals['maintenance_billed'] += $row['maintenance_billed'];
-                    $totals['maintenance_paid'] += $row['maintenance_paid'];
-                    $totals['utility_billed'] += $row['utility_billed'];
-                    $totals['utility_paid'] += $row['utility_paid'];
-                    $totals['total_paid'] += $row['total_paid'];
-                    $totals['total_dues'] += $row['total_dues'];
-                @endphp
-                <tr>
-                    <td>{{ $row['unit'] }} ({{ $row['type'] }})</td>
-                    <td class="text-right">{{ $currencySymbol }}{{ number_format($row['maintenance_billed'], 2) }}</td>
-                    <td class="text-right">{{ $currencySymbol }}{{ number_format($row['maintenance_paid'], 2) }}</td>
-                    <td class="text-right">{{ $currencySymbol }}{{ number_format($row['utility_billed'], 2) }}</td>
-                    <td class="text-right">{{ $currencySymbol }}{{ number_format($row['utility_paid'], 2) }}</td>
-                    <td class="text-right">{{ $currencySymbol }}{{ number_format($row['total_paid'], 2) }}</td>
-                    <td class="text-right">{{ $currencySymbol }}{{ number_format($row['total_dues'], 2) }}</td>
-                </tr>
+            @forelse($report['income']['rows'] as $row)
+                <tr><td>{{ $row['source'] }}</td><td class="r">{{ $row['count'] }}</td><td class="r">₹{{ number_format($row['amount'], 2) }}</td></tr>
             @empty
-                <tr>
-                    <td colspan="7" style="text-align: center; padding: 20px;">No data available</td>
-                </tr>
+                <tr><td colspan="3" class="empty">No income recorded for {{ $periodLabel }}.</td></tr>
             @endforelse
-
-            @if(count($data) > 0)
-            <tr class="total-row">
-                <td>Total</td>
-                <td class="text-right">{{ $currencySymbol }}{{ number_format($totals['maintenance_billed'], 2) }}</td>
-                <td class="text-right">{{ $currencySymbol }}{{ number_format($totals['maintenance_paid'], 2) }}</td>
-                <td class="text-right">{{ $currencySymbol }}{{ number_format($totals['utility_billed'], 2) }}</td>
-                <td class="text-right">{{ $currencySymbol }}{{ number_format($totals['utility_paid'], 2) }}</td>
-                <td class="text-right">{{ $currencySymbol }}{{ number_format($totals['total_paid'], 2) }}</td>
-                <td class="text-right">{{ $currencySymbol }}{{ number_format($totals['total_dues'], 2) }}</td>
-            </tr>
+            <tr class="total"><td>Total Income</td><td class="r">{{ $report['income']['count'] }}</td><td class="r">₹{{ number_format($report['income']['total'], 2) }}</td></tr>
+            @if($o['rent_collected'] > 0)
+                <tr class="memo"><td colspan="2">Rent collected on owners' behalf (not society income)</td><td class="r">₹{{ number_format($o['rent_collected'], 2) }}</td></tr>
             @endif
         </tbody>
     </table>
 
+    <h2>Society Expenses <span class="note">&middot; {{ $periodLabel }}</span></h2>
+    <table class="data">
+        <thead><tr><th>Category</th><th class="r">Transactions</th><th class="r">Amount</th><th class="r">% of Total</th></tr></thead>
+        <tbody>
+            @forelse($report['expenses']['rows'] as $row)
+                <tr><td>{{ $row['category'] }}</td><td class="r">{{ $row['count'] }}</td><td class="r">₹{{ number_format($row['amount'], 2) }}</td><td class="r">{{ $row['percent'] }}%</td></tr>
+            @empty
+                <tr><td colspan="4" class="empty">No society/common expenses recorded for this period.</td></tr>
+            @endforelse
+            <tr class="total"><td>Total Society Expenses</td><td class="r">{{ $report['expenses']['count'] }}</td><td class="r">₹{{ number_format($report['expenses']['total'], 2) }}</td><td class="r">{{ $report['expenses']['total'] > 0 ? '100%' : '—' }}</td></tr>
+        </tbody>
+    </table>
+
+    <h2>Maintenance Billing <span class="note">&middot; bills dated {{ $periodLabel }} ({{ $report['billing']['bills_count'] }} bills)</span></h2>
+    <table class="data">
+        <tbody>
+            <tr><td>Total Billed</td><td class="r">₹{{ number_format($report['billing']['billed'], 2) }}</td></tr>
+            <tr><td>Collected against these bills</td><td class="r green">₹{{ number_format($report['billing']['collected'], 2) }}</td></tr>
+            <tr><td>Outstanding on these bills</td><td class="r red">₹{{ number_format($report['billing']['outstanding'], 2) }}</td></tr>
+            @foreach($report['billing']['charges'] as $charge)
+                <tr class="memo"><td>&nbsp;&nbsp;&nbsp;{{ $charge['label'] }}</td><td class="r">₹{{ number_format($charge['amount'], 2) }}</td></tr>
+            @endforeach
+        </tbody>
+    </table>
+
+    <h2>Collections &amp; Dues</h2>
+    <table class="data">
+        <tbody>
+            <tr><td>Maintenance collected in {{ $periodLabel }}</td><td class="r">₹{{ number_format($o['maintenance_collected'], 2) }}</td></tr>
+            <tr><td>Other collections in {{ $periodLabel }}</td><td class="r">₹{{ number_format($o['other_income'], 2) }}</td></tr>
+            <tr class="total"><td>Total collected</td><td class="r">₹{{ number_format($o['total_income'], 2) }}</td></tr>
+            <tr><td>Outstanding maintenance dues (all bills to date)</td><td class="r red">₹{{ number_format($o['outstanding_dues'], 2) }}</td></tr>
+        </tbody>
+    </table>
+
+    @if(count($report['properties']) > 0)
+    <h2>Property-wise Maintenance <span class="note">&middot; {{ $periodLabel }}</span></h2>
+    <table class="data">
+        <thead><tr><th>Property</th><th class="r">Billed</th><th class="r">Paid</th><th class="r">Due</th></tr></thead>
+        <tbody>
+            @foreach($report['properties'] as $row)
+                <tr><td>{{ $row['property'] }}</td><td class="r">₹{{ number_format($row['billed'], 2) }}</td><td class="r">₹{{ number_format($row['paid'], 2) }}</td><td class="r">₹{{ number_format($row['due'], 2) }}</td></tr>
+            @endforeach
+        </tbody>
+    </table>
+    @endif
+
+
+    @endif
+
+@else
+    @php $o = $report['overview']; @endphp
+    <h2>Overview</h2>
+    <table class="overview">
+        <tr>
+            <td><div class="lbl">Billed</div><div class="val">₹{{ number_format($o['total_billed'], 2) }}</div></td>
+            <td><div class="lbl">Paid</div><div class="val green">₹{{ number_format($o['total_paid'], 2) }}</div></td>
+            <td><div class="lbl">Due on these bills</div><div class="val red">₹{{ number_format($o['period_due'], 2) }}</div></td>
+            <td><div class="lbl">Total Outstanding</div><div class="val orange">₹{{ number_format($o['outstanding_dues'], 2) }}</div></td>
+        </tr>
+    </table>
+
+    @if(!$report['has_data'])
+        <p class="empty"><strong>No financial data available for {{ $periodLabel }}.</strong><br>No transactions recorded for this period.</p>
+    @else
+        <h2>Bills <span class="note">&middot; {{ $periodLabel }}</span></h2>
+        <table class="data">
+            <thead><tr><th>Date</th><th>Property</th><th>Bill</th><th>Type</th><th class="r">Billed</th><th class="r">Paid</th><th class="r">Due</th></tr></thead>
+            <tbody>
+                @forelse($report['bills']['rows'] as $row)
+                    <tr><td>{{ $row['date'] }}</td><td>{{ $row['property'] }}</td><td>{{ $row['number'] }}</td><td>{{ $row['type'] }}</td><td class="r">₹{{ number_format($row['billed'], 2) }}</td><td class="r">₹{{ number_format($row['paid'], 2) }}</td><td class="r">₹{{ number_format($row['due'], 2) }}</td></tr>
+                @empty
+                    <tr><td colspan="7" class="empty">No bills dated {{ $periodLabel }}.</td></tr>
+                @endforelse
+            </tbody>
+        </table>
+
+        <h2>Payments <span class="note">&middot; {{ $periodLabel }}</span></h2>
+        <table class="data">
+            <thead><tr><th>Date</th><th>Property</th><th>For</th><th>Receipt</th><th class="r">Amount</th></tr></thead>
+            <tbody>
+                @forelse($report['payments']['rows'] as $row)
+                    <tr><td>{{ $row['date'] }}</td><td>{{ $row['property'] }}</td><td>{{ $row['type'] }}</td><td>{{ $row['receipt'] ?: '—' }}</td><td class="r">₹{{ number_format($row['amount'], 2) }}</td></tr>
+                @empty
+                    <tr><td colspan="5" class="empty">No payments in {{ $periodLabel }}.</td></tr>
+                @endforelse
+                <tr class="total"><td colspan="4">Total paid</td><td class="r">₹{{ number_format($report['payments']['total'], 2) }}</td></tr>
+            </tbody>
+        </table>
+
+        @if(count($report['utility_bills']['rows']) > 0)
+        <h2>Utility Bills <span class="note">&middot; {{ $periodLabel }}</span></h2>
+        <table class="data">
+            <thead><tr><th>Date</th><th>Property</th><th>Type</th><th>Status</th><th class="r">Amount</th></tr></thead>
+            <tbody>
+                @foreach($report['utility_bills']['rows'] as $row)
+                    <tr><td>{{ $row['date'] }}</td><td>{{ $row['property'] }}</td><td>{{ $row['type'] }}</td><td>{{ $row['status'] }}</td><td class="r">₹{{ number_format($row['amount'], 2) }}</td></tr>
+                @endforeach
+            </tbody>
+        </table>
+        @endif
+
+    @endif
+@endif
+
     <div class="footer">
-        <p>This is an automatically generated report. For more details, please contact the society administration.</p>
-        <p>© {{ now()->year }} {{ $society->name ?? 'Society' }}. All rights reserved.</p>
+        <p>Generated by SocietyFlow from the same figures shown on screen. For queries, contact the society administration.</p>
+        <p>&copy; {{ now()->year }} {{ $society->name ?? 'Society' }}</p>
     </div>
 </body>
 </html>

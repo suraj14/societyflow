@@ -234,9 +234,10 @@ class RentController extends Controller
                 'rent_id' => 'required|exists:maintenance_bills,id',
                 'payment_date' => 'required|date',
                 'payment_amount' => 'required|numeric|min:0.01',
-                'payment_method' => 'required|string',
+                'payment_method' => ['required', \Illuminate\Validation\Rule::in(\App\Models\Payment::METHODS)],
                 'payment_proof' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
                 'notes' => 'nullable|string|max:500',
+                'idempotency_key' => 'nullable|string|max:64',
             ]);
 
             $user = auth()->user();
@@ -253,6 +254,18 @@ class RentController extends Controller
             // Verify payment amount doesn't exceed balance
             if ($request->payment_amount > $rent->balance_amount) {
                 return response()->json(['success' => false, 'message' => 'Payment amount cannot exceed outstanding balance.'], 400);
+            }
+
+            // A double tap or a retried request carries the same key and
+            // must not file the same payment twice.
+            if ($request->filled('idempotency_key')) {
+                $existing = \App\Models\Payment::where('maintenance_bill_id', $rent->id)
+                    ->where('user_id', $user->id)
+                    ->where('transaction_id', 'IDEMP-' . $request->idempotency_key)
+                    ->first();
+                if ($existing) {
+                    return response()->json(['success' => true, 'message' => 'Payment already submitted.', 'payment_id' => $existing->payment_id]);
+                }
             }
 
             \DB::beginTransaction();
@@ -277,33 +290,17 @@ class RentController extends Controller
                 'status' => 'pending', // Tenant payments start as pending for admin approval
                 'payment_date' => $request->payment_date,
                 'bill_type' => 'rent',
-                'due_date' => $request->payment_date,
+                'due_date' => $rent->due_date,
+                'transaction_id' => $request->filled('idempotency_key') ? 'IDEMP-' . $request->idempotency_key : null,
                 'notes' => $request->notes,
                 'receipt_file_path' => $receiptFilePath,
             ]);
 
-            // Update rent record (but keep status as pending until admin approves)
-            $rent->paid_amount = ($rent->paid_amount ?? 0) + $request->payment_amount;
-            $rent->balance_amount = $rent->total_amount - $rent->paid_amount;
-            
-            // Update status based on payment
-            if ($rent->balance_amount <= 0) {
-                $rent->status = 'paid';
-                // Set paid_date if column exists
-                try {
-                    $tableColumns = \DB::select("PRAGMA table_info(maintenance_bills)");
-                    $columnNames = array_column($tableColumns, 'name');
-                    if (in_array('paid_date', $columnNames)) {
-                        $rent->paid_date = $request->payment_date;
-                    }
-                } catch (\Exception $e) {
-                    \Log::warning('Could not set paid_date: ' . $e->getMessage());
-                }
-            } elseif ($rent->paid_amount > 0) {
-                $rent->status = 'partial';
-            }
-            
-            $rent->save();
+            // Nothing on the bill changes yet: a pending payment is a claim,
+            // not money received. It used to be added to paid_amount here -
+            // and the bill was marked "paid" - before any admin had
+            // verified it. The bill is re-derived from the ledger when an
+            // admin approves the payment (PaymentController::approve).
 
             \DB::commit();
 

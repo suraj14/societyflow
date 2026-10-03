@@ -178,8 +178,13 @@ class TenantRentRecordsSeeder extends Seeder
             if (!$existingBill) {
                 $status = $i > 1 ? 'paid' : ($i == 1 ? 'partial' : 'pending');
                 $paidAmount = $status === 'paid' ? $tenant->monthly_rent : ($status === 'partial' ? $tenant->monthly_rent * 0.6 : 0);
-                
-                MaintenanceBill::create([
+
+                // The bill is created unpaid and settled through the
+                // payments ledger, exactly as the application does - this
+                // seeder used to write paid_amount directly, which is where
+                // the dev database's "paid with no payment row" bills came
+                // from.
+                $bill = MaintenanceBill::create([
                     'society_id' => $tenant->society_id,
                     'flat_id' => $tenant->flat_id,
                     'bill_number' => 'RENT' . $tenant->society_id . $billDate->format('Ym') . str_pad($tenant->id, 3, '0', STR_PAD_LEFT),
@@ -194,14 +199,20 @@ class TenantRentRecordsSeeder extends Seeder
                     'penalty_amount' => 0,
                     'other_charges' => 0,
                     'total_amount' => $tenant->monthly_rent,
-                    'paid_amount' => $paidAmount,
-                    'balance_amount' => $tenant->monthly_rent - $paidAmount,
-                    'status' => $status,
+                    'paid_amount' => 0,
                     'bill_type' => 'rent',
-                    'paid_date' => $status === 'paid' ? $dueDate->copy()->subDays(2) : null,
                 ]);
-                
-                $this->command->info("Created rent record for {$tenant->name} - {$billDate->format('M Y')} - Status: {$status}");
+
+                if ($paidAmount > 0) {
+                    $bill->addPayment((float) $paidAmount, [
+                        'user_id' => $tenant->user_id,
+                        'payment_method' => 'online',
+                        'payment_date' => $dueDate->copy()->subDays(2),
+                        'bill_type' => 'rent',
+                    ]);
+                }
+
+                $this->command->info("Created rent record for {$tenant->name} - {$billDate->format('M Y')} - Status: {$bill->status}");
             }
         }
     }

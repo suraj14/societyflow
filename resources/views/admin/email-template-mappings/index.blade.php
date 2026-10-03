@@ -17,12 +17,6 @@
         </div>
     @endif
 
-    @if (session('success'))
-        <div class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
-            {{ session('success') }}
-        </div>
-    @endif
-
     <div class="grid grid-cols-1 gap-6">
         @foreach ($mappings as $eventValue => $mapping)
             <div class="bg-white rounded-lg shadow-md p-6 border-l-4 {{ $mapping['configured'] ? 'border-green-500' : 'border-gray-300' }}">

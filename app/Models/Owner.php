@@ -45,6 +45,56 @@ class Owner extends Model
         'family_members' => 'array',
     ];
 
+    protected static function boot()
+    {
+        parent::boot();
+
+        // An owner record is one of the two facts occupancy is derived from
+        // (App\Support\PropertyOccupancy). Keep the stored flats.status cache
+        // of every unit this owner is linked to - by flats.owner_id or by
+        // address - in step when the owner is created, changed (status,
+        // address) or removed. The Tenant model does the same for tenancies.
+        static::saved(function (Owner $owner) {
+            $owner->resyncLinkedFlats($owner->getOriginal());
+        });
+
+        static::deleted(function (Owner $owner) {
+            $owner->resyncLinkedFlats();
+        });
+    }
+
+    /**
+     * Re-derive the stored status of the flats this owner record points at
+     * now and, after an address change, the ones it pointed at before.
+     */
+    public function resyncLinkedFlats(array $previous = []): void
+    {
+        $query = Flat::query()->where(function ($q) use ($previous) {
+            $q->where('owner_id', $this->id);
+
+            foreach ([$this->getAttributes(), $previous] as $attrs) {
+                if (empty($attrs['society_id'])) {
+                    continue;
+                }
+                if (($attrs['property_type'] ?? null) === 'villa' && !empty($attrs['villa_area_id']) && isset($attrs['villa_no'])) {
+                    $q->orWhere(fn ($w) => $w->where('society_id', $attrs['society_id'])
+                        ->where('property_type', 'villa')
+                        ->where('villa_area_id', $attrs['villa_area_id'])
+                        ->where('flat_number', $attrs['villa_no']));
+                } elseif (($attrs['property_type'] ?? null) === 'apartment' && !empty($attrs['building_id']) && isset($attrs['flat_no'])) {
+                    $q->orWhere(fn ($w) => $w->where('society_id', $attrs['society_id'])
+                        ->where('property_type', 'apartment')
+                        ->where('building_id', $attrs['building_id'])
+                        ->where('flat_number', $attrs['flat_no']));
+                }
+            }
+        });
+
+        foreach ($query->get() as $flat) {
+            $flat->updateStatus();
+        }
+    }
+
     // Relationships
     public function society(): BelongsTo
     {
@@ -69,6 +119,43 @@ class Owner extends Model
     public function flats(): HasMany
     {
         return $this->hasMany(Flat::class, 'owner_id');
+    }
+
+    /**
+     * The inverse of Flat::resolvedOwner(): flats.owner_id is unset on most
+     * rows (see UserFlatResolver / P1-7), so a direct flats() query returns
+     * nothing for most real owners even though they do own a unit. Falls
+     * back to the same villa_area_id+villa_no / building_id+flat_no address
+     * match the property pages already use, so an owner's dashboard finds
+     * their real unit instead of reporting "no property" (which previously
+     * led callers to fabricate a brand new one).
+     */
+    public function resolvedFlats()
+    {
+        $direct = $this->flats;
+        if ($direct->isNotEmpty()) {
+            return $direct;
+        }
+
+        if ($this->property_type === 'villa' && $this->villa_area_id && $this->villa_no) {
+            return Flat::with(['building', 'villaArea'])
+                ->where('society_id', $this->society_id)
+                ->where('property_type', 'villa')
+                ->where('villa_area_id', $this->villa_area_id)
+                ->where('flat_number', $this->villa_no)
+                ->get();
+        }
+
+        if ($this->property_type === 'apartment' && $this->building_id && $this->flat_no) {
+            return Flat::with(['building', 'villaArea'])
+                ->where('society_id', $this->society_id)
+                ->where('property_type', 'apartment')
+                ->where('building_id', $this->building_id)
+                ->where('flat_number', $this->flat_no)
+                ->get();
+        }
+
+        return collect();
     }
 
     // Scopes
@@ -116,15 +203,24 @@ class Owner extends Model
         return $this->property_type ? 1 : 0;
     }
 
+    /** Properties this owner owns that are lived in (by the owner or a tenant). */
     public function getOccupiedPropertiesCount(): int
     {
-        // For now, return 0 as we don't track occupancy at owner level
-        return 0;
+        return $this->countPropertiesByOccupancy(true);
     }
 
+    /** Properties this owner owns that are currently vacant. */
     public function getVacantPropertiesCount(): int
     {
-        // For now, return 0 as we don't track vacancy at owner level
-        return 0;
+        return $this->countPropertiesByOccupancy(false);
+    }
+
+    private function countPropertiesByOccupancy(bool $occupied): int
+    {
+        $states = \App\Support\PropertyOccupancy::statesFor($this->resolvedFlats());
+
+        return collect($states)
+            ->filter(fn ($row) => ($row['state'] !== \App\Support\PropertyOccupancy::VACANT) === $occupied)
+            ->count();
     }
 }

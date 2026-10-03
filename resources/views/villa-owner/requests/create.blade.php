@@ -14,6 +14,7 @@
 
             <form action="{{ route('villa-owner.requests.store') }}" method="POST" class="p-6">
                 @csrf
+                @include('partials.idempotency')
 
                 <div class="space-y-6">
                     <!-- Category -->

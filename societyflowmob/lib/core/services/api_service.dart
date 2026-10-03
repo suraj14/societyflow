@@ -57,6 +57,12 @@ class ApiService {
           headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
+            // PHP's single-threaded dev server (`php artisan serve`) drops
+            // reused keep-alive sockets, which Dart's HttpClient reports as
+            // "connection closed before full header" - the app then showed
+            // "Cannot reach server" although every request had reached it.
+            // One request per connection is harmless against Apache/nginx.
+            'Connection': 'close',
           },
         ),
       );

@@ -3,198 +3,173 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\BaseController;
-use App\Models\User;
 use App\Models\Flat;
-use App\Models\Resident;
+use App\Models\Tenant;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 
+/**
+ * Occupancy management for tenants already on record (Tenant Management
+ * creates them). This screen used to operate on a completely different
+ * table - Resident (type='tenant') - than Tenant Management, which reads
+ * and writes tenants.flat_id directly. The two were never synchronized:
+ * assigning a unit here created a Resident row and left the matching
+ * Tenant row's flat_id untouched, so Tenant Management kept showing
+ * "Not Assigned" for a tenant this screen showed as "Assigned", and
+ * Property & Occupancy's "On Rent" count (which reads flats.status =
+ * 'on_rent') stayed at zero because this screen set flats.status to
+ * 'occupied' instead. Both screens now read and write the same
+ * `tenants` table and the same 'on_rent' status value.
+ */
 class UserTenantAssignmentController extends BaseController
 {
     public function index()
     {
-        // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
-        
+
         $societyId = $this->getSocietyId();
-        
-        // Get tenants without assigned units
-        $unassignedTenants = User::bySociety($societyId)
-            ->role('Tenant')
-            ->whereDoesntHave('residents', function($query) {
+
+        $unassignedTenants = Tenant::bySociety($societyId)
+            ->where('status', 'active')
+            ->whereNull('flat_id')
+            ->get();
+
+        // Same eligibility rule as Tenant Management's own "create" screen:
+        // any unit with no active tenant (owner-occupied units may be rented
+        // out; the stored status is a derived cache, not a gate).
+        $availableUnits = Flat::bySociety($societyId)
+            ->whereDoesntHave('tenants', function ($query) {
                 $query->where('status', 'active');
             })
-            ->get();
-        
-        // Get available units (not assigned to any tenant and not owned)
-        $availableUnits = Flat::bySociety($societyId)
-            ->where(function($query) {
-                $query->whereNull('owner_id')
-                      ->orWhere('status', 'vacant');
-            })
-            ->whereDoesntHave('residents', function($query) {
-                $query->where('type', 'tenant')->where('status', 'active');
-            })
             ->with(['building', 'villaArea'])
+            ->orderBy('property_type')
+            ->orderBy('flat_number')
             ->get();
-        
-        // Get assigned tenants
-        $assignedTenants = User::bySociety($societyId)
-            ->role('Tenant')
-            ->whereHas('residents', function($query) {
-                $query->where('type', 'tenant')->where('status', 'active');
-            })
-            ->with(['residents' => function($query) {
-                $query->where('type', 'tenant')->where('status', 'active')->with(['flat.building', 'flat.villaArea']);
-            }])
-            ->get()
-            ->map(function($user) {
-                // Get the active resident record
-                $user->resident = $user->residents->first();
-                return $user;
-            });
-        
+
+        $assignedTenants = Tenant::bySociety($societyId)
+            ->where('status', 'active')
+            ->whereNotNull('flat_id')
+            ->with(['flat.building', 'flat.villaArea'])
+            ->get();
+
         return view('admin.tenant-assignments.index', compact(
             'unassignedTenants',
-            'availableUnits', 
+            'availableUnits',
             'assignedTenants'
         ));
     }
-    
+
     public function assign(Request $request)
     {
-        // Only admin and super admin can assign units
         $this->authorizeRole('Super Admin', 'Admin');
-        
+
         $request->validate([
-            'user_id' => 'required|exists:users,id',
+            'tenant_id' => 'required|exists:tenants,id',
             'unit_id' => 'required|exists:flats,id',
         ]);
-        
-        $user = User::findOrFail($request->user_id);
+
+        $societyId = $this->getSocietyId();
+        $tenant = Tenant::findOrFail($request->tenant_id);
         $unit = Flat::findOrFail($request->unit_id);
-        
-        // Verify user is a tenant
-        if (!$user->hasRole('Tenant')) {
-            return back()->with('error', 'User must have Tenant role to be assigned a unit.');
+
+        if ((int) $tenant->society_id !== (int) $societyId || (int) $unit->society_id !== (int) $societyId) {
+            return back()->with('error', 'Tenant and unit must belong to your society.');
         }
-        
-        // Verify unit is available for tenant
-        $existingTenant = $unit->residents()->where('type', 'tenant')->where('status', 'active')->first();
+
+        if ($tenant->flat_id) {
+            return back()->with('error', 'This tenant already has an active unit assignment.');
+        }
+
+        $existingTenant = $unit->tenants()->where('status', 'active')->first();
         if ($existingTenant) {
-            return back()->with('error', 'This unit already has an active tenant.');
+            return back()->with('error', "This unit is currently occupied by {$existingTenant->name}.");
         }
-        
-        // Verify unit belongs to the same society
-        if ($unit->society_id !== $this->getSocietyId()) {
-            return back()->with('error', 'Unit must belong to the same society.');
-        }
-        
-        // Check if tenant already has an active assignment
-        $existingAssignment = $user->residents()->where('status', 'active')->first();
-        if ($existingAssignment) {
-            return back()->with('error', 'Tenant already has an active unit assignment.');
-        }
-        
-        // Create resident record for tenant
-        Resident::create([
-            'user_id' => $user->id,
-            'society_id' => $unit->society_id,
+
+        $tenant->update([
             'flat_id' => $unit->id,
-            'type' => 'tenant',
-            'move_in_date' => Carbon::now(),
-            'status' => 'active',
+            'move_in_date' => $tenant->move_in_date ?? Carbon::now(),
+            'move_out_date' => null,
         ]);
-        
-        // Update unit status
-        $unit->update(['status' => 'occupied']);
-        
+        $unit->update(['status' => 'on_rent']);
+
         $unitName = $unit->flat_number ?? $unit->villa_name;
-        return back()->with('success', "Unit {$unitName} has been assigned to tenant {$user->name} successfully!");
+        return back()->with('success', "Unit {$unitName} has been assigned to tenant {$tenant->name} successfully!");
     }
-    
+
     public function unassign(Request $request)
     {
-        // Only admin and super admin can unassign units
         $this->authorizeRole('Super Admin', 'Admin');
-        
+
         $request->validate([
-            'user_id' => 'required|exists:users,id',
+            'tenant_id' => 'required|exists:tenants,id',
         ]);
-        
-        $user = User::findOrFail($request->user_id);
-        $resident = $user->residents()->where('status', 'active')->first();
-        
-        if (!$resident) {
+
+        $tenant = Tenant::findOrFail($request->tenant_id);
+
+        if ((int) $tenant->society_id !== (int) $this->getSocietyId()) {
+            return back()->with('error', 'Tenant not found.');
+        }
+
+        if (!$tenant->flat_id) {
             return back()->with('error', 'Tenant does not have an active unit assignment.');
         }
-        
-        $unit = $resident->flat;
-        $unitName = $unit->flat_number ?? $unit->villa_name;
-        
-        // Update resident record
-        $resident->update([
+
+        $unit = $tenant->flat;
+        $unitName = $unit?->flat_number ?? $unit?->villa_name;
+
+        // Move-out: close the occupancy but keep the tenant and every past
+        // rent/payment record tied to them - only the current unit link is
+        // cleared, nothing is deleted.
+        $tenant->update([
+            'flat_id' => null,
             'move_out_date' => Carbon::now(),
-            'status' => 'inactive',
         ]);
-        
-        // Check if unit has other active residents
-        $otherActiveResidents = $unit->residents()->where('status', 'active')->count();
-        if ($otherActiveResidents == 0) {
+
+        if ($unit && $unit->tenants()->where('status', 'active')->count() === 0) {
             $unit->update(['status' => 'vacant']);
         }
-        
-        return back()->with('success', "Unit {$unitName} has been unassigned from tenant {$user->name} successfully!");
+
+        return back()->with('success', "Unit {$unitName} has been unassigned from tenant {$tenant->name} successfully!");
     }
-    
+
     public function reassign(Request $request)
     {
-        // Only admin and super admin can reassign units
         $this->authorizeRole('Super Admin', 'Admin');
-        
+
         $request->validate([
-            'current_user_id' => 'required|exists:users,id',
+            'current_tenant_id' => 'required|exists:tenants,id',
             'new_unit_id' => 'required|exists:flats,id',
         ]);
-        
-        $currentUser = User::findOrFail($request->current_user_id);
-        $currentResident = $currentUser->residents()->where('status', 'active')->first();
+
+        $societyId = $this->getSocietyId();
+        $tenant = Tenant::findOrFail($request->current_tenant_id);
         $newUnit = Flat::findOrFail($request->new_unit_id);
-        
-        if (!$currentResident) {
+
+        if ((int) $tenant->society_id !== (int) $societyId || (int) $newUnit->society_id !== (int) $societyId) {
+            return back()->with('error', 'Tenant and unit must belong to your society.');
+        }
+
+        if (!$tenant->flat_id) {
             return back()->with('error', 'Tenant does not have an active unit assignment.');
         }
-        
-        // Check if new unit has active tenant
-        $existingTenant = $newUnit->residents()->where('type', 'tenant')->where('status', 'active')->first();
+
+        $existingTenant = $newUnit->tenants()->where('status', 'active')->where('id', '!=', $tenant->id)->first();
         if ($existingTenant) {
-            return back()->with('error', 'The new unit already has an active tenant.');
+            return back()->with('error', "The new unit is currently occupied by {$existingTenant->name}.");
         }
-        
-        $currentUnit = $currentResident->flat;
-        $currentUnitName = $currentUnit->flat_number ?? $currentUnit->villa_name;
+
+        $currentUnit = $tenant->flat;
+        $currentUnitName = $currentUnit?->flat_number ?? $currentUnit?->villa_name;
         $newUnitName = $newUnit->flat_number ?? $newUnit->villa_name;
-        
-        // Update current resident record to inactive
-        $currentResident->update([
-            'move_out_date' => Carbon::now(),
-            'status' => 'inactive',
-        ]);
-        
-        // Create new resident record
-        Resident::create([
-            'user_id' => $currentUser->id,
-            'society_id' => $newUnit->society_id,
-            'flat_id' => $newUnit->id,
-            'type' => 'tenant',
-            'move_in_date' => Carbon::now(),
-            'status' => 'active',
-        ]);
-        
-        // Update unit statuses
-        $currentUnit->update(['status' => 'vacant']);
-        $newUnit->update(['status' => 'occupied']);
-        
-        return back()->with('success', "Tenant reassigned successfully! {$currentUser->name} moved from {$currentUnitName} to {$newUnitName}.");
+
+        $tenant->update(['flat_id' => $newUnit->id]);
+        $newUnit->update(['status' => 'on_rent']);
+
+        if ($currentUnit && $currentUnit->id !== $newUnit->id
+            && $currentUnit->tenants()->where('status', 'active')->count() === 0) {
+            $currentUnit->update(['status' => 'vacant']);
+        }
+
+        return back()->with('success', "Tenant reassigned successfully! {$tenant->name} moved from {$currentUnitName} to {$newUnitName}.");
     }
 }

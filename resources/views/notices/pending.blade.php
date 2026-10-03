@@ -19,14 +19,6 @@
     </div>
 
     <!-- Success/Error Messages -->
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-3"></i>
-                <p class="font-medium">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
     <!-- Pending Notices -->
     <div class="space-y-4">

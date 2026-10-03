@@ -139,7 +139,7 @@ class AccessControl
      */
     public static function isOwnerOrTenant(): bool
     {
-        return Auth::user()?->hasAnyRole(['Villa Owner', 'Apartment Owner', 'Tenant']) ?? false;
+        return Auth::user()?->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner', 'Tenant']) ?? false;
     }
 
     /**

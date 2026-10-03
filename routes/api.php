@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthApiController;
 use App\Http\Controllers\Api\OtpAuthController;
 use App\Http\Controllers\Api\DashboardApiController;
 use App\Http\Controllers\Api\VisitorApiController;
+use App\Http\Controllers\Api\AccessPassApiController;
 use App\Http\Controllers\Api\ComplaintApiController;
 use App\Http\Controllers\Api\PaymentApiController;
 use App\Http\Controllers\Api\NoticeApiController;
@@ -72,6 +73,10 @@ Route::prefix('v1')->group(function () {
         Route::post('/visitors/{id}/check-in',  [VisitorApiController::class, 'checkIn']);
         Route::post('/visitors/{id}/check-out', [VisitorApiController::class, 'checkOut']);
         Route::get('/visitors/{id}',     [VisitorApiController::class, 'show']);
+
+        // Guard mobile QR scan - reuses AccessPassService, the same
+        // verification the web gate (GuardController::scan()) uses.
+        Route::post('/access-passes/scan', [AccessPassApiController::class, 'scan']);
 
         Route::get('/complaints',            [ComplaintApiController::class, 'index']);
         Route::post('/complaints',           [ComplaintApiController::class, 'store']);

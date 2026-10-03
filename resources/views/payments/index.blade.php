@@ -28,23 +28,7 @@
 
     <!-- Main Content -->
     <div class="px-6 py-6">
-        @if(session('success'))
-            <div class="bg-green-50 border border-green-200 text-green-700 p-4 mb-6 rounded-md" role="alert">
-                <div class="flex items-center">
-                    <i class="fas fa-check-circle mr-3"></i>
-                    <p class="font-medium">{{ session('success') }}</p>
-                </div>
-            </div>
-        @endif
 
-        @if(session('error'))
-            <div class="bg-red-50 border border-red-200 text-red-700 p-4 mb-6 rounded-md" role="alert">
-                <div class="flex items-center">
-                    <i class="fas fa-exclamation-circle mr-3"></i>
-                    <p class="font-medium">{{ session('error') }}</p>
-                </div>
-            </div>
-        @endif
 
         <!-- Payment Statistics -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -246,7 +230,12 @@
                                         <div class="text-sm text-gray-900">{{ $payment->bill_type ?? 'N/A' }}</div>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="text-sm font-semibold text-green-600">₹{{ number_format($payment->amount, 2) }}</div>
+                                        <div class="text-sm font-semibold {{ $payment->status === 'success' ? 'text-green-600' : 'text-gray-500' }}">₹{{ number_format($payment->amount, 2) }}</div>
+                                        @if($payment->status === 'pending')
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800" title="Submitted by the resident; not counted against the bill until verified">Pending verification</span>
+                                        @elseif($payment->status !== 'success')
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">{{ ucfirst($payment->status) }}</span>
+                                        @endif
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
@@ -282,7 +271,21 @@
                                             
                                             <div id="action-menu-{{ $payment->id }}" class="hidden absolute right-0 z-10 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5">
                                                 <div class="py-1">
-                                                    <button onclick="viewPayment({{ $payment->id }})" 
+                                                    @if($payment->status === 'pending' && auth()->user()->hasAnyRole(['Super Admin', 'Admin', 'Accountant']))
+                                                        <form method="POST" action="{{ route('payments.approve', $payment) }}" onsubmit="this.querySelector('button').disabled = true;">
+                                                            @csrf
+                                                            <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-green-700 hover:bg-gray-100">
+                                                                <i class="fas fa-check mr-2"></i>Verify &amp; Apply
+                                                            </button>
+                                                        </form>
+                                                        <form method="POST" action="{{ route('payments.reject', $payment) }}" onsubmit="return confirm('Reject this payment? The bill will stay unpaid.') && (this.querySelector('button').disabled = true, true);">
+                                                            @csrf
+                                                            <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100">
+                                                                <i class="fas fa-times mr-2"></i>Reject
+                                                            </button>
+                                                        </form>
+                                                    @endif
+                                                    <button onclick="viewPayment({{ $payment->id }})"
                                                             class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
                                                         <i class="fas fa-eye mr-2"></i>View Details
                                                     </button>

@@ -206,6 +206,24 @@ class AuthApiController extends Controller
             }
         }
 
+        // A tenant created from Admin -> Tenants has a tenants row, not a
+        // residents row and no owner record - the two paths above never find
+        // the unit, so the app showed no villa/flat at all. Same resolver the
+        // web uses (UserFlatResolver): the active tenancy decides.
+        if (!$flat) {
+            $tenantFlatId = \App\Support\UserFlatResolver::tenantFlatIds($user)[0] ?? null;
+            if ($tenantFlatId) {
+                $flat = \App\Models\Flat::with(['building', 'villaArea'])->find($tenantFlatId);
+                if ($flat?->property_type === 'villa') {
+                    $villaNumber = $flat->flat_number;
+                    $villaArea   = $flat->villaArea?->name;
+                    $building    = null;
+                } else {
+                    $building = $flat?->building;
+                }
+            }
+        }
+
         return [
             'id'            => $user->id,
             'name'          => $user->name,

@@ -19,6 +19,7 @@
 
             <form action="{{ route('flats.store') }}" method="POST" class="p-6">
                 @csrf
+                @include('partials.idempotency')
 
                 <div class="space-y-6">
                     <div class="grid md:grid-cols-2 gap-6">
@@ -141,14 +142,13 @@
 
                     <!-- Status -->
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Status *</label>
-                        <select name="status" required
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Availability</label>
+                        <select name="status"
                                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                            <option value="vacant" {{ old('status', 'vacant') === 'vacant' ? 'selected' : '' }}>Vacant</option>
-                            <option value="occupied" {{ old('status') === 'occupied' ? 'selected' : '' }}>Occupied</option>
-                            <option value="on_rent" {{ old('status') === 'on_rent' ? 'selected' : '' }}>On Rent</option>
+                            <option value="vacant" {{ old('status') !== 'maintenance' ? 'selected' : '' }}>Available</option>
                             <option value="maintenance" {{ old('status') === 'maintenance' ? 'selected' : '' }}>Under Maintenance</option>
                         </select>
+                        <p class="text-xs text-gray-500 mt-1">Occupancy (vacant / owner occupied / tenant occupied) is set automatically from the owner and tenant records.</p>
                         @error('status')
                             <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
                         @enderror

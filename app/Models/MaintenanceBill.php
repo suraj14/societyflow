@@ -74,23 +74,43 @@ class MaintenanceBill extends Model
             $bill->calculateTotalAmount();
         });
 
+        // Status is always a function of the money: it used to honour a
+        // manually submitted 'paid' by silently setting paid_amount to the
+        // total - which is how 20 bills in the dev database came to say
+        // "paid" with no payment behind them. A bill is settled by recording
+        // a Payment (which syncFromLedger() picks up), never by editing its
+        // status.
         static::updating(function ($bill) {
-            // Capture manually-set status before recalculation
-            $manualStatus = $bill->isDirty('status') ? $bill->status : null;
-
             $bill->calculateTotalAmount();
-
-            // If admin explicitly set a status, always restore it
-            if ($manualStatus !== null) {
-                $bill->status = $manualStatus;
-
-                // If manually marked as paid, ensure balance is zeroed
-                if ($manualStatus === 'paid') {
-                    $bill->paid_amount   = $bill->total_amount;
-                    $bill->balance_amount = 0;
-                }
-            }
         });
+    }
+
+    /**
+     * Recompute paid / balance / status / paid_date from the payments
+     * ledger. Only `success` payments count: a tenant's submitted-but-
+     * unverified payment is pending and must not reduce the balance until an
+     * admin approves it. Called from the Payment model whenever a linked
+     * payment is created, changed or deleted, so the bill can never say
+     * something its ledger does not.
+     */
+    public function syncFromLedger(): void
+    {
+        $success = $this->payments()->where('status', 'success');
+
+        $paid = (float) $success->sum('amount');
+        $latest = (clone $success)->max('payment_date');
+
+        $this->paid_amount = $paid;
+        $this->calculateTotalAmount(); // balance + status
+        $this->paid_date = $this->balance_amount <= 0 && $latest ? $latest : null;
+
+        $this->save();
+    }
+
+    /** True when paid_amount matches the success payments behind it. */
+    public function ledgerAgrees(): bool
+    {
+        return abs((float) $this->paid_amount - (float) $this->payments()->where('status', 'success')->sum('amount')) < 0.005;
     }
 
     // Relationships
@@ -156,7 +176,7 @@ class MaintenanceBill extends Model
             $this->status = 'paid';
         } elseif ($this->paid_amount > 0) {
             $this->status = 'partial';
-        } elseif ($this->due_date < now()) {
+        } elseif (\App\Support\SocietyClock::dateHasPassed($this->due_date, $this->society_id)) {
             $this->status = 'overdue';
         } else {
             $this->status = 'pending';
@@ -167,15 +187,19 @@ class MaintenanceBill extends Model
     {
         $payment = $this->payments()->create(array_merge([
             'society_id' => $this->society_id,
+            'flat_id' => $this->flat_id,
             'user_id' => $this->flat->activeResident->user_id ?? null,
             'payment_id' => Payment::generatePaymentId(),
             'amount' => $amount,
             'payment_date' => now(),
+            'bill_type' => $this->bill_type ?: 'maintenance',
+            'due_date' => $this->due_date,
             'status' => 'success',
         ], $paymentData));
 
-        $this->paid_amount += $amount;
-        $this->save();
+        // The Payment model's saved hook already re-derived this bill's
+        // paid/balance/status from the ledger; pick that up.
+        $this->refresh();
 
         return $payment;
     }

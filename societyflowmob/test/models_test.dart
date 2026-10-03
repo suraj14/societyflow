@@ -1,7 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:societyflow/core/network/http_service.dart';
 import 'package:societyflow/features/auth/models/user_model.dart';
 import 'package:societyflow/features/events/models/event_model.dart';
 import 'package:societyflow/features/facilities/models/facility_model.dart';
+import 'package:societyflow/features/guard/providers/access_pass_provider.dart';
 import 'package:societyflow/features/payments/models/payment_model.dart';
 import 'package:societyflow/features/visitors/models/visitor_model.dart';
 
@@ -200,6 +202,58 @@ void main() {
 
         expect(visitor.visitorType, type);
       }
+    });
+  });
+
+  group('ScanOutcome', () {
+    // Mirrors AccessPassApiController's {success, message, data:{person,
+    // category, action}} shape - the same response the web gate's
+    // scanResponse() sends, just parsed on the Flutter side here.
+    test('parses a successful entry response', () {
+      final outcome = ScanOutcome.fromResult(const ApiResult(
+        success: true,
+        statusCode: 200,
+        message: 'Ramraj - entry allowed.',
+        data: {
+          'success': true,
+          'message': 'Ramraj - entry allowed.',
+          'data': {'person': 'Ramraj', 'category': 'Cleaner', 'action': 'entered'},
+        },
+      ));
+
+      expect(outcome.success, isTrue);
+      expect(outcome.person, 'Ramraj');
+      expect(outcome.category, 'Cleaner');
+      expect(outcome.message, 'Ramraj - entry allowed.');
+    });
+
+    test('parses a denied response (revoked pass) without throwing', () {
+      final outcome = ScanOutcome.fromResult(const ApiResult(
+        success: false,
+        statusCode: 422,
+        message: 'Access revoked.',
+        data: {
+          'success': false,
+          'message': 'Access revoked.',
+          'data': {'person': 'Ramraj'},
+        },
+      ));
+
+      expect(outcome.success, isFalse);
+      expect(outcome.message, 'Access revoked.');
+      expect(outcome.person, 'Ramraj');
+      expect(outcome.category, isNull);
+    });
+
+    test('survives a network-error result with no data at all', () {
+      final outcome = ScanOutcome.fromResult(
+        ApiResult.error('Cannot reach server.', statusCode: 0),
+      );
+
+      expect(outcome.success, isFalse);
+      expect(outcome.person, isNull);
+      expect(outcome.category, isNull);
+      expect(outcome.message, 'Cannot reach server.');
     });
   });
 }

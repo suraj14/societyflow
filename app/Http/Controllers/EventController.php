@@ -40,7 +40,10 @@ class EventController extends BaseController
         // Auto-update expired events before displaying
         Event::updateExpiredEvents();
 
-        $query = Event::where('society_id', $societyId);
+        $query = Event::query();
+        if (!$user->hasRole('Super Admin')) {
+            $query->where('society_id', $societyId);
+        }
 
         // Apply visibility filter for non-admin users
         if (!$user->hasRole(['Super Admin', 'Admin'])) {
@@ -84,7 +87,10 @@ class EventController extends BaseController
         // Auto-update expired events before displaying
         Event::updateExpiredEvents();
 
-        $query = Event::where('society_id', $societyId);
+        $query = Event::query();
+        if (!$user->hasRole('Super Admin')) {
+            $query->where('society_id', $societyId);
+        }
 
         // Apply visibility filter for non-admin users
         if (!$user->hasRole(['Super Admin', 'Admin'])) {
@@ -104,7 +110,7 @@ class EventController extends BaseController
         $user = auth()->user();
 
         // Only Admin and Manager can create events
-        if (!$user->hasRole(['Admin', 'Manager'])) {
+        if (!$user->hasRole(['Super Admin', 'Admin', 'Manager'])) {
             abort(403, 'You do not have permission to create events.');
         }
 
@@ -122,7 +128,7 @@ class EventController extends BaseController
         $user = auth()->user();
 
         // Only Admin and Manager can create events
-        if (!$user->hasRole(['Admin', 'Manager'])) {
+        if (!$user->hasRole(['Super Admin', 'Admin', 'Manager'])) {
             abort(403, 'You do not have permission to create events.');
         }
 
@@ -155,8 +161,8 @@ class EventController extends BaseController
                 'end_date' => $endDateTime,
                 'status' => $validated['status'],
                 'is_role_based' => $validated['is_role_based'],
-                'visible_roles' => $validated['is_role_based'] ? $validated['visible_roles'] : null,
-                'visible_users' => !$validated['is_role_based'] ? $validated['visible_users'] : null,
+                'visible_roles' => $validated['is_role_based'] ? ($validated['visible_roles'] ?? null) : null,
+                'visible_users' => !$validated['is_role_based'] ? ($validated['visible_users'] ?? null) : null,
             ]);
 
             Log::info('Event created', ['event_id' => $event->id, 'user_id' => $user->id]);
@@ -176,7 +182,7 @@ class EventController extends BaseController
         $user = auth()->user();
 
         // Check society access
-        if ($event->society_id !== $user->society_id) {
+        if ($event->society_id !== $user->society_id && !$user->hasRole('Super Admin')) {
             abort(403, 'Unauthorized access.');
         }
 
@@ -200,7 +206,7 @@ class EventController extends BaseController
         $user = auth()->user();
 
         // Check society access
-        if ($event->society_id !== $user->society_id) {
+        if ($event->society_id !== $user->society_id && !$user->hasRole('Super Admin')) {
             abort(403, 'Unauthorized access.');
         }
 
@@ -209,7 +215,7 @@ class EventController extends BaseController
             abort(403, 'You can only edit your own events.');
         }
 
-        if (!$user->hasRole(['Admin', 'Manager'])) {
+        if (!$user->hasRole(['Super Admin', 'Admin', 'Manager'])) {
             abort(403, 'You do not have permission to edit events.');
         }
 
@@ -227,7 +233,7 @@ class EventController extends BaseController
         $user = auth()->user();
 
         // Check society access
-        if ($event->society_id !== $user->society_id) {
+        if ($event->society_id !== $user->society_id && !$user->hasRole('Super Admin')) {
             abort(403, 'Unauthorized access.');
         }
 
@@ -236,7 +242,7 @@ class EventController extends BaseController
             abort(403, 'You can only edit your own events.');
         }
 
-        if (!$user->hasRole(['Admin', 'Manager'])) {
+        if (!$user->hasRole(['Super Admin', 'Admin', 'Manager'])) {
             abort(403, 'You do not have permission to update events.');
         }
 
@@ -273,8 +279,8 @@ class EventController extends BaseController
                 'end_date' => $endDateTime,
                 'status' => $validated['status'],
                 'is_role_based' => $validated['is_role_based'],
-                'visible_roles' => $validated['is_role_based'] ? $validated['visible_roles'] : null,
-                'visible_users' => !$validated['is_role_based'] ? $validated['visible_users'] : null,
+                'visible_roles' => $validated['is_role_based'] ? ($validated['visible_roles'] ?? null) : null,
+                'visible_users' => !$validated['is_role_based'] ? ($validated['visible_users'] ?? null) : null,
             ]);
 
             Log::info('Event updated', ['event_id' => $event->id, 'user_id' => $user->id]);
@@ -294,12 +300,12 @@ class EventController extends BaseController
         $user = auth()->user();
 
         // Check society access
-        if ($event->society_id !== $user->society_id) {
+        if ($event->society_id !== $user->society_id && !$user->hasRole('Super Admin')) {
             abort(403, 'Unauthorized access.');
         }
 
         // Only Admin can delete
-        if (!$user->hasRole('Admin')) {
+        if (!$user->hasRole(['Super Admin', 'Admin'])) {
             abort(403, 'You do not have permission to delete events.');
         }
 
@@ -321,7 +327,10 @@ class EventController extends BaseController
         // Auto-update expired events before returning data
         Event::updateExpiredEvents();
 
-        $query = Event::where('society_id', $societyId);
+        $query = Event::query();
+        if (!$user->hasRole('Super Admin')) {
+            $query->where('society_id', $societyId);
+        }
 
         // Apply visibility filter for non-admin users
         if (!$user->hasRole(['Super Admin', 'Admin'])) {

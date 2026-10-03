@@ -18,6 +18,7 @@
 
         <form action="{{ route('super-admin.societies.store') }}" method="POST" class="p-6">
             @csrf
+            @include('partials.idempotency')
 
             <!-- Society Details -->
             <div class="mb-8">

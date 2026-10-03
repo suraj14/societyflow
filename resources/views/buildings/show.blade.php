@@ -111,6 +111,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">
+                            @php $sfOcc = \App\Support\PropertyOccupancy::statesFor($building->flats); @endphp
                             @forelse($building->flats as $flat)
                                 <tr class="hover:bg-gray-50">
                                     <td class="px-6 py-4">
@@ -119,14 +120,11 @@
                                     <td class="px-6 py-4 text-sm text-gray-600">{{ $flat->floor }}</td>
                                     <td class="px-6 py-4 text-sm text-gray-600">{{ $flat->type ?? '-' }}</td>
                                     <td class="px-6 py-4 text-sm text-gray-600">
-                                        {{ $flat->activeResident->name ?? '-' }}
+                                        {{ $sfOcc[$flat->id]['tenant']->name ?? $sfOcc[$flat->id]['owner']->name ?? '-' }}
                                     </td>
                                     <td class="px-6 py-4">
-                                        <span class="px-2 py-1 text-xs rounded-full 
-                                            {{ $flat->status === 'occupied' ? 'bg-green-100 text-green-700' : '' }}
-                                            {{ $flat->status === 'vacant' ? 'bg-yellow-100 text-yellow-700' : '' }}
-                                            {{ $flat->status === 'maintenance' ? 'bg-red-100 text-red-700' : '' }}">
-                                            {{ ucfirst($flat->status) }}
+                                        <span class="px-2 py-1 text-xs rounded-full {{ \App\Support\PropertyOccupancy::badgeClass($sfOcc[$flat->id]['state']) }}">
+                                            {{ \App\Support\PropertyOccupancy::label($sfOcc[$flat->id]['state']) }}
                                         </span>
                                     </td>
                                     <td class="px-6 py-4">

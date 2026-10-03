@@ -31,7 +31,7 @@ class DashboardController extends Controller
         $pendingDues = $villa->getPendingDues();
         
         $todayVisitors = Visitor::where('flat_id', $villa->id)
-            ->whereDate('expected_entry_time', today())
+            ->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())
             ->count();
 
         $upcomingBookings = FacilityBooking::where('flat_id', $villa->id)
@@ -128,20 +128,10 @@ class DashboardController extends Controller
             }
         }
         
-        // Method 5: Create villa if user has Villa Owner role but no villa (auto-fix)
-        if (!$villa && $user->hasRole('Villa Owner')) {
+        // Method 5: Create villa if user has the Owner role but no villa (auto-fix)
+        if (!$villa && $user->hasAnyRole(['Owner', 'Villa Owner'])) {
             $villa = $this->createVillaForOwner($user);
         }
-
-        // Debug information
-        \Log::info('Villa Owner Dashboard Debug', [
-            'user_id' => $user->id,
-            'user_email' => $user->email,
-            'owner_id' => $user->owner_id,
-            'user_roles' => $user->getRoleNames()->toArray(),
-            'villa_found' => $villa ? $villa->id : null,
-            'villa_number' => $villa ? $villa->flat_number : null,
-        ]);
 
         return $villa;
     }

@@ -100,31 +100,28 @@ class PropertyTypeNavigationTest extends TestCase
     }
 
     /**
-     * Owner/tenant assignment ("assign an existing user to an existing
-     * property", distinct from creating one) links were built, tested and
-     * society-scoped, but had no live navigation path anywhere - only an
-     * unused sidebar partial nothing renders referenced them. Wired into
-     * the live sidebar's existing property-type-gated groups.
+     * Owner/tenant assignment links were originally wired directly into the
+     * Apartments/Villas/Tenant sidebar groups (one "Owner/Tenant Assignments"
+     * link per group). A later pass added a single "Property & Occupancy"
+     * hub covering all three, which made the per-group links a second path
+     * to the same screens - exactly the "should I use Tenant Assignment,
+     * Apartment Assignment, or Villa Assignment?" confusion a follow-up
+     * cleanup asked to remove. The per-group links were deleted; the
+     * underlying assignment screens are untouched and still reachable, only
+     * now from one place. This test's assertions were updated to match -
+     * see PropertyContextUxTest::test_property_occupancy_hub_shows_only_supported_sections
+     * for the hub's own property-type gating.
      */
-    public function test_assignment_links_follow_the_same_property_type_gate(): void
+    public function test_assignment_links_are_reachable_only_via_the_occupancy_hub(): void
     {
-        $villaHtml = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Villa))
+        $html = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Both))
             ->get('/dashboard')->assertOk()->getContent();
 
-        $this->assertStringContainsString('villa-assignments', $villaHtml);
-        $this->assertStringNotContainsString('apartment-assignments', $villaHtml);
-        $this->assertStringContainsString('tenant-assignments', $villaHtml);
-
-        $apartmentHtml = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Apartment))
-            ->get('/dashboard')->assertOk()->getContent();
-
-        $this->assertStringContainsString('apartment-assignments', $apartmentHtml);
-        $this->assertStringNotContainsString('villa-assignments', $apartmentHtml);
-
-        $mixedHtml = $this->actingAs($this->adminOfSociety(SocietyPropertyType::Both))
-            ->get('/dashboard')->assertOk()->getContent();
-
-        $this->assertStringContainsString('apartment-assignments', $mixedHtml);
-        $this->assertStringContainsString('villa-assignments', $mixedHtml);
+        // One entry point in the sidebar itself...
+        $this->assertStringContainsString('property-occupancy', $html);
+        // ...not three separate ones duplicating what the hub already covers.
+        $this->assertStringNotContainsString('apartment-assignments', $html);
+        $this->assertStringNotContainsString('villa-assignments', $html);
+        $this->assertStringNotContainsString('tenant-assignments', $html);
     }
 }

@@ -41,6 +41,12 @@ class Payment extends Model
             'due_date' => 'date',
         ];
 
+    /** Values the payments.payment_method column accepts (MySQL enum). */
+    public const METHODS = ['cash', 'cheque', 'online', 'upi', 'card', 'bank_transfer', 'unrecorded'];
+
+    /** Values the payments.status column accepts (MySQL enum). */
+    public const STATUSES = ['pending', 'success', 'failed', 'cancelled'];
+
     protected static function boot()
     {
         parent::boot();
@@ -50,6 +56,33 @@ class Payment extends Model
                 $payment->payment_id = static::generatePaymentId();
             }
         });
+
+        // The ledger is the source of truth for what a bill has collected.
+        // Any change to a linked payment re-derives that bill (and the bill
+        // it was previously linked to, if it moved), so paid_amount /
+        // balance_amount / status / paid_date can never drift from the
+        // payments behind them. Controllers must not add to paid_amount by
+        // hand - they used to, and a pending tenant payment was counted as
+        // collected before anyone verified it.
+        static::saved(function ($payment) {
+            $payment->syncLinkedBills();
+        });
+
+        static::deleted(function ($payment) {
+            $payment->syncLinkedBills();
+        });
+    }
+
+    private function syncLinkedBills(): void
+    {
+        $ids = array_filter(array_unique([
+            $this->maintenance_bill_id,
+            $this->getOriginal('maintenance_bill_id'),
+        ]));
+
+        foreach ($ids as $billId) {
+            MaintenanceBill::find($billId)?->syncFromLedger();
+        }
     }
 
     // Relationships
@@ -122,15 +155,18 @@ class Payment extends Model
 
     public function markAsSuccess(array $gatewayData = []): void
     {
+        // The saved hook re-derives the linked bill from the ledger.
         $this->update([
             'status' => 'success',
             'gateway_response' => $gatewayData,
             'payment_date' => now(),
         ]);
+    }
 
-        // Update maintenance bill
-        $this->maintenanceBill->paid_amount += $this->amount;
-        $this->maintenanceBill->save();
+    /** True once an admin has verified the money actually arrived. */
+    public function isVerified(): bool
+    {
+        return $this->status === 'success';
     }
 
     public function markAsFailed(array $gatewayData = []): void

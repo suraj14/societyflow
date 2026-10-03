@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Flat;
 use App\Models\Building;
 use App\Models\Society;
+use App\Support\PropertyOccupancy;
 use App\Http\Controllers\Concerns\ResolvesPropertyOwner;
 use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
@@ -65,15 +66,38 @@ class FlatController extends BaseController
         // Search functionality
         if ($request->filled('search')) {
             $search = $request->search;
-            $query->where('flat_number', 'like', "%{$search}%")
-                  ->orWhereHas('building', function ($q) use ($search) {
-                      $q->where('name', 'like', "%{$search}%");
+            // Grouped: an ungrouped orWhereHas escapes the society scope
+            // applied above and lists other societies' flats.
+            $query->where(function ($q) use ($search) {
+                $q->where('flat_number', 'like', "%{$search}%")
+                  ->orWhereHas('building', function ($b) use ($search) {
+                      $b->where('name', 'like', "%{$search}%");
                   });
+            });
         }
 
-        // Status filter
+        // Status filter. Occupancy filters use the canonical rule
+        // (PropertyOccupancy), so the list agrees with its own badges and
+        // with every other screen; only maintenance is a stored status.
         if ($request->filled('status')) {
-            $query->where('status', $request->status);
+            $status = $request->status;
+            $occupancyFilter = [
+                'vacant'          => [PropertyOccupancy::VACANT],
+                'occupied'        => [PropertyOccupancy::OWNER, PropertyOccupancy::TENANT],
+                'owner_occupied'  => [PropertyOccupancy::OWNER],
+                'tenant_occupied' => [PropertyOccupancy::TENANT],
+                'on_rent'         => [PropertyOccupancy::TENANT],
+            ];
+
+            if (isset($occupancyFilter[$status])) {
+                $ids = [];
+                foreach ($occupancyFilter[$status] as $state) {
+                    $ids = array_merge($ids, PropertyOccupancy::flatIdsInState($societyId, $state));
+                }
+                $query->whereIn('id', $ids ?: [0]);
+            } else {
+                $query->where('status', $status);
+            }
         }
 
         // Building filter (also needs society filtering)
@@ -81,8 +105,9 @@ class FlatController extends BaseController
             $query->where('building_id', $request->building_id);
         }
 
-        $flats = $query->latest()->paginate(15);
-        
+        $flats = $query->latest()->paginate(15)->withQueryString();
+        $occupancy = PropertyOccupancy::statesFor($flats->getCollection());
+
         // Buildings dropdown should also be filtered by society
         $buildingsQuery = Building::query();
         if ($societyId) {
@@ -90,7 +115,7 @@ class FlatController extends BaseController
         }
         $buildings = $buildingsQuery->get();
 
-        return view('flats.index', compact('flats', 'buildings'));
+        return view('flats.index', compact('flats', 'buildings', 'occupancy'));
     }
 
     public function create()
@@ -132,17 +157,22 @@ class FlatController extends BaseController
                 'carpet_area' => 'nullable|numeric|min:100|max:10000',
                 'built_up_area' => 'nullable|numeric|min:100|max:10000',
                 'maintenance_amount' => 'nullable|numeric|min:0',
-                'status' => 'required|in:vacant,occupied,on_rent,maintenance',
+                // Only "under maintenance" is a decision a person makes.
+                // Occupancy (vacant / occupied / on_rent) is derived from
+                // the owner and tenant records by the Flat model and any
+                // submitted value is ignored - see Flat::OCCUPANCY_STATUSES.
+                'status' => 'nullable|in:vacant,occupied,on_rent,maintenance,under_maintenance',
                 'description' => 'nullable|string',
                 'owner_id' => ['nullable', $this->existsInSociety('owners', $societyId)],
             ];
-            
+
             // Only Super Admin can select society, others use their own society
             if ($user->hasRole('Super Admin')) {
                 $rules['society_id'] = 'required|exists:societies,id';
             }
 
             $validated = $request->validate($rules);
+            $validated['status'] = self::storedStatusFromRequest($validated['status'] ?? null);
 
             // Set society_id for non-Super Admin users
             if (!$user->hasRole('Super Admin')) {
@@ -227,17 +257,19 @@ class FlatController extends BaseController
             'carpet_area' => 'nullable|numeric|min:100|max:10000',
             'built_up_area' => 'nullable|numeric|min:100|max:10000',
             'maintenance_amount' => 'nullable|numeric|min:0',
-            'status' => 'required|in:vacant,occupied,on_rent,maintenance',
+            // See store(): occupancy is derived, only maintenance is chosen.
+            'status' => 'nullable|in:vacant,occupied,on_rent,maintenance,under_maintenance',
             'description' => 'nullable|string',
             'owner_id' => ['nullable', $this->existsInSociety('owners', $societyId)],
         ];
-        
+
         // Only Super Admin can select society, others use their own society
         if ($user->hasRole('Super Admin')) {
             $rules['society_id'] = 'required|exists:societies,id';
         }
 
         $validated = $request->validate($rules);
+        $validated['status'] = self::storedStatusFromRequest($validated['status'] ?? null);
 
         // Set society_id for non-Super Admin users
         if (!$user->hasRole('Super Admin')) {
@@ -264,7 +296,7 @@ class FlatController extends BaseController
     {
         $this->authorizeSocietyAccess($flat);
 
-        if ($flat->status === 'occupied') {
+        if ($flat->isOccupied()) {
             return back()->with('error', 'Cannot delete occupied flat!');
         }
 
@@ -283,11 +315,23 @@ class FlatController extends BaseController
         $this->authorizeSocietyAccess($flat);
 
         $request->validate([
-            'status' => 'required|in:vacant,occupied,on_rent,maintenance',
+            'status' => 'required|in:vacant,occupied,on_rent,maintenance,under_maintenance',
         ]);
 
-        $flat->update(['status' => $request->status]);
+        // A person can only put a unit under maintenance or take it out
+        // again; the occupancy value stored after that is derived.
+        $flat->update(['status' => self::storedStatusFromRequest($request->status)]);
 
         return back()->with('success', 'Flat status updated successfully!');
+    }
+
+    /**
+     * Map a submitted status to what may actually be stored: a manual
+     * maintenance state is kept, anything else means "derive occupancy"
+     * (the Flat model replaces 'vacant' with the real derived value on save).
+     */
+    public static function storedStatusFromRequest(?string $submitted): string
+    {
+        return in_array($submitted, Flat::MANUAL_STATUSES, true) ? $submitted : 'vacant';
     }
 }

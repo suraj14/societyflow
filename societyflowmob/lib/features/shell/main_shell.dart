@@ -34,7 +34,13 @@ class _MainShellState extends ConsumerState<MainShell> {
 
   bool get _isGuard {
     final role = ref.read(currentUserProvider)?.role ?? '';
-    return role == 'Guard' || role == 'Staff';
+    // Staff used to be routed to the Guard home screen (QR scanner, gate
+    // actions) - that is not their job and the scan endpoint's own backend
+    // authorization (Guard|Admin|Super Admin) already rejects them, so it
+    // was a dead button, not a security hole. Staff now gets the same
+    // generic HomeScreen as Owner/Tenant, since no dedicated Staff screen
+    // exists yet - a real one is separate follow-up work, not invented here.
+    return role == 'Guard';
   }
 
   List<Widget> get _screens {

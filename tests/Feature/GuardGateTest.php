@@ -82,7 +82,12 @@ class GuardGateTest extends TestCase
     {
         $html = $this->actingAs($this->guard)->get('/guard')->assertOk()->getContent();
 
-        $this->assertStringContainsString('Register Visitor', $html);
+        // Scan QR is now the primary action ("scan, verify, move on");
+        // Register Visitor moved to a secondary button and was renamed to
+        // make clear it is for the one case with no pass - an unannounced,
+        // unknown visitor.
+        $this->assertStringContainsString('Scan QR', $html);
+        $this->assertStringContainsString('Register Unknown Visitor', $html);
         $this->assertStringNotContainsString('Monthly Revenue', $html);
         $this->assertStringNotContainsString('Pending Dues', $html);
     }

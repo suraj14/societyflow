@@ -17,6 +17,7 @@
         <!-- Form -->
         <form method="POST" action="{{ route('events.store') }}" class="p-6 space-y-6">
             @csrf
+            @include('partials.idempotency')
 
             <!-- Event Name -->
             <div>

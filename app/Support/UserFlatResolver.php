@@ -62,9 +62,26 @@ class UserFlatResolver
             $user->residents()->where('status', 'active')->pluck('flat_id')->filter()
         );
 
-        // 2. Tenancy. Matched by users.tenant_id first, then by any tenant
-        //    row pointing back at this user, since both links exist in data.
-        $tenantFlatIds = Tenant::query()
+        // 2. Tenancy.
+        $ids = $ids->merge(self::tenantFlatIds($user));
+
+        // 3. Ownership.
+        $ids = $ids->merge(self::ownedFlatIds($user));
+
+        return $ids->unique()->values()->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
+     * Flat IDs the user currently rents (active tenancy only).
+     *
+     * Matched by users.tenant_id first, then by any tenant row pointing back
+     * at this user, since both links exist in data.
+     *
+     * @return array<int,int>
+     */
+    public static function tenantFlatIds(User $user): array
+    {
+        return Tenant::query()
             ->where('society_id', $user->society_id)
             ->where('status', 'active')
             ->where(function ($q) use ($user) {
@@ -74,14 +91,11 @@ class UserFlatResolver
                 }
             })
             ->pluck('flat_id')
-            ->filter();
-
-        $ids = $ids->merge($tenantFlatIds);
-
-        // 3. Ownership.
-        $ids = $ids->merge(self::ownedFlatIds($user));
-
-        return $ids->unique()->values()->map(fn ($id) => (int) $id)->all();
+            ->filter()
+            ->unique()
+            ->values()
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     /**

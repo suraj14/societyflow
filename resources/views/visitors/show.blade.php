@@ -15,8 +15,30 @@
                 <p class="text-gray-600 mt-1">Visitor Details</p>
             </div>
         </div>
-        <div class="flex space-x-3">
-            @if($visitor->approval_status === 'approved' && $visitor->entry_status === 'pending')
+        @php $isGateStaff = auth()->user()->hasRole(['Admin', 'Staff', 'Super Admin']); @endphp
+        <div class="flex flex-wrap gap-3 justify-end">
+            {{-- Allow / Deny: Admin/Staff, or the tenant/owner of this property. --}}
+            @if($canDecide && $visitor->approval_status === 'pending')
+                <form action="{{ route('visitors.allow', $visitor) }}" method="POST" class="inline-block">
+                    @csrf
+                    <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
+                        <i class="fas fa-check mr-2"></i>Approve
+                    </button>
+                </form>
+                <form action="{{ route('visitors.deny', $visitor) }}" method="POST" class="inline-flex items-center gap-2">
+                    @csrf
+                    <input type="text" name="reason" maxlength="500" @if($isGateStaff) required @endif
+                           placeholder="Reason{{ $isGateStaff ? '' : ' (optional)' }}"
+                           class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500">
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
+                        <i class="fas fa-times mr-2"></i>Deny
+                    </button>
+                </form>
+            @endif
+            {{-- Was 'approved' - not a value this column ever holds (the
+                 model/controller both use 'allowed'), so this button never
+                 appeared. --}}
+            @if($isGateStaff && $visitor->approval_status === 'allowed' && $visitor->entry_status === 'pending')
                 <form action="{{ route('visitors.check-in', $visitor) }}" method="POST" class="inline-block">
                     @csrf
                     <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
@@ -24,7 +46,7 @@
                     </button>
                 </form>
             @endif
-            @if($visitor->entry_status === 'entered')
+            @if($isGateStaff && $visitor->entry_status === 'entered')
                 <form action="{{ route('visitors.check-out', $visitor) }}" method="POST" class="inline-block">
                     @csrf
                     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
@@ -32,10 +54,12 @@
                     </button>
                 </form>
             @endif
-            <a href="{{ route('visitors.edit', $visitor) }}" 
-               class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
-                <i class="fas fa-edit mr-2"></i>Edit
-            </a>
+            @if(auth()->user()->hasRole(['Admin', 'Super Admin']))
+                <a href="{{ route('visitors.edit', $visitor) }}"
+                   class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
+                    <i class="fas fa-edit mr-2"></i>Edit
+                </a>
+            @endif
         </div>
     </div>
 
@@ -106,15 +130,24 @@
                 <div class="px-6 py-4">
                     <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <dt class="text-sm font-medium text-gray-500">Visiting Apartment</dt>
+                            <dt class="text-sm font-medium text-gray-500">Visiting Property</dt>
                             <dd class="mt-1 text-sm text-gray-900">
-                                {{ $visitor->flat->building->name ?? '' }} - {{ $visitor->flat->flat_number ?? '' }}
+                                {{ $visitor->flat ? \App\Support\VisitorPropertyScope::unitLabel($visitor->flat) : '-' }}
                             </dd>
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-gray-500">Host</dt>
                             <dd class="mt-1 text-sm text-gray-900">{{ $visitor->host->name ?? 'N/A' }}</dd>
                         </div>
+                        @if($visitor->approval_status === 'allowed' && $visitor->entry_status === 'pending' && $visitor->qr_token)
+                            {{-- Issued automatically on approval (Visitor::booted); the
+                                 guard's Scan QR page accepts this code. --}}
+                            <div class="md:col-span-2">
+                                <dt class="text-sm font-medium text-gray-500">Gate Pass Code</dt>
+                                <dd class="mt-1 font-mono text-xs text-gray-700 bg-gray-50 rounded-lg py-2 px-3 break-all">{{ $visitor->qr_token }}</dd>
+                                <p class="mt-1 text-xs text-gray-500">Share this with your visitor; security can scan or enter it at the gate.</p>
+                            </div>
+                        @endif
                         <div>
                             <dt class="text-sm font-medium text-gray-500">Expected Entry</dt>
                             <dd class="mt-1 text-sm text-gray-900">{{ \Carbon\Carbon::parse($visitor->expected_entry_time)->format('M d, Y h:i A') }}</dd>
@@ -161,8 +194,8 @@
                                                     @php
                                                         $actionColors = [
                                                             'created' => 'bg-blue-500',
-                                                            'approved' => 'bg-green-500',
-                                                            'rejected' => 'bg-red-500',
+                                                            'allowed' => 'bg-green-500',
+                                                            'denied' => 'bg-red-500',
                                                             'entry' => 'bg-green-500',
                                                             'exit' => 'bg-gray-500',
                                                             'updated' => 'bg-yellow-500',
@@ -211,8 +244,8 @@
                                 @php
                                     $approvalColors = [
                                         'pending' => 'bg-yellow-100 text-yellow-800',
-                                        'approved' => 'bg-green-100 text-green-800',
-                                        'rejected' => 'bg-red-100 text-red-800',
+                                        'allowed' => 'bg-green-100 text-green-800',
+                                        'denied' => 'bg-red-100 text-red-800',
                                     ];
                                 @endphp
                                 <span class="px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full {{ $approvalColors[$visitor->approval_status] ?? 'bg-gray-100 text-gray-800' }}">

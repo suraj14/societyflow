@@ -148,9 +148,34 @@ class ThemeHelper
             background-color: {$primaryColor} !important;
             color: white !important;
         }
-        
+
         .btn-primary:hover {
             background-color: " . self::darkenColor($primaryColor, 0.1) . " !important;
+        }
+
+        /* Secondary color - was defined as a CSS variable only, with no
+           utility class actually reading it anywhere, so changing it in
+           Settings had saved to the database correctly but had no visible
+           effect. Mirrors the primary-color classes above. */
+        .bg-secondary {
+            background-color: {$secondaryColor} !important;
+        }
+
+        .text-secondary {
+            color: {$secondaryColor} !important;
+        }
+
+        .border-secondary {
+            border-color: {$secondaryColor} !important;
+        }
+
+        .btn-secondary {
+            background-color: {$secondaryColor} !important;
+            color: white !important;
+        }
+
+        .btn-secondary:hover {
+            background-color: " . self::darkenColor($secondaryColor, 0.1) . " !important;
         }
         
         /* Active navigation styles */

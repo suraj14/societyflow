@@ -22,6 +22,20 @@ class PaymentController extends Controller
         $user = auth()->user();
         $query = Payment::with(['flat.building', 'flat.villaArea']);
 
+        // Scope by default; exempt Super Admin explicitly (CLAUDE.md §3).
+        //
+        // The role chain below names Admin, Tenant, Villa Owner and Apartment
+        // Owner and then falls through to "Super Admin sees all" - so Guard
+        // and Accountant, named nowhere, listed every payment in every
+        // society. RestrictStaffAccess hid this for Staff only; its first
+        // guard returns early for every role that is not Staff.
+        //
+        // This scope only ever narrows: the branches below still apply their
+        // own per-role filters on top of it.
+        if (!$user->hasRole('Super Admin')) {
+            $query->where('society_id', $user->society_id);
+        }
+
         // Filter by society for Admin users
         if ($user->hasRole('Admin')) {
             $query->where('society_id', $user->society_id);
@@ -88,6 +102,18 @@ class PaymentController extends Controller
                 $query->whereIn('flat_id', []);
             }
         }
+        // Owner (canonical role): see bills for every property they own,
+        // villa or apartment - property type is a flat attribute, not a
+        // separate role, so this is one branch instead of two.
+        elseif ($user->hasRole('Owner')) {
+            $flatIds = \App\Models\Flat::where('owner_id', $user->owner_id)->pluck('id');
+
+            if ($flatIds->count() > 0) {
+                $query->whereIn('flat_id', $flatIds);
+            } else {
+                $query->whereIn('flat_id', []);
+            }
+        }
         // Super Admin sees all payments
 
         // Get paginated payments
@@ -95,6 +121,14 @@ class PaymentController extends Controller
         
         // Get statistics (all payments, not just current page)
         $statsQuery = Payment::query();
+
+        // Same default scoping as the list above - the headline totals leaked
+        // other societies' revenue to Guard and Accountant independently of
+        // the table.
+        if (!$user->hasRole('Super Admin')) {
+            $statsQuery->where('society_id', $user->society_id);
+        }
+
         if ($user->hasRole('Admin')) {
             $statsQuery->where('society_id', $user->society_id);
         }
@@ -157,12 +191,23 @@ class PaymentController extends Controller
                 $statsQuery->whereIn('flat_id', []);
             }
         }
-        
+        // Owner (canonical role): same combined villa+apartment scope as the
+        // list query above.
+        elseif ($user->hasRole('Owner')) {
+            $flatIds = \App\Models\Flat::where('owner_id', $user->owner_id)->pluck('id');
+
+            if ($flatIds->count() > 0) {
+                $statsQuery->whereIn('flat_id', $flatIds);
+            } else {
+                $statsQuery->whereIn('flat_id', []);
+            }
+        }
+
         $stats = [
             'total_amount' => $statsQuery->sum('amount'),
             'total_count' => $statsQuery->count(),
-            'this_month_amount' => (clone $statsQuery)->where('created_at', '>=', now()->startOfMonth())->sum('amount'),
-            'today_amount' => (clone $statsQuery)->where('created_at', '>=', now()->startOfDay())->sum('amount'),
+            'this_month_amount' => (clone $statsQuery)->where('created_at', '>=', \App\Support\SocietyClock::monthBounds()[0])->sum('amount'),
+            'today_amount' => (clone $statsQuery)->where('created_at', '>=', \App\Support\SocietyClock::dayBounds()[0])->sum('amount'),
         ];
         
         return view('payments.index', compact('payments', 'stats'));
@@ -201,7 +246,7 @@ class PaymentController extends Controller
             }
         }
         // For owners - auto-populate their properties (apartments and/or villas)
-        elseif ($user->hasRole('Villa Owner') || $user->hasRole('Apartment Owner')) {
+        elseif ($user->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner'])) {
             // Get user's owned villas
             $villas = collect();
             if ($user->owner_id) {
@@ -265,13 +310,20 @@ class PaymentController extends Controller
             
             $properties = $allProperties;
             
-            // Determine property type label based on what user owns
+            // Determine the property type label based on what the user owns.
+            //
+            // 'mixed' is a LABEL ONLY - it is deliberately not one of the
+            // PropertyType values. An owner holding both a villa and an
+            // apartment picks the specific unit from one combined list, and
+            // store() derives the concrete type from that unit. The view
+            // must not submit 'mixed' as property_type: it fails the
+            // in:apartment,villa rule, and because the field is hidden in
+            // this branch the owner had no way to correct it.
             if ($villas->count() > 0 && $apartments->count() === 0) {
                 $propertyType = 'villa';
             } elseif ($apartments->count() > 0 && $villas->count() === 0) {
                 $propertyType = 'apartment';
             } else if ($properties->count() > 0) {
-                // Mixed properties or has properties - use generic label
                 $propertyType = 'mixed';
             }
         }
@@ -300,18 +352,27 @@ class PaymentController extends Controller
     {
         try {
             $request->validate([
-                'property_type' => 'required|in:apartment,villa',
+                // Nullable: an owner holding both kinds picks the unit from one
+                // combined list and submits no type. The selected flat is the
+                // authority either way - this value only routes which input
+                // carries the id, and is never persisted.
+                'property_type' => 'nullable|in:apartment,villa',
+                // Bill-first flow: reuses the existing maintenance_bills
+                // table rather than adding a parallel one. When a bill is
+                // picked, bill_type/due_date are resolved from it
+                // server-side below rather than trusted as submitted.
+                'maintenance_bill_id' => 'nullable|exists:maintenance_bills,id',
                 'amount' => 'required|numeric|min:0',
                 'payment_method' => 'required|in:cash,cheque,online,upi',
                 'payment_date' => 'required|date',
-                'bill_type' => 'required|string|max:255',
-                'due_date' => 'required|date',
+                'bill_type' => 'required_without:maintenance_bill_id|nullable|string|max:255',
+                'due_date' => 'required_without:maintenance_bill_id|nullable|date',
                 'receipt_file' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
                 'notes' => 'nullable|string',
             ]);
 
             $user = auth()->user();
-            
+
             // Get the flat_id based on property type
             $flatId = null;
             if ($request->property_type === 'apartment') {
@@ -329,25 +390,52 @@ class PaymentController extends Controller
                 return back()->withErrors(['error' => 'Please select a property'])->withInput();
             }
             
-            // Verify flat exists and belongs to user's society (for Admin users)
+            // Verify the flat exists and belongs to the acting user's society.
             $flat = \App\Models\Flat::find($flatId);
             if (!$flat) {
                 return back()->withErrors(['error' => 'Invalid property selected'])->withInput();
             }
-            
-            if ($user->hasRole('Admin') && $flat->society_id != $user->society_id) {
-                return back()->withErrors(['error' => 'Invalid property selected'])->withInput();
+
+            // Was `if ($user->hasRole('Admin') && $flat->society_id != ...)`:
+            // the && meant every non-Admin role (Owner, Tenant, Guard,
+            // Accountant, Staff) skipped the check, so any authenticated
+            // resident could post another society's flat_id and create a
+            // payment row inside that society. Scope by default instead.
+            $this->authorizeSocietyAccess($flat);
+
+            // create() only ever lists the acting resident's own flat(s) as
+            // options, but the field is still a plain form input - a
+            // same-society resident could otherwise hand-craft a request
+            // naming a neighbour's flat_id and record a payment against it.
+            if (!$user->hasAnyRole(['Admin', 'Super Admin']) && !\App\Support\UserFlatResolver::userHasFlat($user, $flat->id)) {
+                return back()->withErrors(['error' => 'You can only record a payment for your own property.'])->withInput();
             }
-            
+
+            // Bill-first: never trust bill_type/due_date typed alongside a
+            // chosen bill - resolve them from the bill itself, and check the
+            // bill actually belongs to the flat being paid against so a
+            // request cannot pair one flat's bill with another's flat_id.
+            $bill = null;
+            if ($request->filled('maintenance_bill_id')) {
+                $bill = MaintenanceBill::where('id', $request->maintenance_bill_id)
+                    ->where('flat_id', $flat->id)
+                    ->first();
+
+                if (!$bill) {
+                    return back()->withErrors(['error' => 'Selected bill does not belong to this property.'])->withInput();
+                }
+            }
+
             // Create payment data
             $paymentData = [
                 'society_id' => $user->hasRole('Admin') ? $user->society_id : $flat->society_id,
                 'flat_id' => $flatId,
+                'maintenance_bill_id' => $bill?->id,
                 'amount' => $request->amount,
                 'payment_method' => $request->payment_method,
                 'payment_date' => $request->payment_date,
-                'bill_type' => $request->bill_type,
-                'due_date' => $request->due_date,
+                'bill_type' => $bill ? ($bill->bill_type ?: 'Maintenance') : $request->bill_type,
+                'due_date' => $bill ? $bill->due_date : $request->due_date,
                 'notes' => $request->notes,
                 'status' => 'success',
             ];
@@ -370,9 +458,14 @@ class PaymentController extends Controller
             PaymentReceived::dispatch($payment);
 
             return redirect()->route('payments.index')->with('success', 'Payment recorded successfully!');
-            
+
         } catch (\Illuminate\Validation\ValidationException $e) {
             return back()->withErrors($e->errors())->withInput();
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            // abort(403) from the society check is an \Exception too; without
+            // this it would be swallowed into the generic "an error occurred"
+            // redirect below, hiding a blocked cross-society write.
+            throw $e;
         } catch (\Exception $e) {
             return back()->withErrors(['error' => 'An error occurred while processing your request. Please try again.'])->withInput();
         }
@@ -409,7 +502,11 @@ class PaymentController extends Controller
 
         try {
             $request->validate([
-                'property_type' => 'required|in:apartment,villa',
+                // Nullable: an owner holding both kinds picks the unit from one
+                // combined list and submits no type. The selected flat is the
+                // authority either way - this value only routes which input
+                // carries the id, and is never persisted.
+                'property_type' => 'nullable|in:apartment,villa',
                 'amount' => 'required|numeric|min:0',
                 'payment_method' => 'required|in:cash,cheque,online,upi',
                 'payment_date' => 'required|date',
@@ -422,16 +519,17 @@ class PaymentController extends Controller
             // flat_id is sent as a hidden field directly on edit
             $flatId = $request->get('flat_id') ?? $payment->flat_id;
             
-            // Verify flat exists and belongs to user's society (for Admin users)
+            // Verify the flat exists and belongs to the acting user's society.
             $flat = \App\Models\Flat::find($flatId);
             if (!$flat) {
                 return back()->withErrors(['error' => 'Invalid property selected'])->withInput();
             }
-            
-            if ($user->hasRole('Admin') && $flat->society_id != $user->society_id) {
-                return back()->withErrors(['error' => 'Invalid property selected'])->withInput();
-            }
-            
+
+            // Same `&&` short-circuit as store() had: re-pointing an existing
+            // payment at another society's flat was open to every non-Admin
+            // role. authorizeSocietyAccess() scopes by default.
+            $this->authorizeSocietyAccess($flat);
+
             // Create payment data
             $paymentData = [
                 'flat_id' => $flatId,
@@ -463,9 +561,12 @@ class PaymentController extends Controller
             $payment->update($paymentData);
 
             return redirect()->route('payments.index')->with('success', 'Payment updated successfully!');
-            
+
         } catch (\Illuminate\Validation\ValidationException $e) {
             return back()->withErrors($e->errors())->withInput();
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            // See store(): keep the 403 from the society check intact.
+            throw $e;
         } catch (\Exception $e) {
             return back()->withErrors(['error' => 'An error occurred while processing your request. Please try again.'])->withInput();
         }
@@ -475,10 +576,52 @@ class PaymentController extends Controller
     {
         $this->authorizeOwnedRecord($payment);
 
+        // The Payment model's deleted hook re-derives the linked bill.
         $payment->delete();
 
         return redirect()->route('payments.index')
             ->with('success', 'Payment deleted successfully!');
+    }
+
+    /**
+     * Verify a resident-submitted (pending) payment. Only now does it count
+     * towards the bill - the Payment model's saved hook re-derives the bill
+     * from its ledger when the status flips to success.
+     */
+    public function approve(Payment $payment)
+    {
+        $this->authorizeSocietyAccess($payment);
+        abort_unless(auth()->user()->hasAnyRole(['Super Admin', 'Admin', 'Accountant']), 403);
+
+        if ($payment->status === 'success') {
+            return back()->with('info', 'This payment is already verified.');
+        }
+        if ($payment->status !== 'pending') {
+            return back()->with('error', 'Only a pending payment can be verified.');
+        }
+
+        $payment->update(['status' => 'success']);
+
+        \App\Models\ActivityLog::recordFor($payment, 'payment.approved', ['amount' => (float) $payment->amount, 'maintenance_bill_id' => $payment->maintenance_bill_id]);
+
+        return back()->with('success', 'Payment verified and applied to the bill.');
+    }
+
+    /** Decline a resident-submitted payment; the bill is left untouched. */
+    public function reject(Payment $payment)
+    {
+        $this->authorizeSocietyAccess($payment);
+        abort_unless(auth()->user()->hasAnyRole(['Super Admin', 'Admin', 'Accountant']), 403);
+
+        if ($payment->status !== 'pending') {
+            return back()->with('error', 'Only a pending payment can be rejected.');
+        }
+
+        $payment->update(['status' => 'cancelled']);
+
+        \App\Models\ActivityLog::recordFor($payment, 'payment.rejected', ['amount' => (float) $payment->amount, 'maintenance_bill_id' => $payment->maintenance_bill_id]);
+
+        return back()->with('success', 'Payment rejected.');
     }
 
     /**
@@ -684,6 +827,58 @@ class PaymentController extends Controller
             \Log::error('Error loading villas: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to load villas'], 500);
         }
+    }
+
+    /**
+     * API endpoint listing a flat's unpaid/partial maintenance bills, so the
+     * Record Payment form can go bill-first: once a property is chosen, its
+     * outstanding bills populate a select and choosing one fills bill type,
+     * amount and due date instead of asking the admin to retype them.
+     */
+    public function getOutstandingBills(Request $request)
+    {
+        $flatId = $request->get('flat_id');
+
+        if (!$flatId) {
+            return response()->json([]);
+        }
+
+        $flat = \App\Models\Flat::find($flatId);
+
+        if (!$flat) {
+            return response()->json([]);
+        }
+
+        // Same rule as store(): scope by default, and a non-admin resident
+        // may only ever see their own property's bills, not a neighbour's.
+        $this->authorizeSocietyAccess($flat);
+
+        $user = auth()->user();
+        if (!$user->hasAnyRole(['Super Admin', 'Admin']) && !\App\Support\UserFlatResolver::userHasFlat($user, $flat->id)) {
+            abort(403);
+        }
+
+        $bills = MaintenanceBill::where('flat_id', $flat->id)
+            ->whereIn('status', ['pending', 'partial'])
+            ->orderBy('due_date')
+            ->get()
+            ->map(function ($bill) {
+                $outstanding = $bill->total_amount - $bill->paid_amount;
+
+                return [
+                    'id' => $bill->id,
+                    'bill_type' => $bill->bill_type ?: 'Maintenance',
+                    'label' => ($bill->bill_type ? ucfirst($bill->bill_type) : 'Maintenance')
+                        . ' - ' . ($bill->month ? $bill->month . ' ' . $bill->year : $bill->bill_date?->format('M Y'))
+                        . ' (Due ' . optional($bill->due_date)->format('d M Y') . ')',
+                    'total_amount' => (float) $bill->total_amount,
+                    'paid_amount' => (float) $bill->paid_amount,
+                    'outstanding_amount' => (float) $outstanding,
+                    'due_date' => optional($bill->due_date)->format('Y-m-d'),
+                ];
+            });
+
+        return response()->json($bills);
     }
 
     /**

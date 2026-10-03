@@ -23,23 +23,24 @@ class UserVillaAssignmentController extends BaseController
         
         $societyId = $this->getSocietyId();
         
-        // Get villa owners without assigned villas
+        // Get villa owners without assigned villas ('Owner' is canonical;
+        // 'Villa Owner' kept for users not yet migrated)
         $unassignedVillaOwners = User::bySociety($societyId)
-            ->role('Villa Owner')
+            ->role(['Owner', 'Villa Owner'])
             ->whereDoesntHave('ownedVilla')
             ->with('resident')
             ->get();
-        
+
         // Get available villas (not assigned to any owner)
         $availableVillas = Flat::bySociety($societyId)
             ->villas()
             ->whereNull('owner_id')
             ->with('villaArea')
             ->get();
-        
+
         // Get assigned villa owners
         $assignedVillaOwners = User::bySociety($societyId)
-            ->role('Villa Owner')
+            ->role(['Owner', 'Villa Owner'])
             ->whereHas('ownedVilla')
             ->with(['ownedVilla.villaArea', 'resident'])
             ->get();
@@ -64,9 +65,9 @@ class UserVillaAssignmentController extends BaseController
         $user = User::findOrFail($request->user_id);
         $villa = Flat::findOrFail($request->villa_id);
 
-        // Verify user is a villa owner
-        if (!$user->hasRole('Villa Owner')) {
-            return back()->with('error', 'User must have Villa Owner role to be assigned a villa.');
+        // Verify user is an owner
+        if (!$user->hasAnyRole(['Owner', 'Villa Owner'])) {
+            return back()->with('error', 'User must have the Owner role to be assigned a villa.');
         }
 
         // Verify villa is available

@@ -34,30 +34,26 @@
     <div class="bg-white rounded-lg shadow-md overflow-hidden">
         <form id="rent-create-form" action="{{ route('admin.rents.store') }}" method="POST" class="p-6" enctype="multipart/form-data">
             @csrf
+            @include('partials.idempotency')
             
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <!-- Left Column: Unit & Tenant Selection -->
                 <div class="space-y-6">
                     <h3 class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">Unit & Tenant Details</h3>
                     
-                    <!-- Property Type -->
-                    <div>
-                        <label for="property_type" class="block text-sm font-medium text-gray-700 mb-2">
-                            Property Type <span class="text-red-500">*</span>
-                        </label>
-                        <select id="property_type" 
-                                name="property_type" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                                required>
-                            <option value="">Select Property Type</option>
-@include('partials.property-type-options')
-                        </select>
-                    </div>
+                    <!-- Property Type: only a real question in a mixed society. A
+                         single-type society already knows the answer, so the
+                         component hides the select and shows a read-only line
+                         instead - its own onload script fires the unit-loading
+                         handler below exactly as if the user had picked it. -->
+                    @include('partials.property-type-field', [
+                        'sfOnChange' => 'handlePropertyTypeChange()',
+                    ])
 
-                    <!-- Select Tenant Unit -->
+                    <!-- Select Tenant / Unit -->
                     <div>
                         <label for="unit_id" class="block text-sm font-medium text-gray-700 mb-2">
-                            Select Tenant Unit <span class="text-red-500">*</span>
+                            Select Tenant / Unit <span class="text-red-500">*</span>
                         </label>
                         <select id="unit_id" 
                                 name="unit_id" 

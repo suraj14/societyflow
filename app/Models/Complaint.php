@@ -12,6 +12,12 @@ class Complaint extends Model
 {
     use HasFactory, GeneratesDocumentNumber;
 
+    /** The values the complaints.status enum accepts. */
+    public const STATUSES = ['open', 'in_progress', 'resolved', 'closed', 'cancelled'];
+
+    /** Statuses in which a complaint is still someone's work. */
+    public const OPEN_STATUSES = ['open', 'in_progress'];
+
     protected $fillable = [
         'society_id',
         'complaint_category_id',
@@ -109,6 +115,28 @@ class Complaint extends Model
     public function scopeInProgress($query)
     {
         return $query->where('status', 'in_progress');
+    }
+
+    /** Open or in progress - the "still unresolved" set every counter uses. */
+    public function scopeOpenTickets($query)
+    {
+        return $query->whereIn('status', self::OPEN_STATUSES);
+    }
+
+    /**
+     * Keep resolved_at consistent with a status change made by update():
+     * stamp it on entering resolved/closed, clear it on reopening.
+     */
+    public function syncResolutionTimestamp(?string $oldStatus): void
+    {
+        $wasDone = in_array($oldStatus, ['resolved', 'closed'], true);
+        $isDone  = in_array($this->status, ['resolved', 'closed'], true);
+
+        if ($isDone && !$wasDone && !$this->resolved_at) {
+            $this->forceFill(['resolved_at' => now()])->save();
+        } elseif (!$isDone && $this->resolved_at) {
+            $this->forceFill(['resolved_at' => null])->save();
+        }
     }
 
     public function scopeResolved($query)

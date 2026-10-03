@@ -22,6 +22,7 @@
         
         <form action="{{ route('facilities.store') }}" method="POST" enctype="multipart/form-data" class="px-6 py-6">
             @csrf
+            @include('partials.idempotency')
             
             <div class="space-y-6">
                 <!-- Basic Information -->

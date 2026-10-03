@@ -4,7 +4,13 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  # mobile_scanner 5.2.3 itself requires Dart >=3.4.0 and Flutter >=3.22.0
+  # (confirmed against its own pubspec.yaml) - both floors raised to match,
+  # or `flutter pub get` would fail its own version solving on an older
+  # toolchain with a less direct error than these constraints now give up
+  # front.
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: '>=3.22.0'
 
 dependencies:
   flutter:
@@ -25,6 +31,10 @@ dependencies:
 
   # Image
   image_picker: ^1.0.7       # complaints_screen.dart (attachment picker)
+
+  # QR scanning — guard_scan_screen.dart. One package, camera-based
+  # (MLKit on Android / AVFoundation on iOS), no second scanner library.
+  mobile_scanner: ^5.2.3
 
   # Removed 2026-09-09 after verifying zero references in lib/ and test/:
   #   intl            - no import, and no DateFormat/NumberFormat/Intl usage;

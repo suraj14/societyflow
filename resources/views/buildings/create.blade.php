@@ -15,6 +15,7 @@
         <div class="bg-white rounded-lg shadow p-6">
             <form action="{{ route('buildings.store') }}" method="POST">
                 @csrf
+                @include('partials.idempotency')
 
                 <div class="mb-6">
                     @if(auth()->user()->hasRole('Super Admin'))

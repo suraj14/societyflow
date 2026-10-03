@@ -53,6 +53,7 @@ class RestrictStaffAccess
             // 'utility-bills', // Temporarily allow utility-bills for testing
             'reports',
             'maintenance',
+            'expenses',
             
             // Management Modules  
             'owners',

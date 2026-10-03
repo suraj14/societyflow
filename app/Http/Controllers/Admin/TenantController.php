@@ -37,17 +37,15 @@ class TenantController extends BaseController
         
         $societyId = $this->getSocietyId();
         
-        // Get ONLY vacant properties that meet ALL conditions:
-        // 1. status = 'vacant'
-        // 2. society_id = logged_in_society_id  
-        // 3. Property is NOT already assigned to any active tenant
-        // 4. Property is NOT owner-occupied
+        // Units a tenant can move into: every unit in the society with no
+        // active tenant. Owner-occupied units are included - an owner renting
+        // out their villa is exactly the Villa 159 case (owner + tenant), the
+        // occupancy model treats it as Tenant Occupied, and the stored
+        // flats.status is a derived cache that must not gate assignment.
         $availableUnits = Flat::bySociety($societyId)
-            ->where('status', 'vacant')
             ->whereDoesntHave('tenants', function($query) {
                 $query->where('status', 'active');
             })
-            ->whereNull('owner_id') // Not owner-occupied
             ->with(['building', 'villaArea'])
             ->orderBy('property_type')
             ->orderBy('flat_number')
@@ -76,10 +74,7 @@ class TenantController extends BaseController
     {
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
-        
-        // Debug: Log all request data
-        \Log::info('Tenant form submission data:', $request->all());
-        
+
         return $this->handleFormSubmission(function() use ($request) {
             $request->validate([
                 'name' => 'required|string|max:255',
@@ -182,20 +177,14 @@ class TenantController extends BaseController
                     throw new \Exception('Selected unit must belong to the same society.');
                 }
                 
-                // CRITICAL VALIDATION: Ensure flat meets all assignment criteria
-                if ($flat->status !== 'vacant') {
-                    throw new \Exception('Selected unit is not vacant and cannot be assigned.');
-                }
-                
+                // The only thing that blocks a tenancy is another active
+                // tenancy. An owner living there today may be renting it out
+                // (the occupancy rule then derives Tenant Occupied), and the
+                // stored status is a cache, never an input to this decision.
                 // Check if flat is already assigned to any active tenant
                 $existingTenant = $flat->tenants()->where('status', 'active')->first();
                 if ($existingTenant) {
                     throw new \Exception('Selected unit is already assigned to an active tenant.');
-                }
-                
-                // Check if flat is owner-occupied
-                if ($flat->owner_id) {
-                    throw new \Exception('Selected unit is owner-occupied and cannot be assigned to a tenant.');
                 }
                 
                 $tenantData['flat_id'] = $flat->id;
@@ -238,11 +227,10 @@ class TenantController extends BaseController
         // PLUS: Include the currently assigned flat (if any) for editing
         $availableUnits = Flat::bySociety($societyId)
             ->where(function($query) use ($tenant) {
-                $query->where('status', 'vacant')
-                      ->whereDoesntHave('tenants', function($q) {
+                // No active tenant (owner-occupied units may be rented out).
+                $query->whereDoesntHave('tenants', function($q) {
                           $q->where('status', 'active');
-                      })
-                      ->whereNull('owner_id');
+                      });
                 
                 // Also include the currently assigned flat for editing
                 if ($tenant->flat_id) {
@@ -361,20 +349,10 @@ class TenantController extends BaseController
                 
                 // CRITICAL VALIDATION: Only validate if assigning a different flat
                 if ($oldFlatId != $request->flat_id) {
-                    // Ensure new flat meets all assignment criteria
-                    if ($flat->status !== 'vacant') {
-                        throw new \Exception('Selected unit is not vacant and cannot be assigned.');
-                    }
-                    
                     // Check if flat is already assigned to any active tenant
                     $existingTenant = $flat->tenants()->where('status', 'active')->first();
                     if ($existingTenant) {
                         throw new \Exception('Selected unit is already assigned to an active tenant.');
-                    }
-                    
-                    // Check if flat is owner-occupied
-                    if ($flat->owner_id) {
-                        throw new \Exception('Selected unit is owner-occupied and cannot be assigned to a tenant.');
                     }
                     
                     // Mark old flat as vacant if it exists and no other active tenants
@@ -410,6 +388,39 @@ class TenantController extends BaseController
         }, 'Tenant updated successfully!', 'admin.tenants.index');
     }
     
+    /**
+     * Close the current occupancy without deleting the tenant record - the
+     * tenant and every past rent/payment tied to them stay intact, only the
+     * unit link is cleared. Same effect as Tenant Assignments' "Unassign",
+     * kept here too so an admin editing a tenant doesn't have to visit a
+     * second screen for a routine move-out.
+     */
+    public function moveOut(Tenant $tenant)
+    {
+        $this->authorizeRole('Super Admin', 'Admin');
+
+        if ($tenant->society_id !== $this->getSocietyId()) {
+            return back()->with('error', 'Tenant not found.');
+        }
+
+        if (!$tenant->flat_id) {
+            return back()->with('error', 'This tenant does not have an active unit assignment.');
+        }
+
+        $flat = $tenant->flat;
+        $unitName = $flat?->flat_number ?? $flat?->villa_name;
+
+        // The Tenant model's updated hook re-derives the unit's status from
+        // the canonical rule: tenant-occupied while another tenant remains,
+        // otherwise owner-occupied or vacant - never blindly "vacant".
+        $tenant->update([
+            'flat_id' => null,
+            'move_out_date' => Carbon::now(),
+        ]);
+
+        return back()->with('success', "{$tenant->name} has been moved out of {$unitName}.");
+    }
+
     public function destroy(Tenant $tenant)
     {
         // Only admin and super admin can access this
@@ -420,14 +431,8 @@ class TenantController extends BaseController
             return back()->with('error', 'Tenant not found.');
         }
         
-        // Mark flat as vacant if exists
-        if ($tenant->flat_id) {
-            $flat = $tenant->flat;
-            if ($flat && $flat->tenants()->where('status', 'active')->count() == 1) {
-                $flat->update(['status' => 'vacant']);
-            }
-        }
-        
+        // The Tenant model's deleted hook re-derives the unit's status.
+
         // Delete associated user first
         if ($tenant->user) {
             $tenant->user->delete();

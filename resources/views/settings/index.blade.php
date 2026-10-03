@@ -19,61 +19,125 @@
         </div>
         <form action="{{ route('settings.clear-cache') }}" method="POST">
             @csrf
-            <button type="submit" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm">
+            <button type="submit" class="btn-secondary px-4 py-2 rounded-lg text-sm">
                 <i class="fas fa-sync-alt mr-2"></i>Clear Cache
             </button>
         </form>
     </div>
 
     <!-- Success/Error Messages -->
-    @if(session('success'))
-        <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded-r-lg">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle text-green-500 mr-3"></i>
-                <p class="text-sm text-green-800">{{ session('success') }}</p>
-            </div>
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle text-red-500 mr-3"></i>
-                <p class="text-sm text-red-800">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
-    <!-- Tabs Navigation -->
-    <div class="bg-white rounded-xl shadow-sm border border-gray-200" x-data="{ activeTab: '{{ $tab }}' }">
+    @php
+        // Consolidated into 6 sections (was 12 flat tabs, forcing horizontal
+        // scrolling to find anything). Every `activeTab` key below is
+        // unchanged from before - each one still drives the exact same
+        // `x-show="activeTab === '...'"` content block, form and POST route
+        // further down this file. This is a navigation-only change; no
+        // content, route or controller was touched to make this grouping
+        // work.
+        //
+        // 'push' is deliberately not listed in any section: SettingsController
+        // ::updatePush() writes to SystemSetting's 'push' group, which has no
+        // reader anywhere in the app (confirmed by search) - the real push
+        // infrastructure (PushNotificationService, the PushNotificationSetting
+        // model, PushSubscriptionController) is configured on its own admin
+        // page and is untouched. The route/content still exist (nothing was
+        // deleted), just with no menu entry pointing at them.
+        $sections = [
+            'general' => [
+                'icon' => 'fa-cog',
+                'label' => 'General',
+                'tabs' => [
+                    'society' => ['icon' => 'fa-building', 'label' => 'Society Info'],
+                    'app' => ['icon' => 'fa-cog', 'label' => 'App Settings'],
+                    'currency-features' => ['icon' => 'fa-coins', 'label' => 'Currency & Features'],
+                ],
+            ],
+            'appearance' => [
+                'icon' => 'fa-palette',
+                'label' => 'Appearance',
+                'tabs' => [
+                    'theme' => ['icon' => 'fa-palette', 'label' => 'Theme'],
+                ],
+            ],
+            'modules' => [
+                'icon' => 'fa-th-large',
+                'label' => 'Modules & Access',
+                'tabs' => [
+                    'complaint-categories' => ['icon' => 'fa-list', 'label' => 'Complaint Categories'],
+                    'permissions' => ['icon' => 'fa-user-shield', 'label' => 'Role & Module Permissions'],
+                ],
+            ],
+            'communication' => [
+                'icon' => 'fa-envelope',
+                'label' => 'Communication',
+                'tabs' => [
+                    'email' => ['icon' => 'fa-envelope', 'label' => 'Email Settings'],
+                    'email-templates' => ['icon' => 'fa-envelope-open-text', 'label' => 'Email Templates'],
+                    'sms' => ['icon' => 'fa-sms', 'label' => 'SMS / OTP'],
+                ],
+            ],
+            'payments' => [
+                'icon' => 'fa-credit-card',
+                'label' => 'Payments',
+                'tabs' => [
+                    'payment' => ['icon' => 'fa-credit-card', 'label' => 'Payment Gateway'],
+                ],
+            ],
+            'security' => [
+                'icon' => 'fa-shield-alt',
+                'label' => 'Security',
+                'tabs' => [
+                    'security' => ['icon' => 'fa-shield-alt', 'label' => 'Security'],
+                ],
+            ],
+        ];
+
+        // Which section owns the tab the controller resolved from ?tab=...,
+        // so a bookmarked/shared link still opens on the right section.
+        $initialSection = 'general';
+        foreach ($sections as $sectionKey => $sectionInfo) {
+            if (array_key_exists($tab, $sectionInfo['tabs'])) {
+                $initialSection = $sectionKey;
+                break;
+            }
+        }
+    @endphp
+
+    <!-- Settings Navigation -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200"
+        x-data="{ activeTab: '{{ $tab }}', activeSection: '{{ $initialSection }}' }">
         <div class="border-b border-gray-200 overflow-x-auto">
-            <nav class="flex -mb-px min-w-max" aria-label="Tabs">
-                @php
-                    // Admin tabs only
-                    $tabs = [
-                        'society' => ['icon' => 'fa-building', 'label' => 'Society Info'],
-                        'app' => ['icon' => 'fa-cog', 'label' => 'App Settings'],
-                        'theme' => ['icon' => 'fa-palette', 'label' => 'Theme'],
-                        'currency-features' => ['icon' => 'fa-coins', 'label' => 'Currency & Features'],
-                        'permissions' => ['icon' => 'fa-user-shield', 'label' => 'Role Permissions'],
-                        'complaint-categories' => ['icon' => 'fa-list', 'label' => 'Complaint Categories'],
-                        'email' => ['icon' => 'fa-envelope', 'label' => 'Email Settings'],
-                        'email-templates' => ['icon' => 'fa-envelope-open-text', 'label' => 'Email Templates'],
-                        'payment' => ['icon' => 'fa-credit-card', 'label' => 'Payment Gateway'],
-                        'push' => ['icon' => 'fa-bell', 'label' => 'Push Notifications'],
-                        'sms' => ['icon' => 'fa-sms', 'label' => 'SMS / OTP'],
-                        'security' => ['icon' => 'fa-shield-alt', 'label' => 'Security'],
-                    ];
-                @endphp
-                @foreach($tabs as $key => $tabInfo)
-                    <button type="button" @click="activeTab = '{{ $key }}'"
-                        :class="activeTab === '{{ $key }}' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+            <nav class="flex -mb-px min-w-max" aria-label="Settings sections">
+                @foreach($sections as $sectionKey => $sectionInfo)
+                    <button type="button"
+                        @click="activeSection = '{{ $sectionKey }}'; activeTab = '{{ array_key_first($sectionInfo['tabs']) }}'"
+                        :class="activeSection === '{{ $sectionKey }}' ? 'border-purple-500 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                         class="whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm transition-colors">
-                        <i class="fas {{ $tabInfo['icon'] }} mr-2"></i>{{ $tabInfo['label'] }}
+                        <i class="fas {{ $sectionInfo['icon'] }} mr-2"></i>{{ $sectionInfo['label'] }}
                     </button>
                 @endforeach
             </nav>
         </div>
+
+        <!-- Sub-navigation: only sections with more than one sub-tab need a second row -->
+        @foreach($sections as $sectionKey => $sectionInfo)
+            @if(count($sectionInfo['tabs']) > 1)
+                <div x-show="activeSection === '{{ $sectionKey }}'" x-cloak
+                    class="border-b border-gray-100 bg-gray-50 overflow-x-auto">
+                    <nav class="flex min-w-max px-3" aria-label="{{ $sectionInfo['label'] }} sub-sections">
+                        @foreach($sectionInfo['tabs'] as $tabKey => $tabInfo)
+                            <button type="button" @click="activeTab = '{{ $tabKey }}'"
+                                :class="activeTab === '{{ $tabKey }}' ? 'text-purple-600 font-semibold' : 'text-gray-500 hover:text-gray-700'"
+                                class="whitespace-nowrap py-2.5 px-4 text-xs transition-colors">
+                                <i class="fas {{ $tabInfo['icon'] }} mr-1.5"></i>{{ $tabInfo['label'] }}
+                            </button>
+                        @endforeach
+                    </nav>
+                </div>
+            @endif
+        @endforeach
 
         <!-- Tab Content -->
         <div class="p-6">
@@ -104,9 +168,12 @@
                                     class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
                             </div>
                             <div class="md:col-span-2">
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Address</label>
-                                <textarea name="society_address" rows="3"
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                                <textarea name="society_address" rows="3" required
                                     class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">{{ auth()->user()->society->address ?? '' }}</textarea>
+                                @error('society_address')
+                                    <p class="text-xs text-red-600 mt-1">{{ $message }}</p>
+                                @enderror
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
@@ -150,6 +217,14 @@
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="md:col-span-2">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Display Name</label>
+                                <input type="text" name="app_name"
+                                    value="{{ $settings['app']['app_name'] ?? auth()->user()->society->name ?? '' }}"
+                                    maxlength="255"
+                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                <p class="text-xs text-gray-500 mt-1">Shown in the sidebar and page header - separate from the official Society Name on the General tab.</p>
+                            </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">Default Language</label>
                                 <select name="default_language" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
@@ -456,6 +531,12 @@
                             </div>
                         </div>
 
+                        <div class="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5 text-xs text-blue-800">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            Access is also protected by each role's built-in authorization rules - these toggles
+                            record your intended configuration for the modules that already read it.
+                        </div>
+
                         @php
                             $currentPlan = auth()->user()->society->subscription->subscriptionPlan ?? null;
                             $availableModules = [
@@ -463,62 +544,61 @@
                                     'name' => 'Facilities Management',
                                     'description' => 'Manage and book society facilities',
                                     'icon' => 'fa-swimming-pool',
-                                    'permissions' => ['view_facility', 'book_facility', 'manage_facilities'],
-                                    'required_plan' => 'free'
                                 ],
                                 'visitors' => [
                                     'name' => 'Visitor Management',
                                     'description' => 'Track and manage visitor entries',
                                     'icon' => 'fa-users',
-                                    'permissions' => ['view_own_visitors', 'create_visitor', 'approve_visitor', 'view_all_visitors'],
-                                    'required_plan' => 'free'
                                 ],
                                 'complaints' => [
                                     'name' => 'Complaints & Tickets',
                                     'description' => 'Handle resident complaints and support tickets',
                                     'icon' => 'fa-exclamation-triangle',
-                                    'permissions' => ['create_ticket', 'view_own_ticket', 'view_all_tickets', 'resolve_ticket'],
-                                    'required_plan' => 'free'
                                 ],
                                 'bills' => [
                                     'name' => 'Bills & Payments',
                                     'description' => 'Manage society bills and payment tracking',
                                     'icon' => 'fa-file-invoice-dollar',
-                                    'permissions' => ['view_own_bills', 'view_all_bills', 'manage_bills', 'pay_bill'],
-                                    'required_plan' => 'free'
                                 ],
                                 'services' => [
                                     'name' => 'Service Providers',
                                     'description' => 'Manage service providers and attendance',
                                     'icon' => 'fa-tools',
-                                    'permissions' => ['view_services', 'manage_services', 'clock_service'],
-                                    'required_plan' => 'free'
                                 ],
                                 'notices' => [
                                     'name' => 'Notice Board',
                                     'description' => 'Society announcements and notices',
                                     'icon' => 'fa-bullhorn',
-                                    'permissions' => ['view_notices', 'create_notice', 'manage_notices'],
-                                    'required_plan' => 'free'
                                 ],
                                 'reports' => [
                                     'name' => 'Reports & Analytics',
                                     'description' => 'Generate reports and view analytics',
                                     'icon' => 'fa-chart-bar',
-                                    'permissions' => ['view_reports'],
-                                    'required_plan' => 'free'
                                 ],
                                 'advanced_settings' => [
                                     'name' => 'Advanced Settings',
                                     'description' => 'Advanced configuration options',
                                     'icon' => 'fa-cogs',
-                                    'permissions' => ['access_settings', 'manage_roles'],
-                                    'required_plan' => 'free'
-                                ]
+                                ],
                             ];
 
-                            $roles = ['Admin', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'];
-                            $currentPermissions = $settings['permissions'] ?? [];
+                            // The canonical business roles, other than Super Admin
+                            // (system-level, not controlled by society module toggles -
+                            // see AuthServiceProvider's Gate::before). Villa Owner/
+                            // Apartment Owner are legacy names for 'Owner' (property
+                            // type is a flat attribute, not a role) and are
+                            // deliberately not shown here - see
+                            // php artisan users:migrate-to-owner-role.
+                            $roles = ['Admin', 'Owner', 'Tenant', 'Staff', 'Accountant', 'Guard'];
+
+                            // SettingsController::updatePermissions() saves under the
+                            // single 'module_permissions' key within the 'permissions'
+                            // group (SystemSetting::set('permissions',
+                            // 'module_permissions', ...)), but SystemSetting::getGroup()
+                            // returns a group keyed by its setting keys - so the real
+                            // value lives one level deeper. Reading this correctly is
+                            // what makes a saved toggle survive a refresh.
+                            $currentPermissions = $settings['permissions']['module_permissions'] ?? [];
                         @endphp
 
                         <!-- Current Plan Info -->
@@ -528,7 +608,7 @@
                                 <div>
                                     <h4 class="text-sm font-medium text-green-900">Free Forever Plan</h4>
                                     <p class="text-sm text-green-700">
-                                        {{ $currentPlan ? $currentPlan->name : 'Free Forever Plan' }} - 
+                                        {{ $currentPlan ? $currentPlan->name : 'Free Forever Plan' }} -
                                         All modules and features are available for free! Configure permissions as needed for your society.
                                     </p>
                                 </div>
@@ -538,10 +618,6 @@
                         <!-- Module Permissions Grid -->
                         <div class="space-y-6">
                             @foreach($availableModules as $moduleKey => $module)
-                                @php
-                                    $isAvailable = true; // All modules are available in Free Forever plan
-                                @endphp
-                                
                                 <div class="border border-gray-200 rounded-lg">
                                     <div class="p-4 border-b border-gray-200">
                                         <div class="flex items-center justify-between">
@@ -559,16 +635,16 @@
                                             </span>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="p-4">
-                                        <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                                             @foreach($roles as $role)
                                                 <div class="text-center">
                                                     <h5 class="text-xs font-medium text-gray-700 mb-2">{{ $role }}</h5>
                                                     <label class="relative inline-flex items-center cursor-pointer">
-                                                        <input type="checkbox" 
-                                                            name="permissions[{{ $moduleKey }}][{{ $role }}]" 
-                                                            value="1" 
+                                                        <input type="checkbox"
+                                                            name="permissions[{{ $moduleKey }}][{{ $role }}]"
+                                                            value="1"
                                                             {{ ($currentPermissions[$moduleKey][$role] ?? false) ? 'checked' : '' }}
                                                             class="sr-only peer">
                                                         <div class="w-9 h-5 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
@@ -585,15 +661,15 @@
                         <div class="bg-gray-50 rounded-lg p-4">
                             <h4 class="text-sm font-medium text-gray-900 mb-3">Quick Actions</h4>
                             <div class="flex flex-wrap gap-2">
-                                <button type="button" onclick="toggleAllPermissions(true)" 
+                                <button type="button" onclick="toggleAllPermissions(true)"
                                     class="px-3 py-1.5 bg-green-100 hover:bg-green-200 text-green-800 text-xs rounded-lg transition-colors">
                                     <i class="fas fa-check mr-1"></i>Enable All
                                 </button>
-                                <button type="button" onclick="toggleAllPermissions(false)" 
+                                <button type="button" onclick="toggleAllPermissions(false)"
                                     class="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 text-xs rounded-lg transition-colors">
                                     <i class="fas fa-times mr-1"></i>Disable All
                                 </button>
-                                <button type="button" onclick="resetToDefaults()" 
+                                <button type="button" onclick="resetToDefaults()"
                                     class="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs rounded-lg transition-colors">
                                     <i class="fas fa-undo mr-1"></i>Reset to Defaults
                                 </button>
@@ -741,72 +817,88 @@
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Mail Driver</label>
-                                <select name="mail_driver" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                    <option value="smtp" {{ ($settings['email']['mail_driver'] ?? 'smtp') == 'smtp' ? 'selected' : '' }}>SMTP</option>
-                                    <option value="sendmail" {{ ($settings['email']['mail_driver'] ?? '') == 'sendmail' ? 'selected' : '' }}>Sendmail</option>
-                                    <option value="mailgun" {{ ($settings['email']['mail_driver'] ?? '') == 'mailgun' ? 'selected' : '' }}>Mailgun</option>
-                                    <option value="ses" {{ ($settings['email']['mail_driver'] ?? '') == 'ses' ? 'selected' : '' }}>Amazon SES</option>
-                                    <option value="postmark" {{ ($settings['email']['mail_driver'] ?? '') == 'postmark' ? 'selected' : '' }}>Postmark</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Host</label>
-                                <input type="text" name="mail_host" value="{{ $settings['email']['mail_host'] ?? '' }}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    placeholder="smtp.gmail.com">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Port</label>
-                                <input type="number" name="mail_port" value="{{ $settings['email']['mail_port'] ?? '587' }}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    placeholder="587">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Encryption</label>
-                                <select name="mail_encryption" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                    <option value="tls" {{ ($settings['email']['mail_encryption'] ?? 'tls') == 'tls' ? 'selected' : '' }}>TLS</option>
-                                    <option value="ssl" {{ ($settings['email']['mail_encryption'] ?? '') == 'ssl' ? 'selected' : '' }}>SSL</option>
-                                    <option value="null" {{ ($settings['email']['mail_encryption'] ?? '') == 'null' ? 'selected' : '' }}>None</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
-                                <input type="text" name="mail_username" value="{{ $settings['email']['mail_username'] ?? '' }}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                                <input type="password" name="mail_password" value="{{ $settings['email']['mail_password'] ?? '' }}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">From Email</label>
-                                <input type="email" name="mail_from_address" value="{{ $settings['email']['mail_from_address'] ?? '' }}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    required>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">From Name</label>
-                                <input type="text" name="mail_from_name" value="{{ $settings['email']['mail_from_name'] ?? auth()->user()->society->name ?? 'Society' }}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    required>
+                        <!-- Mail Configuration -->
+                        <div>
+                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Mail Configuration</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Mail Driver</label>
+                                    <select name="mail_driver" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="smtp" {{ ($settings['email']['mail_driver'] ?? 'smtp') == 'smtp' ? 'selected' : '' }}>SMTP</option>
+                                        <option value="sendmail" {{ ($settings['email']['mail_driver'] ?? '') == 'sendmail' ? 'selected' : '' }}>Sendmail</option>
+                                        <option value="mailgun" {{ ($settings['email']['mail_driver'] ?? '') == 'mailgun' ? 'selected' : '' }}>Mailgun</option>
+                                        <option value="ses" {{ ($settings['email']['mail_driver'] ?? '') == 'ses' ? 'selected' : '' }}>Amazon SES</option>
+                                        <option value="postmark" {{ ($settings['email']['mail_driver'] ?? '') == 'postmark' ? 'selected' : '' }}>Postmark</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Host</label>
+                                    <input type="text" name="mail_host" value="{{ $settings['email']['mail_host'] ?? '' }}"
+                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                        placeholder="smtp.gmail.com">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Port</label>
+                                    <input type="number" name="mail_port" value="{{ $settings['email']['mail_port'] ?? '587' }}"
+                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                        placeholder="587">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Encryption</label>
+                                    <select name="mail_encryption" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                        <option value="tls" {{ ($settings['email']['mail_encryption'] ?? 'tls') == 'tls' ? 'selected' : '' }}>TLS</option>
+                                        <option value="ssl" {{ ($settings['email']['mail_encryption'] ?? '') == 'ssl' ? 'selected' : '' }}>SSL</option>
+                                        <option value="null" {{ ($settings['email']['mail_encryption'] ?? '') == 'null' ? 'selected' : '' }}>None</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                                    <input type="text" name="mail_username" value="{{ $settings['email']['mail_username'] ?? '' }}"
+                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                                    <input type="password" name="mail_password" value="{{ $settings['email']['mail_password'] ?? '' }}"
+                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                </div>
                             </div>
                         </div>
 
-                        <div class="flex items-center justify-between pt-4 border-t border-gray-200">
-                            <div class="flex items-center space-x-4">
-                                <input type="email" id="test_email" placeholder="test@example.com"
-                                    class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                <button type="button" onclick="testEmail()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
-                                    <i class="fas fa-paper-plane mr-2"></i>Test Email
+                        <!-- Sender Information -->
+                        <div class="border-t border-gray-200 pt-6">
+                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Sender Information</h4>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">From Email</label>
+                                    <input type="email" name="mail_from_address" value="{{ $settings['email']['mail_from_address'] ?? '' }}"
+                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                        required>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">From Name</label>
+                                    <input type="text" name="mail_from_name" value="{{ $settings['email']['mail_from_name'] ?? auth()->user()->society->name ?? 'Society' }}"
+                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                                        required>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Testing -->
+                        <div class="border-t border-gray-200 pt-6">
+                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Testing</h4>
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-4">
+                                    <input type="email" id="test_email" placeholder="test@example.com"
+                                        aria-label="Test email address"
+                                        class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
+                                    <button type="button" onclick="testEmail()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
+                                        <i class="fas fa-paper-plane mr-2"></i>Send Test Email
+                                    </button>
+                                </div>
+                                <button type="submit" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors">
+                                    <i class="fas fa-save mr-2"></i>Save Changes
                                 </button>
                             </div>
-                            <button type="submit" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors">
-                                <i class="fas fa-save mr-2"></i>Save Settings
-                            </button>
                         </div>
                     </div>
                 </form>
@@ -838,116 +930,89 @@
                         </div>
                     </div>
 
-                    <!-- Email Templates List -->
-                    <div class="bg-gray-50 rounded-lg p-6">
-                        @php
-                            $templates = \App\Models\EmailTemplate::when(!auth()->user()->hasRole('Super Admin'), function($query) {
-                                return $query->forSociety(auth()->user()->society_id);
-                            })->orderBy('name')->get();
-                        @endphp
+                    <!-- Email Templates: compact searchable table (was a card grid -
+                         same data, same routes, just less scrolling to find one template) -->
+                    @php
+                        $templates = \App\Models\EmailTemplate::when(!auth()->user()->hasRole('Super Admin'), function($query) {
+                            return $query->forSociety(auth()->user()->society_id);
+                        })->orderBy('name')->get();
+                    @endphp
 
-                        @if($templates->count() > 0)
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                @foreach($templates as $template)
-                                <div class="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow">
-                                    <div class="flex items-start justify-between mb-3">
-                                        <div>
-                                            <h4 class="font-medium text-gray-900">{{ $template->name }}</h4>
-                                            <p class="text-sm text-gray-500 mt-1">{{ Str::limit($template->subject, 40) }}</p>
-                                        </div>
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $template->status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
-                                            {{ ucfirst($template->status) }}
-                                        </span>
-                                    </div>
-                                    <div class="flex items-center justify-between">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $template->type === 'system' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800' }}">
-                                            {{ ucfirst($template->type) }}
-                                        </span>
-                                        <div class="flex space-x-2">
-                                            <a href="{{ route('admin.email-templates.show', $template) }}" class="text-blue-600 hover:text-blue-800 text-sm">
-                                                <i class="fas fa-eye"></i>
-                                            </a>
-                                            <a href="{{ route('admin.email-templates.edit', $template) }}" class="text-purple-600 hover:text-purple-800 text-sm">
-                                                <i class="fas fa-edit"></i>
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
-                                @endforeach
+                    <div class="flex items-center gap-4 text-xs text-gray-500">
+                        <span><i class="fas fa-envelope text-blue-500 mr-1"></i>{{ $templates->count() }} total</span>
+                        <span><i class="fas fa-check-circle text-green-500 mr-1"></i>{{ $templates->where('status', 'active')->count() }} active</span>
+                        <span><i class="fas fa-cogs text-purple-500 mr-1"></i>{{ $templates->where('type', 'system')->count() }} system</span>
+                        <span><i class="fas fa-user-edit text-orange-500 mr-1"></i>{{ $templates->where('type', 'custom')->count() }} custom</span>
+                    </div>
+
+                    @if($templates->count() > 0)
+                        <div x-data="{ search: '' }">
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                <input type="text" x-model="search" placeholder="Search templates…"
+                                    aria-label="Search email templates"
+                                    class="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-300 focus:border-purple-500 mb-3">
                             </div>
-                            
-                            <div class="mt-6 text-center">
-                                <a href="{{ route('admin.email-templates.index') }}" class="text-purple-600 hover:text-purple-800 font-medium">
-                                    View All Templates <i class="fas fa-arrow-right ml-1"></i>
+
+                            <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                <table class="w-full text-sm">
+                                    <thead class="bg-gray-50">
+                                        <tr class="text-left text-xs font-medium text-gray-500">
+                                            <th class="px-4 py-2">Template</th>
+                                            <th class="px-4 py-2 hidden md:table-cell">Subject</th>
+                                            <th class="px-4 py-2">Status</th>
+                                            <th class="px-4 py-2 hidden sm:table-cell">Type</th>
+                                            <th class="px-4 py-2 text-right">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-100">
+                                        @foreach($templates as $template)
+                                            <tr x-show="search === '' || {{ \Illuminate\Support\Js::from(strtolower($template->name.' '.$template->subject)) }}.includes(search.toLowerCase())"
+                                                class="hover:bg-gray-50">
+                                                <td class="px-4 py-2.5 font-medium text-gray-800">{{ $template->name }}</td>
+                                                <td class="px-4 py-2.5 text-gray-500 hidden md:table-cell">{{ Str::limit($template->subject, 50) }}</td>
+                                                <td class="px-4 py-2.5">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ $template->status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
+                                                        {{ ucfirst($template->status) }}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-2.5 hidden sm:table-cell">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ $template->type === 'system' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800' }}">
+                                                        {{ ucfirst($template->type) }}
+                                                    </span>
+                                                </td>
+                                                <td class="px-4 py-2.5 text-right whitespace-nowrap">
+                                                    <a href="{{ route('admin.email-templates.show', $template) }}" class="text-blue-600 hover:text-blue-800 mr-3" aria-label="View {{ $template->name }}">
+                                                        <i class="fas fa-eye"></i>
+                                                    </a>
+                                                    <a href="{{ route('admin.email-templates.edit', $template) }}" class="text-purple-600 hover:text-purple-800" aria-label="Edit {{ $template->name }}">
+                                                        <i class="fas fa-edit"></i> Edit
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    @else
+                        <div class="text-center py-8 bg-gray-50 rounded-lg">
+                            <i class="fas fa-envelope fa-3x text-gray-400 mb-4"></i>
+                            <h3 class="text-lg font-medium text-gray-900 mb-2">No Email Templates Found</h3>
+                            <p class="text-gray-500 mb-6">Get started by creating your first email template or initializing default templates.</p>
+                            <div class="flex justify-center space-x-3">
+                                <a href="{{ route('admin.email-templates.create') }}" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
+                                    <i class="fas fa-plus mr-2"></i>Create Template
                                 </a>
-                            </div>
-                        @else
-                            <div class="text-center py-8">
-                                <i class="fas fa-envelope fa-3x text-gray-400 mb-4"></i>
-                                <h3 class="text-lg font-medium text-gray-900 mb-2">No Email Templates Found</h3>
-                                <p class="text-gray-500 mb-6">Get started by creating your first email template or initializing default templates.</p>
-                                <div class="flex justify-center space-x-3">
-                                    <a href="{{ route('admin.email-templates.create') }}" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
-                                        <i class="fas fa-plus mr-2"></i>Create Template
-                                    </a>
-                                    <form method="POST" action="{{ route('admin.email-templates.initialize') }}" class="inline">
-                                        @csrf
-                                        <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg">
-                                            <i class="fas fa-magic mr-2"></i>Initialize Defaults
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        @endif
-                    </div>
-
-                    <!-- Quick Stats -->
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div class="bg-white rounded-lg border border-gray-200 p-4">
-                            <div class="flex items-center">
-                                <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
-                                    <i class="fas fa-envelope text-blue-600 text-sm"></i>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-gray-600">Total Templates</p>
-                                    <p class="text-lg font-semibold text-gray-900">{{ $templates->count() }}</p>
-                                </div>
+                                <form method="POST" action="{{ route('admin.email-templates.initialize') }}" class="inline">
+                                    @csrf
+                                    <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg">
+                                        <i class="fas fa-magic mr-2"></i>Initialize Defaults
+                                    </button>
+                                </form>
                             </div>
                         </div>
-                        <div class="bg-white rounded-lg border border-gray-200 p-4">
-                            <div class="flex items-center">
-                                <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center mr-3">
-                                    <i class="fas fa-check-circle text-green-600 text-sm"></i>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-gray-600">Active Templates</p>
-                                    <p class="text-lg font-semibold text-gray-900">{{ $templates->where('status', 'active')->count() }}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-lg border border-gray-200 p-4">
-                            <div class="flex items-center">
-                                <div class="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
-                                    <i class="fas fa-cogs text-purple-600 text-sm"></i>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-gray-600">System Templates</p>
-                                    <p class="text-lg font-semibold text-gray-900">{{ $templates->where('type', 'system')->count() }}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="bg-white rounded-lg border border-gray-200 p-4">
-                            <div class="flex items-center">
-                                <div class="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center mr-3">
-                                    <i class="fas fa-user-edit text-orange-600 text-sm"></i>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-gray-600">Custom Templates</p>
-                                    <p class="text-lg font-semibold text-gray-900">{{ $templates->where('type', 'custom')->count() }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    @endif
                 </div>
             </div>
 
@@ -1468,13 +1533,14 @@ function toggleAllPermissions(enable) {
 
 function resetToDefaults() {
     if (confirm('Are you sure you want to reset all permissions to default values? This will override your current settings.')) {
-        // Define default permissions for each role in Free Forever plan
+        // Least-privilege defaults for the final role set.
         const defaults = {
             'Admin': ['facilities', 'visitors', 'complaints', 'bills', 'services', 'notices', 'reports', 'advanced_settings'],
-            'Villa Owner': ['facilities', 'visitors', 'complaints', 'bills', 'services', 'notices'],
-            'Apartment Owner': ['facilities', 'visitors', 'complaints', 'bills', 'services', 'notices'],
+            'Owner': ['facilities', 'visitors', 'complaints', 'bills', 'services', 'notices'],
             'Tenant': ['facilities', 'visitors', 'complaints', 'bills', 'notices'],
-            'Staff': ['visitors', 'complaints', 'services', 'notices']
+            'Staff': ['visitors', 'complaints', 'services', 'notices'],
+            'Accountant': ['bills', 'reports'],
+            'Guard': ['visitors']
         };
 
         // Reset all checkboxes first

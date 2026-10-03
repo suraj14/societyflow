@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class Visitor extends Model
 {
@@ -15,6 +16,8 @@ class Visitor extends Model
         'society_id',
         'flat_id',
         'host_user_id',
+        'access_pass_id',
+        'qr_token',
         'approved_by',
         'visitor_name',
         'visitor_phone',
@@ -46,10 +49,36 @@ class Visitor extends Model
             'actual_exit_time' => 'datetime',
         ];
 
+    /**
+     * A pre-approved visit gets a scannable QR token the moment it becomes
+     * "allowed" - whichever of the several approval paths got it there
+     * (villa/apartment owner self-registration, the general allow() action,
+     * the mobile API). One hook here instead of repeating token generation
+     * at every call site, and it never fires again once a token exists, so
+     * re-saving an already-allowed visitor cannot rotate its QR under it.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Visitor $visitor) {
+            if ($visitor->approval_status === 'allowed' && empty($visitor->qr_token)) {
+                do {
+                    $token = Str::random(40);
+                } while (static::where('qr_token', $token)->exists());
+
+                $visitor->qr_token = $token;
+            }
+        });
+    }
+
     // Relationships
     public function society(): BelongsTo
     {
         return $this->belongsTo(Society::class);
+    }
+
+    public function accessPass(): BelongsTo
+    {
+        return $this->belongsTo(AccessPass::class, 'access_pass_id');
     }
 
     public function flat(): BelongsTo

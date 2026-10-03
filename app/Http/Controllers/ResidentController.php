@@ -29,10 +29,10 @@ use App\Traits\HandlesFormSubmissions;
  *     registers `Route::resource('residents', ...)` but a later
  *     `Route::redirect('/residents', '/owners')` (comment: "Phase 8 refactor
  *     - Residents deprecated") intercepts the bare index path first, so
- *     ResidentController::index() itself is unreachable. Both live
- *     navigation partials (layouts/navigation.blade.php,
- *     partials/sidebar.blade.php) link only to residents.index, so no UI
- *     path leads anywhere else in this controller either - create/show/
+ *     ResidentController::index() itself is unreachable. No live
+ *     navigation links anywhere else in this controller either (the two
+ *     legacy navigation partials that once linked residents.index were
+ *     removed as dead code on 2026-10-03) - create/show/
  *     edit/update/destroy are reachable only by a direct URL that nothing
  *     in the app links to.
  *
@@ -115,15 +115,6 @@ class ResidentController extends BaseController
             ->with(['building', 'villaArea'])
             ->get();
         
-        // Debug information
-        \Log::info('Resident Create Debug', [
-            'user_id' => $user->id,
-            'user_roles' => $user->getRoleNames()->toArray(),
-            'society_id' => $societyId,
-            'vacant_flats_count' => $flats->count(),
-            'vacant_flats' => $flats->pluck('flat_number', 'id')->toArray()
-        ]);
-
         return view('residents.create', compact('societies', 'buildings', 'flats', 'societyId'));
     }
 

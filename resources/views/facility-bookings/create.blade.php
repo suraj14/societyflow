@@ -15,14 +15,6 @@
         </div>
     </div>
 
-    @if(session('error'))
-        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-3"></i>
-                <p class="font-medium">{{ session('error') }}</p>
-            </div>
-        </div>
-    @endif
 
     <div class="max-w-3xl bg-white rounded-lg shadow-md">
         <div class="px-6 py-4 border-b border-gray-200">
@@ -31,6 +23,7 @@
         
         <form action="{{ route('facility-bookings.store') }}" method="POST" class="px-6 py-6" data-no-ajax>
             @csrf
+            @include('partials.idempotency')
             
             <div class="space-y-6">
                 <!-- Booked By (Auto-filled, read-only) -->
@@ -115,19 +108,12 @@
                     <input type="hidden" name="flat_id" id="flat_id" value="">
                     
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="property_type" class="block text-sm font-medium text-gray-700 mb-2">
-                                Property Type <span class="text-red-500">*</span>
-                            </label>
-                            <select name="property_type" id="property_type" required
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('property_type') border-red-500 @enderror">
-                                <option value="">Select Property Type</option>
-@include('partials.property-type-options')
-                            </select>
-                            @error('property_type')
-                                <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                            @enderror
-                        </div>
+                        {{-- Real choice only in a mixed society - a single-type
+                             society hides the select and the admin goes straight
+                             to Building/Flat or Villa below. --}}
+                        @include('partials.property-type-field', [
+                            'sfOnChange' => 'handlePropertyTypeChange()',
+                        ])
                     </div>
 
                     <!-- Apartment Selection Fields (for Admin) -->
@@ -306,30 +292,36 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const propertyTypeSelect = document.getElementById('property_type');
+// Named so partials/property-type-field.blade.php's own onload trigger can
+// call it directly for a single-type society, the same as the regular
+// change listener does for a mixed society's manual selection.
+function handlePropertyTypeChange() {
     const flatIdSelect = document.getElementById('flat_id');
     const apartmentFields = document.getElementById('apartment_fields');
     const villaFields = document.getElementById('villa_fields');
-    
+    const selectedType = document.getElementById('property_type').value;
+
+    if (selectedType === 'apartment') {
+        apartmentFields.style.display = 'block';
+        villaFields.style.display = 'none';
+        if (flatIdSelect) flatIdSelect.innerHTML = '<option value="">Select Property</option>';
+    } else if (selectedType === 'villa') {
+        apartmentFields.style.display = 'none';
+        villaFields.style.display = 'block';
+        if (flatIdSelect) flatIdSelect.innerHTML = '<option value="">Select Property</option>';
+    } else {
+        apartmentFields.style.display = 'none';
+        villaFields.style.display = 'none';
+        if (flatIdSelect) flatIdSelect.innerHTML = '<option value="">Select Property</option>';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const propertyTypeSelect = document.getElementById('property_type');
+    const flatIdSelect = document.getElementById('flat_id');
+
     if (propertyTypeSelect) {
-        propertyTypeSelect.addEventListener('change', function() {
-            const selectedType = this.value;
-            
-            if (selectedType === 'apartment') {
-                apartmentFields.style.display = 'block';
-                villaFields.style.display = 'none';
-                if (flatIdSelect) flatIdSelect.innerHTML = '<option value="">Select Property</option>';
-            } else if (selectedType === 'villa') {
-                apartmentFields.style.display = 'none';
-                villaFields.style.display = 'block';
-                if (flatIdSelect) flatIdSelect.innerHTML = '<option value="">Select Property</option>';
-            } else {
-                apartmentFields.style.display = 'none';
-                villaFields.style.display = 'none';
-                if (flatIdSelect) flatIdSelect.innerHTML = '<option value="">Select Property</option>';
-            }
-        });
+        propertyTypeSelect.addEventListener('change', handlePropertyTypeChange);
 
         const buildingSelect = document.getElementById('building_id');
         if (buildingSelect) {

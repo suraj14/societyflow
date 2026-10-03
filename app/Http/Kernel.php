@@ -23,6 +23,7 @@ class Kernel extends HttpKernel
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
         \App\Http\Middleware\PreventBackHistory::class,
         \App\Http\Middleware\PreventAllCaching::class,
+        \App\Http\Middleware\SecurityHeaders::class,
     ];
 
     /**
@@ -43,6 +44,9 @@ class Kernel extends HttpKernel
             \App\Http\Middleware\SetCacheHeaders::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             \App\Http\Middleware\LoadSocietyEmailSettings::class,
+            // After the session + CSRF: a replayed form token is refused
+            // before the controller can create a second record.
+            \App\Http\Middleware\PreventDuplicateFormSubmission::class,
         ],
 
         'api' => [

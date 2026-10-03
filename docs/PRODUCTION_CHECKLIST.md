@@ -49,7 +49,39 @@ residents. They are the things this codebase cannot do for itself.
 - [ ] `DB_CONNECTION=mysql` with production credentials.
 - [ ] `QUEUE_CONNECTION` set to a real driver and a worker running.
       It is `sync`, so every email and push send blocks the HTTP response.
+      Worker (keep alive with systemd/supervisor):
+
+      ```bash
+      php artisan queue:work --tries=3 --timeout=90
+      ```
 - [ ] `LOG_LEVEL=error` and log rotation configured.
+- [ ] `TRUSTED_PROXIES` set when the app sits behind nginx / a load
+      balancer / Cloudflare (comma-separated IPs or CIDRs, or `*` when the
+      app is reachable only through the proxy). Without it the app never
+      sees HTTPS, so secure cookies and `https://` URLs are not produced.
+- [ ] HTTPS everywhere. `SecurityHeaders` sends HSTS only when
+      `APP_ENV=production` **and** the request is HTTPS.
+- [ ] Sanctum tokens never expire (`config/sanctum.php` `expiration` is
+      null). Password change/reset revokes them; decide whether a hard
+      lifetime is wanted before launch.
+
+## Timezone (India)
+
+Storage stays in `APP_TIMEZONE`; every calendar rule (today, this month,
+overdue, access-pass hours, the 09:00 / 18:00 bill reminders) runs on the
+society's own timezone through `App\Support\SocietyClock`, which reads
+`societies.timezone` (default `Asia/Kolkata`, editable in Settings → App
+Settings → Time Zone).
+
+- [ ] **Fresh database:** set `APP_TIMEZONE=Asia/Kolkata` so stored
+      timestamps read as IST everywhere, including raw `created_at`
+      columns in views and exports.
+- [ ] **Existing database that ran under UTC:** keep `APP_TIMEZONE=UTC`.
+      Changing it would re-interpret every stored timestamp 5½ hours off.
+      The society-timezone rules above are correct either way; only raw
+      timestamp display stays in UTC.
+- [ ] `SOCIETY_TIMEZONE` only needs setting if the default for societies
+      with no timezone of their own should not be `Asia/Kolkata`.
 
 ## BLOCKING — mobile
 
@@ -82,7 +114,20 @@ residents. They are the things this codebase cannot do for itself.
       The existing symlink points at a POSIX-style path
       (`/d/xampp/...`) that will not resolve under a normal web server.
 - [ ] `php artisan schedule:run` on cron — event status updates and bill
-      reminders depend on it.
+      reminders depend on it:
+
+      ```
+      * * * * * cd /path/to/SocietyFlow && php artisan schedule:run >> /dev/null 2>&1
+      ```
+
+      The two reminder jobs are pinned to `SOCIETY_TIMEZONE` (IST), so the
+      server's own clock may stay UTC.
+- [ ] `php artisan migrate --force` runs the one-time data repair
+      (`2026_10_03_000001`): active tenancies lose stale move-out dates,
+      `flats.status` is re-derived, and bills marked paid without a payment
+      row get a clearly labelled `unrecorded`-method reconciliation payment.
+      Re-run `php artisan data:integrity-audit` afterwards; it must report
+      "All invariants hold."
 - [ ] Confirm `storage/` and `bootstrap/cache/` are writable and that
       `storage/app/private/` is **not** web-reachable (Firebase
       credentials live there).

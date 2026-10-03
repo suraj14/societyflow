@@ -83,6 +83,7 @@
                     $isOwner = $user && $user->hasAnyRole(['Villa Owner', 'Apartment Owner', 'Owner']);
                     $isTenant = $user && $user->hasRole('Tenant');
                     $isStaff = $user && $user->hasRole('Staff');
+                    $isAccountant = $user && $user->hasRole('Accountant');
                 @endphp
                 
                 <div class="h-full flex flex-col">
@@ -166,6 +167,38 @@
                                 <span class="ml-3">Dashboard</span>
                             </a>
 
+                            @if($isAccountant)
+                                <!-- Bills -->
+                                <a href="{{ route('payments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('payments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-file-invoice-dollar w-5 text-center"></i>
+                                    <span class="ml-3">Bills &amp; Payments</span>
+                                </a>
+
+                                <!-- Utility Bills / Receipts -->
+                                <a href="{{ route('utility-bills.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('utility-bills.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-receipt w-5 text-center"></i>
+                                    <span class="ml-3">Utility Bills</span>
+                                </a>
+
+                                <!-- Rent (read-only for Accountant) -->
+                                <a href="{{ route('admin.rents.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.rents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-key w-5 text-center"></i>
+                                    <span class="ml-3">Rent</span>
+                                </a>
+
+                                <!-- Society Expenses -->
+                                <a href="{{ route('expenses.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('expenses.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-wallet w-5 text-center"></i>
+                                    <span class="ml-3">Society Expenses</span>
+                                </a>
+
+                                <!-- Finance Report -->
+                                <a href="{{ route('reports.financial') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('reports.financial') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-chart-line w-5 text-center"></i>
+                                    <span class="ml-3">Finance Reports</span>
+                                </a>
+                            @endif
+
                             @if($isAdmin)
                                 <!-- User Management -->
                                 <a href="{{ route('users.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('users.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
@@ -179,6 +212,16 @@
                                     <span class="ml-3">Owners</span>
                                 </a>
 
+                                @if(auth()->user()?->hasAnyRole(['Super Admin', 'Admin']))
+                                <!-- Property & Occupancy: one entry point for assign/transfer/
+                                     move-in/move-out, instead of finding the right one of three
+                                     separate assignment screens (brief §15/§16). Each of those
+                                     screens stays directly reachable too - see the groups below. -->
+                                <a href="{{ route('admin.property-occupancy.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.property-occupancy.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-people-roof w-5 text-center"></i>
+                                    <span class="ml-3">Property &amp; Occupancy</span>
+                                </a>
+                                @endif
 
 
                                 @php
@@ -209,13 +252,11 @@
                                         <a href="{{ route('flats.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('flats.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                             Apartments
                                         </a>
-                                        {{-- Assign an existing owner to an existing apartment. The
-                                             screen itself was already built, tested and society-scoped
-                                             - it simply had no live link anywhere, only a reference in
-                                             an unused sidebar file nothing renders. --}}
-                                        <a href="{{ route('admin.apartment-assignments.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.apartment-assignments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Owner Assignments
-                                        </a>
+                                        {{-- Assigning an owner to a unit lives in Property & Occupancy
+                                             now (one place for every assignment operation, not a
+                                             second copy of the same link per group - see that page's
+                                             controller docblock). The screen itself is unchanged and
+                                             still directly reachable there. --}}
                                     </div>
                                 </div>
                                 @endif
@@ -237,15 +278,14 @@
                                         <a href="{{ route('villas.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('villas.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                             Villas
                                         </a>
-                                        <a href="{{ route('admin.villa-assignments.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.villa-assignments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Owner Assignments
-                                        </a>
+                                        {{-- Owner assignment moved to Property & Occupancy - see the
+                                             Apartments group above for why. --}}
                                     </div>
                                 </div>
                                 @endif
 
                                 <!-- Tenant Group -->
-                                <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') || request()->routeIs('admin.tenant-assignments.*') ? 'true' : 'false' }} }">
+                                <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') ? 'true' : 'false' }} }">
                                     <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
                                         <div class="flex items-center">
                                             <i class="fas fa-key w-5 text-center"></i>
@@ -260,9 +300,8 @@
                                         <a href="{{ route('admin.rents.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.rents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                             Rent
                                         </a>
-                                        <a href="{{ route('admin.tenant-assignments.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.tenant-assignments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Tenant Assignments
-                                        </a>
+                                        {{-- Tenant assignment moved to Property & Occupancy - see the
+                                             Apartments group above for why. --}}
                                     </div>
                                 </div>
                             @endif
@@ -310,6 +349,15 @@
                                     <span class="ml-3">Visitors</span>
                                 </a>
 
+                                @if(auth()->user()?->hasAnyRole(['Super Admin', 'Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant']))
+                                <!-- Access Passes: recurring staff / temporary service QR, so the
+                                     guard scans instead of retyping the same person every visit. -->
+                                <a href="{{ route('access-passes.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('access-passes.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-id-card w-5 text-center"></i>
+                                    <span class="ml-3">Access Passes</span>
+                                </a>
+                                @endif
+
                                 <!-- Services -->
                                 <a href="{{ route('services.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('services.*') || request()->routeIs('service-providers.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
                                     <i class="fas fa-concierge-bell w-5 text-center"></i>
@@ -327,6 +375,14 @@
                                 <a href="{{ route('payments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('payments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
                                     <i class="fas fa-file-invoice-dollar w-5 text-center"></i>
                                     <span class="ml-3">Bills</span>
+                                </a>
+                                @endif
+
+                                <!-- Society Expenses - Admin only (Accountant has its own block above) -->
+                                @if($isAdmin)
+                                <a href="{{ route('expenses.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('expenses.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-wallet w-5 text-center"></i>
+                                    <span class="ml-3">Society Expenses</span>
                                 </a>
                                 @endif
 
@@ -545,20 +601,6 @@
         </div>
     </div>
 
-    <!-- Laravel Session Messages (Hidden data for JavaScript) -->
-    @if(session('success'))
-        <div data-success-message="{{ session('success') }}" style="display: none;"></div>
-    @endif
-    
-    @if(session('error'))
-        <div data-error-message="{{ session('error') }}" style="display: none;"></div>
-    @endif
-    
-    @if($errors->any())
-        @foreach($errors->all() as $error)
-            <div data-validation-error="{{ $error }}" style="display: none;"></div>
-        @endforeach
-    @endif
 
     <!-- Global Form Handler - CRITICAL FOR FORM SUBMISSIONS -->
     <script src="{{ asset('js/global-form-handler.js') }}"></script>
@@ -570,6 +612,22 @@
     <!-- Push Notifications DISABLED -->
     
     @stack('scripts')
+    <script>
+    // Double-submit guard for plain HTML forms: once a form is really being
+    // submitted (not intercepted by its own JS), its submit buttons are
+    // disabled and a second submit within a few seconds is dropped. Forms
+    // that manage their own submission (AJAX) call preventDefault() first
+    // and are left alone; add data-allow-resubmit to opt a form out.
+    document.addEventListener('submit', function (e) {
+        var f = e.target;
+        if (!(f instanceof HTMLFormElement) || e.defaultPrevented || f.hasAttribute('data-allow-resubmit')) return;
+        if (f.dataset.sfSubmitted === '1') { e.preventDefault(); return; }
+        f.dataset.sfSubmitted = '1';
+        var buttons = f.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])');
+        setTimeout(function () { buttons.forEach(function (b) { b.disabled = true; }); }, 0);
+        setTimeout(function () { f.dataset.sfSubmitted = ''; buttons.forEach(function (b) { b.disabled = false; }); }, 8000);
+    }, false);
+    </script>
 </body>
 </html>
 

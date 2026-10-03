@@ -30,8 +30,19 @@ class PropertyTypeDashboardTest extends TestCase
 
         $building = $this->makeBuilding($society);
 
+        // Occupancy is derived from real tenant/owner records (see
+        // App\Support\PropertyOccupancy), not from the stored status column,
+        // so "occupied" units get an active tenant here.
+        $occupy = function (Flat $flat) use ($society) {
+            \App\Models\Tenant::create([
+                'society_id' => $society->id, 'flat_id' => $flat->id, 'name' => 'T ' . $flat->flat_number,
+                'email' => 't' . $flat->id . uniqid() . '@test.local', 'phone' => '90000' . random_int(10000, 99999),
+                'move_in_date' => now(), 'status' => 'active',
+            ]);
+        };
+
         for ($i = 0; $i < $apartments; $i++) {
-            Flat::create([
+            $flat = Flat::create([
                 'society_id' => $society->id,
                 'building_id' => $building->id,
                 'property_type' => 'apartment',
@@ -39,15 +50,19 @@ class PropertyTypeDashboardTest extends TestCase
                 'floor' => 1,
                 'status' => $i === 0 ? 'vacant' : 'occupied',
             ]);
+            if ($i !== 0) {
+                $occupy($flat);
+            }
         }
 
         for ($i = 0; $i < $villas; $i++) {
-            Flat::create([
+            $flat = Flat::create([
                 'society_id' => $society->id,
                 'property_type' => 'villa',
                 'flat_number' => 'V-' . $i,
                 'status' => 'occupied',
             ]);
+            $occupy($flat);
         }
 
         return [$society, $this->makeUserWithRole($society, 'Admin')];
@@ -107,22 +122,32 @@ class PropertyTypeDashboardTest extends TestCase
         $this->assertSame(4, $stats['occupied_units']);
     }
 
-    /** The split counts must not cost extra round trips per card. */
-    public function test_property_counts_use_a_single_grouped_query(): void
+    /**
+     * The split counts must not cost extra round trips per card or per
+     * unit. (This used to assert "one grouped property_type query", an
+     * implementation detail of the old stored-status counting; the intent
+     * is that the cost does not grow with the number of units.)
+     */
+    public function test_property_counts_cost_a_fixed_number_of_queries(): void
     {
-        [, $admin] = $this->societyWithUnits(SocietyPropertyType::Both, 6, 6);
+        $flatQueries = function (int $apartments, int $villas): int {
+            [, $admin] = $this->societyWithUnits(SocietyPropertyType::Both, $apartments, $villas);
 
-        DB::flushQueryLog();
-        DB::enableQueryLog();
-        $this->actingAs($admin)->get('/dashboard')->assertOk();
-        $queries = DB::getQueryLog();
-        DB::disableQueryLog();
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            $this->actingAs($admin)->get('/dashboard')->assertOk();
+            $queries = DB::getQueryLog();
+            DB::disableQueryLog();
 
-        $grouped = array_filter(
-            $queries,
-            fn ($q) => str_contains($q['query'], 'group by') && str_contains($q['query'], 'property_type')
-        );
+            return count(array_filter(
+                $queries,
+                fn ($q) => preg_match('/from "(flats|tenants|owners)"/i', $q['query'])
+            ));
+        };
 
-        $this->assertCount(1, $grouped, 'expected exactly one grouped property_type query');
+        $small = $flatQueries(2, 2);
+        $large = $flatQueries(12, 12);
+
+        $this->assertSame($small, $large, 'unit/occupancy queries must not grow with the number of units');
     }
 }

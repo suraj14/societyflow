@@ -58,4 +58,24 @@ class ActivityLog extends Model
             'user_agent' => request()?->userAgent(),
         ]);
     }
+
+    /**
+     * Record an event about one model row (expense created/updated/deleted
+     * and the like), filling model_type/model_id so the row can be found
+     * again by the record it describes.
+     */
+    public static function recordFor(Model $model, string $action, array $newValues = [], array $oldValues = []): self
+    {
+        return static::create([
+            'society_id' => $model->getAttribute('society_id') ?? auth()->user()?->society_id,
+            'user_id'    => auth()->id(),
+            'action'     => $action,
+            'model_type' => $model::class,
+            'model_id'   => $model->getKey(),
+            'old_values' => $oldValues ?: null,
+            'new_values' => $newValues ?: null,
+            'ip_address' => request()?->ip(),
+            'user_agent' => request()?->userAgent(),
+        ]);
+    }
 }

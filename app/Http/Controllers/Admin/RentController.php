@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Http\Controllers\Concerns\ResolvesSocietyPropertyType;
 use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -20,8 +21,9 @@ class RentController extends BaseController
     use HandlesFormSubmissions, ResolvesSocietyPropertyType;
     public function index()
     {
-        // Only admin and super admin can access this
-        $this->authorizeRole('Super Admin', 'Admin');
+        // Admin/Super Admin manage rent; Accountant has read-only access
+        // (the route itself now grants this - see routes/web.php).
+        $this->authorizeRole('Super Admin', 'Admin', 'Accountant');
         
         $societyId = $this->getSocietyId();
         
@@ -77,18 +79,27 @@ class RentController extends BaseController
                 'due_date' => 'required|date|after:bill_date',
                 'status' => 'required|in:pending,paid',
                 'description' => 'nullable|string|max:500',
-                'payment_date' => 'nullable|date',
-                'payment_method' => 'nullable|string',
+                // "Paid" is a statement that money was received, and that
+                // is recorded in the payments ledger - so a paid rent must
+                // say when and how. It used to accept "paid" with no
+                // payment details and set paid_amount by hand, leaving a
+                // bill that said paid with no payment behind it.
+                'payment_date' => 'required_if:status,paid|nullable|date',
+                'payment_method' => ['required_if:status,paid', 'nullable', Rule::in(Payment::METHODS)],
                 'payment_proof' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
                 'payment_notes' => 'nullable|string|max:255',
+            ], [
+                'payment_date.required_if' => 'Enter the payment date to record this rent as paid.',
+                'payment_method.required_if' => 'Select the payment method to record this rent as paid.',
             ]);
-            
+
             $societyId = $this->getSocietyId();
-            
-            // Validate unit belongs to society and is on rent
+
+            // Validate unit belongs to society and has an active tenant
+            // (the tenant check below pins which one).
             $flat = Flat::where('id', $request->unit_id)
                 ->where('society_id', $societyId)
-                ->where('status', 'on_rent')
+                ->whereHas('tenants', fn ($q) => $q->where('status', 'active'))
                 ->first();
                 
             if (!$flat) {
@@ -117,8 +128,10 @@ class RentController extends BaseController
                 throw new \Exception('Rent record already exists for this unit in ' . $billDate->format('F Y') . '.');
             }
             
-            // Create rent record - handle missing columns gracefully
-            $rentData = [
+            // The bill itself is always created unpaid; the payment below
+            // settles it through the ledger (bill_type/paid_date columns
+            // are unconditionally present - see MaintenanceBill::$fillable).
+            $rent = MaintenanceBill::create([
                 'society_id' => $societyId,
                 'flat_id' => $request->unit_id,
                 'bill_number' => 'RENT-' . $societyId . '-' . $request->unit_id . '-' . $billDate->format('Ym') . '-' . time(),
@@ -126,38 +139,14 @@ class RentController extends BaseController
                 'year' => $billDate->year,
                 'maintenance_amount' => $request->rent_amount,
                 'total_amount' => $request->rent_amount,
+                'paid_amount' => 0,
                 'bill_date' => $request->bill_date,
                 'due_date' => $request->due_date,
-                'status' => $request->status,
+                'bill_type' => 'rent',
                 'notes' => $request->description ?? 'Monthly Rent',
-            ];
+            ]);
 
-            // If status is paid, set paid_amount to the full amount
             if ($request->status === 'paid') {
-                $rentData['paid_amount'] = $request->rent_amount;
-            } else {
-                $rentData['paid_amount'] = 0;
-            }
-
-            // Only add bill_type and paid_date if columns exist in database
-            try {
-                $columnNames = \Illuminate\Support\Facades\Schema::getColumnListing('maintenance_bills');
-                
-                if (in_array('bill_type', $columnNames)) {
-                    $rentData['bill_type'] = 'rent';
-                }
-                
-                if (in_array('paid_date', $columnNames) && $request->status === 'paid') {
-                    $rentData['paid_date'] = now();
-                }
-            } catch (\Exception $e) {
-                Log::warning('Could not check database columns: ' . $e->getMessage());
-            }
-
-            $rent = MaintenanceBill::create($rentData);
-            
-            // Create payment record if payment details are provided
-            if ($request->payment_date && $request->status === 'paid') {
                 // Handle file upload for payment proof
                 $receiptFilePath = null;
                 if ($request->hasFile('payment_proof')) {
@@ -166,7 +155,9 @@ class RentController extends BaseController
                     $receiptFilePath = $file->storeAs('payment_receipts', $fileName, 'public');
                 }
 
-                // Create payment record
+                // The Payment model's saved hook marks the bill paid from
+                // the ledger. Status is 'success' - 'completed' is not a
+                // value the payments.status column accepts on MySQL.
                 Payment::create([
                     'society_id' => $societyId,
                     'flat_id' => $request->unit_id,
@@ -174,15 +165,18 @@ class RentController extends BaseController
                     'user_id' => auth()->id(),
                     'payment_id' => Payment::generatePaymentId(),
                     'amount' => $request->rent_amount,
-                    'payment_method' => $request->payment_method ?? 'cash',
-                    'status' => 'completed',
+                    'payment_method' => $request->payment_method,
+                    'status' => 'success',
                     'payment_date' => $request->payment_date,
                     'bill_type' => 'rent',
+                    'due_date' => $request->due_date,
                     'notes' => $request->payment_notes,
                     'receipt_file_path' => $receiptFilePath,
                 ]);
+
+                $rent->refresh();
             }
-            
+
             return $rent;
         }, 'Rent record created successfully!', 'admin.rents.index');
     }
@@ -206,7 +200,6 @@ class RentController extends BaseController
         
         // Get all flats with active tenants for the dropdown
         $tenantFlats = Flat::where('society_id', $societyId)
-            ->where('status', 'on_rent')
             ->whereHas('tenants', function($query) {
                 $query->where('status', 'active');
             })
@@ -228,26 +221,31 @@ class RentController extends BaseController
             return back()->with('error', 'Rent record not found.');
         }
         
+        // No `status` here: a rent record's status is derived from the
+        // payments recorded against it (MaintenanceBill::syncFromLedger).
+        // Marking it paid happens through "Add Payment", which writes the
+        // ledger row the status is then computed from. The edit form used to
+        // accept status=paid and set paid_amount to the total with no payment
+        // behind it.
         $request->validate([
-            'flat_id' => 'required|exists:flats,id',
+            'flat_id' => ['required', Rule::exists('flats', 'id')->where('society_id', $this->getSocietyId())],
             'rent_amount' => 'required|numeric|min:1',
             'bill_date' => 'required|date',
             'due_date' => 'required|date|after_or_equal:bill_date',
             'description' => 'nullable|string|max:500',
-            'status' => 'required|in:pending,paid,partial,overdue',
         ]);
-        
-        // Business rule: Once paid, status cannot be changed
-        if ($rent->status === 'paid' && $request->status !== 'paid') {
-            return back()->withErrors(['status' => 'Cannot change status of a paid rent record.'])->withInput();
+
+        if ((float) $request->rent_amount < (float) $rent->paid_amount) {
+            return back()->withErrors(['rent_amount' => 'Rent amount cannot be less than the ₹' . number_format($rent->paid_amount, 2) . ' already paid against this record.'])->withInput();
         }
-        
+
         DB::beginTransaction();
         try {
             $billDate = Carbon::parse($request->bill_date);
-            
-            // Update rent record
-            $updateData = [
+
+            // paid_amount is untouched; the model recomputes balance and
+            // status from it on save.
+            $rent->update([
                 'flat_id' => $request->flat_id,
                 'month' => $billDate->format('F'),
                 'year' => $billDate->year,
@@ -256,25 +254,7 @@ class RentController extends BaseController
                 'bill_date' => $request->bill_date,
                 'due_date' => $request->due_date,
                 'notes' => $request->description ?? 'Monthly Rent',
-                'status' => $request->status,
-            ];
-            
-            // Handle paid_amount based on status
-            if ($request->status === 'paid') {
-                // Fully paid — zero out balance
-                $updateData['paid_amount'] = $request->rent_amount;
-                $updateData['balance_amount'] = 0;
-            } elseif ($request->status === 'pending' || $request->status === 'overdue') {
-                // Not paid yet - keep existing paid_amount or set to 0
-                $updateData['paid_amount'] = $rent->paid_amount ?? 0;
-                $updateData['balance_amount'] = $request->rent_amount - ($rent->paid_amount ?? 0);
-            } elseif ($request->status === 'partial') {
-                // Partially paid - keep existing paid_amount
-                $updateData['paid_amount'] = $rent->paid_amount ?? 0;
-                $updateData['balance_amount'] = $request->rent_amount - ($rent->paid_amount ?? 0);
-            }
-            
-            $rent->update($updateData);
+            ]);
             
             DB::commit();
             
@@ -326,21 +306,25 @@ class RentController extends BaseController
     {
         try {
             $societyId = $this->getSocietyId();
+            $society = Society::find($societyId);
+
+            // A single-type society never sends property_type - the browser
+            // never showed that select, so there is nothing to trust or
+            // distrust from it. Resolve the only type the society supports
+            // server-side instead of rejecting the request.
             $propertyType = $request->get('property_type');
-            
-            Log::info("Rent API called with property_type: {$propertyType}, society_id: {$societyId}");
-            
+            if (!$propertyType && $society && !$society->isMixedProperty()) {
+                $propertyType = $society->propertyType()->allows()[0]->value;
+            }
+
             if (!in_array($propertyType, ['apartment', 'villa'])) {
-                Log::error("Invalid property type: {$propertyType}");
                 return response()->json(['error' => 'Invalid property type'], 400);
             }
-            
-            // First, let's update flat statuses for active tenants
-            $this->updateFlatStatusesForActiveTenants();
-            
-            // Get units that are on rent with active tenants
+
+            // Units with an active tenant. The stored flats.status is a
+            // cache the Flat model keeps in sync with the tenant/owner
+            // records; the active tenant is the fact, so filter on that.
             $query = Flat::where('society_id', $societyId)
-                ->where('status', 'on_rent')
                 ->whereHas('tenants', function($q) {
                     $q->where('status', 'active');
                 })
@@ -357,8 +341,7 @@ class RentController extends BaseController
             }
             
             $flats = $query->get();
-            Log::info("Found {$flats->count()} flats for property type: {$propertyType}");
-            
+
             $units = $flats->map(function($flat) {
                 $tenant = $flat->tenants->first();
                 $tenantName = $tenant && $tenant->user ? $tenant->user->name : 'Unknown Tenant';
@@ -381,7 +364,6 @@ class RentController extends BaseController
                 ];
             });
 
-            Log::info("Returning {$units->count()} units to frontend");
             return response()->json($units);
             
         } catch (\Exception $e) {
@@ -438,19 +420,36 @@ class RentController extends BaseController
                 'rent_id' => 'required|exists:maintenance_bills,id',
                 'payment_date' => 'required|date',
                 'payment_amount' => 'required|numeric|min:0.01',
-                'payment_method' => 'required|string',
+                'payment_method' => ['required', Rule::in(Payment::METHODS)],
                 'payment_proof' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
                 'notes' => 'nullable|string|max:500',
+                // Idempotency: the form stamps one token per open modal, so
+                // a double click or a browser retry replays the same token
+                // and finds the payment it already created.
+                'idempotency_key' => 'nullable|string|max:64',
             ]);
 
             $societyId = $this->getSocietyId();
-            
+
             // Get the rent record
             $rent = MaintenanceBill::findOrFail($request->rent_id);
-            
+
             // Verify rent belongs to the same society
             if ($rent->flat->society_id !== $societyId) {
                 return response()->json(['success' => false, 'message' => 'Rent record not found.'], 404);
+            }
+
+            if ($request->filled('idempotency_key')) {
+                $existing = Payment::where('maintenance_bill_id', $rent->id)
+                    ->where('transaction_id', 'IDEMP-' . $request->idempotency_key)
+                    ->first();
+                if ($existing) {
+                    return response()->json(['success' => true, 'message' => 'Payment already recorded.', 'payment' => $existing]);
+                }
+            }
+
+            if ((float) $request->payment_amount > (float) $rent->balance_amount + 0.005) {
+                return response()->json(['success' => false, 'message' => 'Payment amount cannot exceed the outstanding balance of ₹' . number_format($rent->balance_amount, 2) . '.'], 422);
             }
 
             DB::beginTransaction();
@@ -475,31 +474,15 @@ class RentController extends BaseController
                 'status' => 'success',
                 'payment_date' => $request->payment_date,
                 'bill_type' => 'rent',
-                'due_date' => $request->payment_date, // Use payment date as due date for rent payments
+                'due_date' => $rent->due_date,
+                'transaction_id' => $request->filled('idempotency_key') ? 'IDEMP-' . $request->idempotency_key : null,
                 'notes' => $request->notes,
                 'receipt_file_path' => $receiptFilePath,
             ]);
 
-            // Update rent record
-            $rent->paid_amount = ($rent->paid_amount ?? 0) + $request->payment_amount;
-            $rent->balance_amount = $rent->total_amount - $rent->paid_amount;
-            
-            // Update status based on payment
-            if ($rent->balance_amount <= 0) {
-                $rent->status = 'paid';
-                try {
-                    $columnNames = \Illuminate\Support\Facades\Schema::getColumnListing('maintenance_bills');
-                    if (in_array('paid_date', $columnNames)) {
-                        $rent->paid_date = $request->payment_date;
-                    }
-                } catch (\Exception $e) {
-                    Log::warning('Could not set paid_date: ' . $e->getMessage());
-                }
-            } elseif ($rent->paid_amount > 0) {
-                $rent->status = 'partial';
-            }
-            
-            $rent->save();
+            // The bill's paid/balance/status/paid_date were re-derived from
+            // the ledger by the Payment model's saved hook.
+            $rent->refresh();
 
             DB::commit();
 
@@ -520,40 +503,12 @@ class RentController extends BaseController
     }
 
     /**
-     * Helper method to update flat statuses for active tenants
-     */
-    private function updateFlatStatusesForActiveTenants()
-    {
-        try {
-            $activeTenants = Tenant::where('status', 'active')
-                ->whereNotNull('flat_id')
-                ->with('flat')
-                ->get();
-
-            $updatedCount = 0;
-            foreach ($activeTenants as $tenant) {
-                if ($tenant->flat && $tenant->flat->status !== 'on_rent') {
-                    $tenant->flat->update(['status' => 'on_rent']);
-                    $updatedCount++;
-                    Log::info("Updated flat {$tenant->flat->flat_number} (ID: {$tenant->flat->id}) to on_rent status");
-                }
-            }
-            
-            if ($updatedCount > 0) {
-                Log::info("Updated {$updatedCount} flats to on_rent status");
-            }
-        } catch (\Exception $e) {
-            Log::error('Error updating flat statuses: ' . $e->getMessage());
-        }
-    }
-
-    /**
      * Show rent receipt for admin
      */
     public function receipt(MaintenanceBill $rent)
     {
-        // Only admin and super admin can access this
-        $this->authorizeRole('Super Admin', 'Admin');
+        // Admin/Super Admin manage rent; Accountant has read-only access.
+        $this->authorizeRole('Super Admin', 'Admin', 'Accountant');
         
         // Verify rent record belongs to the same society
         if ($rent->flat->society_id !== $this->getSocietyId()) {

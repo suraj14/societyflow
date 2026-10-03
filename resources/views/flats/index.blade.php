@@ -25,8 +25,9 @@
                 <select name="status" class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
                     <option value="">All Status</option>
                     <option value="vacant" {{ request('status') == 'vacant' ? 'selected' : '' }}>Vacant</option>
-                    <option value="occupied" {{ request('status') == 'occupied' ? 'selected' : '' }}>Occupied</option>
-                    <option value="on_rent" {{ request('status') == 'on_rent' ? 'selected' : '' }}>On Rent</option>
+                    <option value="occupied" {{ request('status') == 'occupied' ? 'selected' : '' }}>Occupied (owner or tenant)</option>
+                    <option value="owner_occupied" {{ request('status') == 'owner_occupied' ? 'selected' : '' }}>Owner Occupied</option>
+                    <option value="tenant_occupied" {{ in_array(request('status'), ['tenant_occupied', 'on_rent']) ? 'selected' : '' }}>Tenant Occupied</option>
                     <option value="maintenance" {{ request('status') == 'maintenance' ? 'selected' : '' }}>Maintenance</option>
                     <option value="under_maintenance" {{ request('status') == 'under_maintenance' ? 'selected' : '' }}>Under Maintenance</option>
                 </select>
@@ -55,17 +56,7 @@
         </form>
     </div>
 
-    @if(session('success'))
-        <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
-            {{ session('success') }}
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-            {{ session('error') }}
-        </div>
-    @endif
 
     <div class="bg-white rounded-lg shadow overflow-hidden">
         <div class="overflow-x-auto">
@@ -105,22 +96,22 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 @php
-                                    $statusColors = [
-                                        'vacant' => 'bg-green-100 text-green-800',
-                                        'occupied' => 'bg-red-100 text-red-800',
-                                        'on_rent' => 'bg-blue-100 text-blue-800',
-                                        'maintenance' => 'bg-yellow-100 text-yellow-800',
-                                        'under_maintenance' => 'bg-orange-100 text-orange-800',
-                                    ];
+                                    $sfRow = $occupancy[$flat->id] ?? ['state' => 'vacant', 'owner' => null];
+                                    $sfUnderMaintenance = in_array($flat->status, ['maintenance', 'under_maintenance'], true);
                                 @endphp
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $statusColors[$flat->status] ?? 'bg-gray-100 text-gray-800' }}">
-                                    {{ ucfirst($flat->status) }}
-                                </span>
+                                @if($sfUnderMaintenance)
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">Under maintenance</span>
+                                @else
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ \App\Support\PropertyOccupancy::badgeClass($sfRow['state']) }}">
+                                        {{ \App\Support\PropertyOccupancy::label($sfRow['state']) }}
+                                    </span>
+                                @endif
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                @if($flat->ownerModel)
-                                    <div class="text-sm text-gray-900">{{ $flat->ownerModel->name }}</div>
-                                    <div class="text-sm text-gray-500">{{ $flat->ownerModel->phone ?? $flat->ownerModel->email }}</div>
+                                @php $sfOwner = $sfRow['owner'] ?? null; @endphp
+                                @if($sfOwner)
+                                    <div class="text-sm text-gray-900">{{ $sfOwner->name }}</div>
+                                    <div class="text-sm text-gray-500">{{ $sfOwner->phone ?? $sfOwner->email }}</div>
                                 @else
                                     <span class="text-gray-400">No owner</span>
                                 @endif

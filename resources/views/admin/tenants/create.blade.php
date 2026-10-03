@@ -21,6 +21,7 @@
 
             <form action="{{ route('admin.tenants.store') }}" method="POST" class="p-6" enctype="multipart/form-data" id="tenant-create-form">
                 @csrf
+                @include('partials.idempotency')
 
                 <div class="space-y-6">
                     <!-- Basic Information -->
@@ -229,18 +230,13 @@
                         <h3 class="text-md font-semibold text-gray-800 mb-4">Property Assignment</h3>
                         
                         <div class="space-y-4">
-                            <!-- Property Type -->
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Property Type</label>
-                                <select name="property_type" id="property_type"
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                    <option value="">Select Property Type</option>
-@include('partials.property-type-options')
-                                </select>
-                                @error('property_type')
-                                    <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
-                                @enderror
-                            </div>
+                            <!-- Property Type: real choice only in a mixed society - a
+                                 single-type society already knows the answer, and its
+                                 own onload trigger below drives updatePropertyTypeSelection()
+                                 exactly as a user picking the only option would. -->
+                            @include('partials.property-type-field', [
+                                'sfOnChange' => 'updatePropertyTypeSelection()',
+                            ])
 
                             <!-- Apartment Fields -->
                             <div id="apartment-fields" class="space-y-4" style="display: none;">

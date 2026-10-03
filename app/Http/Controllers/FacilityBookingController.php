@@ -8,9 +8,11 @@ use App\Models\FacilityBooking;
 use App\Models\Flat;
 use App\Models\Society;
 use App\Models\VillaArea;
+use App\Support\UserFlatResolver;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Concerns\AuthorizesSocietyAccess;
 
 class FacilityBookingController extends Controller
@@ -22,8 +24,8 @@ class FacilityBookingController extends Controller
         // Check if user has permission to view bookings
         // Allow: Users with view_own_bookings or manage_facilities permissions, or specific roles
         $user = auth()->user();
-        if (!$user->can('view_own_bookings') && !$user->can('manage_facilities') && 
-            !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner') &&
+        if (!$user->can('view_own_bookings') && !$user->can('manage_facilities') &&
+            !$user->hasRole('Owner') && !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner') &&
             !$user->hasRole('Resident') && !$user->hasRole('Tenant')) {
             abort(403, 'You do not have permission to view bookings.');
         }
@@ -83,6 +85,18 @@ class FacilityBookingController extends Controller
                 });
             } else {
                 // No apartments owned, show only bookings created by this user
+                $query->where('user_id', $user->id);
+            }
+        } elseif ($user->hasRole('Owner')) {
+            // Owner (canonical role): see bookings for every property they
+            // own, villa or apartment, OR bookings they created.
+            $ownedFlats = Flat::where('owner_id', $user->owner_id)->pluck('id');
+            if ($ownedFlats->count() > 0) {
+                $query->where(function ($q) use ($ownedFlats, $user) {
+                    $q->whereIn('flat_id', $ownedFlats)
+                      ->orWhere('user_id', $user->id);
+                });
+            } else {
                 $query->where('user_id', $user->id);
             }
         } elseif ($user->hasRole('Resident') || $user->hasRole('Tenant')) {
@@ -188,6 +202,16 @@ class FacilityBookingController extends Controller
             } else {
                 $statsQuery->where('user_id', $user->id);
             }
+        } elseif ($user->hasRole('Owner')) {
+            $ownedFlats = Flat::where('owner_id', $user->owner_id)->pluck('id');
+            if ($ownedFlats->count() > 0) {
+                $statsQuery->where(function ($q) use ($ownedFlats, $user) {
+                    $q->whereIn('flat_id', $ownedFlats)
+                      ->orWhere('user_id', $user->id);
+                });
+            } else {
+                $statsQuery->where('user_id', $user->id);
+            }
         } elseif ($user->hasRole('Resident') || $user->hasRole('Tenant')) {
             $statsQuery->where('user_id', $user->id);
         }
@@ -208,9 +232,9 @@ class FacilityBookingController extends Controller
         $user = auth()->user();
         
         // Check if user has permission to book facilities
-        // Allow: Users with book_facility permission, Admins, Villa Owners, Apartment Owners
-        if (!$user->can('book_facility') && !$user->can('manage_facilities') && 
-            !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
+        // Allow: Users with book_facility permission, Admins, Owners (canonical or legacy)
+        if (!$user->can('book_facility') && !$user->can('manage_facilities') &&
+            !$user->hasRole('Owner') && !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
             abort(403, 'You do not have permission to book facilities.');
         }
 
@@ -300,9 +324,32 @@ class FacilityBookingController extends Controller
                 $buildings = Building::where('status', 'active')
                                     ->where('society_id', $societyId)
                                     ->get();
-                
+
                 return view('facility-bookings.create', compact('facilities', 'buildings', 'user', 'propertyType', 'properties', 'society'));
             }
+        }
+        elseif ($user->hasRole('Owner')) {
+            // Owner (canonical role): every property they own, villa or
+            // apartment, in one list - property type is per-flat, not
+            // something the form needs to ask again.
+            $ownedFlats = Flat::with(['building', 'villaArea'])
+                            ->where('owner_id', $user->owner_id)
+                            ->where('society_id', $societyId)
+                            ->get();
+
+            $properties = $ownedFlats->map(function ($flat) use ($society) {
+                if ($flat->property_type === 'villa') {
+                    $villaName = !empty($flat->villa_name) ? $flat->villa_name : $flat->flat_number;
+                    return ['id' => $flat->id, 'display_name' => "Villa - {$villaName}"];
+                }
+
+                $buildingName = $flat->building ? $flat->building->name : 'Unknown';
+                return ['id' => $flat->id, 'display_name' => "Apartment - {$buildingName} {$flat->flat_number}"];
+            });
+
+            $propertyType = $ownedFlats->pluck('property_type')->unique()->count() === 1
+                ? $ownedFlats->first()?->property_type
+                : null;
         } elseif ($user->hasRole('Resident') || $user->hasRole('Tenant')) {
             // Get user's flats (could be apartment or villa)
             // Don't filter by status - check both owner_id and residents relationship
@@ -357,14 +404,69 @@ class FacilityBookingController extends Controller
         return view('facility-bookings.create', compact('facilities', 'user', 'propertyType', 'properties', 'society'));
     }
 
+    /**
+     * True if $facilityId already has a pending/approved booking on $date
+     * overlapping [$startTime, $endTime] (both "H:i").
+     *
+     * Deliberately does not filter by booking_date or compare start_time/
+     * end_time with raw SQL. Two independent casts make raw comparison
+     * unreliable:
+     *   - booking_date casts as `date`, but on write Eloquent persists the
+     *     full `Y-m-d H:i:s` string, not a bare date. A raw
+     *     where('booking_date', '2026-09-17') then never matches the stored
+     *     '2026-09-17 00:00:00' on SQLite.
+     *   - start_time/end_time cast as `datetime:H:i`, and on SQLite that
+     *     persists a full datetime using *today's* date rather than a bare
+     *     time, so a raw BETWEEN against "10:00"/"12:00" never matches
+     *     either.
+     * Both meant the original overlap query returned zero rows on every
+     * call, silently disabling the double-booking check entirely on
+     * SQLite (proven by test before this fix). MySQL's real DATE/TIME
+     * column types happen to tolerate the same query, which is exactly
+     * why this went unnoticed - the two engines were hiding each other's
+     * bug, the failure mode CLAUDE.md §8 names directly. Filtering by
+     * facility_id/status in SQL (safe on both engines) and comparing date
+     * and time via the model's own casted values in PHP is correct
+     * regardless of how a given driver serializes date/time casts.
+     */
+    private function hasOverlappingBooking(int $facilityId, string $date, string $startTime, string $endTime, ?int $excludeBookingId = null): bool
+    {
+        $newStart = Carbon::createFromFormat('H:i', $startTime);
+        $newEnd = Carbon::createFromFormat('H:i', $endTime);
+
+        $query = FacilityBooking::where('facility_id', $facilityId)
+            ->whereIn('status', ['pending', 'approved']);
+
+        if ($excludeBookingId !== null) {
+            $query->where('id', '!=', $excludeBookingId);
+        }
+
+        foreach ($query->get(['booking_date', 'start_time', 'end_time']) as $existing) {
+            if ($existing->booking_date->toDateString() !== $date) {
+                continue;
+            }
+
+            $existingStart = Carbon::createFromFormat('H:i', $existing->start_time->format('H:i'));
+            $existingEnd = Carbon::createFromFormat('H:i', $existing->end_time->format('H:i'));
+
+            // Standard interval overlap: two ranges overlap unless one ends
+            // at or before the other starts.
+            if ($newStart->lt($existingEnd) && $existingStart->lt($newEnd)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function store(Request $request)
     {
         $user = auth()->user();
-        
+
         // Check if user has permission to book facilities
-        // Allow: Users with book_facility permission, Admins, Villa Owners, Apartment Owners
-        if (!$user->can('book_facility') && !$user->can('manage_facilities') && 
-            !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
+        // Allow: Users with book_facility permission, Admins, Owners (canonical or legacy)
+        if (!$user->can('book_facility') && !$user->can('manage_facilities') &&
+            !$user->hasRole('Owner') && !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
             abort(403, 'You do not have permission to book facilities.');
         }
 
@@ -378,7 +480,6 @@ class FacilityBookingController extends Controller
             'expected_guests' => 'nullable|integer|min:0',
         ]);
 
-        $facility = Facility::findOrFail($validated['facility_id']);
         $flat = Flat::findOrFail($validated['flat_id']);
 
         // Verify the flat belongs to the current user's society
@@ -386,37 +487,60 @@ class FacilityBookingController extends Controller
             return back()->with('error', 'Invalid property selection.');
         }
 
-        // Check for double booking
-        $existingBooking = FacilityBooking::where('facility_id', $validated['facility_id'])
-            ->where('booking_date', $validated['booking_date'])
-            ->whereIn('status', ['pending', 'approved'])
-            ->where(function ($query) use ($validated) {
-                $query->whereBetween('start_time', [$validated['start_time'], $validated['end_time']])
-                    ->orWhereBetween('end_time', [$validated['start_time'], $validated['end_time']])
-                    ->orWhere(function ($q) use ($validated) {
-                        $q->where('start_time', '<=', $validated['start_time'])
-                          ->where('end_time', '>=', $validated['end_time']);
-                    });
-            })
-            ->exists();
-
-        if ($existingBooking) {
-            return back()->with('error', 'This time slot is already booked. Please select a different time.');
+        // A resident/owner picks their own flat from a pre-populated list the
+        // server built (create(), above) - the browser never showed anyone
+        // else's flat_id as an option. But the field is still a plain form
+        // input, so a same-society resident could otherwise hand-craft a
+        // request naming a neighbour's flat_id and book on their behalf.
+        // Only manage_facilities (Admin/Staff booking for someone else) may
+        // name a flat the requester does not themselves occupy or own.
+        if (!$user->can('manage_facilities') && !UserFlatResolver::userHasFlat($user, $flat->id)) {
+            return back()->with('error', 'You can only book a facility for your own property.');
         }
 
-        $booking = FacilityBooking::create([
-            'society_id' => $flat->society_id,
-            'facility_id' => $validated['facility_id'],
-            'user_id' => $user->id,
-            'flat_id' => $validated['flat_id'],
-            'booking_date' => $validated['booking_date'],
-            'start_time' => $validated['start_time'],
-            'end_time' => $validated['end_time'],
-            'purpose' => $validated['purpose'],
-            'expected_guests' => $validated['expected_guests'] ?? 0,
-            'booking_amount' => $facility->booking_charge ?? 0,
-            'status' => 'pending', // Always require admin approval
-        ]);
+        // The read-then-create below (check for an overlap, then insert) is a
+        // classic TOCTOU race: two concurrent requests for the same slot can
+        // both pass the overlap check before either has inserted its row.
+        // lockForUpdate() on the facility row serializes every booking
+        // attempt against that facility - a second transaction's
+        // lockForUpdate() blocks until the first commits (or rolls back), so
+        // its overlap check always sees the first booking's already-committed
+        // row. This does not add a row lock on SQLite (no FOR UPDATE
+        // support there), but SQLite already serializes writers at the
+        // database level, so the property under test - no double booking
+        // survives - holds on both engines; only the mechanism differs.
+        $booking = DB::transaction(function () use ($validated, $user, $flat) {
+            $facility = Facility::where('id', $validated['facility_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($this->hasOverlappingBooking(
+                $validated['facility_id'],
+                $validated['booking_date'],
+                $validated['start_time'],
+                $validated['end_time']
+            )) {
+                return null;
+            }
+
+            return FacilityBooking::create([
+                'society_id' => $flat->society_id,
+                'facility_id' => $validated['facility_id'],
+                'user_id' => $user->id,
+                'flat_id' => $validated['flat_id'],
+                'booking_date' => $validated['booking_date'],
+                'start_time' => $validated['start_time'],
+                'end_time' => $validated['end_time'],
+                'purpose' => $validated['purpose'] ?? null,
+                'expected_guests' => $validated['expected_guests'] ?? 0,
+                'booking_amount' => $facility->booking_charge ?? 0,
+                'status' => 'pending', // Always require admin approval
+            ]);
+        });
+
+        if ($booking === null) {
+            return back()->with('error', 'This time slot is already booked. Please select a different time.');
+        }
 
         return redirect()->route('facility-bookings.index')
             ->with('success', 'Booking request submitted successfully. Waiting for admin approval.');
@@ -444,9 +568,9 @@ class FacilityBookingController extends Controller
         $this->authorizeSocietyAccess($facilityBooking);
 
         // Users can edit their own booking details, but only admin can edit status
-        // Allow: Users with book_facility permission, Admins, Villa Owners, Apartment Owners
-        if (!$user->can('book_facility') && !$user->can('manage_facilities') && 
-            !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
+        // Allow: Users with book_facility permission, Admins, Owners (canonical or legacy)
+        if (!$user->can('book_facility') && !$user->can('manage_facilities') &&
+            !$user->hasRole('Owner') && !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
             abort(403, 'You do not have permission to edit bookings.');
         }
 
@@ -532,6 +656,21 @@ class FacilityBookingController extends Controller
                                     'display_name' => "Apartment Owner {$society->name} Apartment - {$buildingName} {$apartment->flat_number}"
                                 ];
                             });
+        } elseif ($user->hasRole('Owner')) {
+            // Owner (canonical role): every property they own, in one list.
+            $properties = Flat::with(['building', 'villaArea'])
+                            ->where('owner_id', $user->owner_id)
+                            ->where('society_id', $societyId)
+                            ->get()
+                            ->map(function ($flat) use ($society) {
+                                if ($flat->property_type === 'villa') {
+                                    $villaName = !empty($flat->villa_name) ? $flat->villa_name : $flat->flat_number;
+                                    return ['id' => $flat->id, 'display_name' => "Villa - {$villaName}"];
+                                }
+
+                                $buildingName = $flat->building ? $flat->building->name : 'Unknown';
+                                return ['id' => $flat->id, 'display_name' => "Apartment - {$buildingName} {$flat->flat_number}"];
+                            });
         } elseif ($user->hasRole('Resident') || $user->hasRole('Tenant')) {
             // Get user's flats (could be apartment or villa)
             $userFlats = Flat::with('building', 'villaArea')
@@ -595,9 +734,9 @@ class FacilityBookingController extends Controller
         $this->authorizeSocietyAccess($facilityBooking);
 
         // Users can update their own booking details, but only admin can update status
-        // Allow: Users with book_facility permission, Admins, Villa Owners, Apartment Owners
-        if (!$user->can('book_facility') && !$user->can('manage_facilities') && 
-            !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
+        // Allow: Users with book_facility permission, Admins, Owners (canonical or legacy)
+        if (!$user->can('book_facility') && !$user->can('manage_facilities') &&
+            !$user->hasRole('Owner') && !$user->hasRole('Villa Owner') && !$user->hasRole('Apartment Owner')) {
             abort(403, 'You do not have permission to update bookings.');
         }
 
@@ -630,35 +769,41 @@ class FacilityBookingController extends Controller
             return back()->with('error', 'Invalid property selection.');
         }
 
-        // Check for double booking (exclude current booking)
-        $existingBooking = FacilityBooking::where('facility_id', $validated['facility_id'])
-            ->where('booking_date', $validated['booking_date'])
-            ->where('id', '!=', $facilityBooking->id)
-            ->whereIn('status', ['pending', 'approved'])
-            ->where(function ($query) use ($validated) {
-                $query->whereBetween('start_time', [$validated['start_time'], $validated['end_time']])
-                    ->orWhereBetween('end_time', [$validated['start_time'], $validated['end_time']])
-                    ->orWhere(function ($q) use ($validated) {
-                        $q->where('start_time', '<=', $validated['start_time'])
-                          ->where('end_time', '>=', $validated['end_time']);
-                    });
-            })
-            ->exists();
+        // Check-then-write, both inside the lock. Doing the overlap check in
+        // its own transaction and the update() afterwards (as this used to)
+        // would release the lock between the two, reopening the same race
+        // store() has - see hasOverlappingBooking() for why the check itself
+        // has to compare casted values rather than raw columns.
+        $updated = DB::transaction(function () use ($validated, $facilityBooking, $facility) {
+            Facility::where('id', $validated['facility_id'])->lockForUpdate()->firstOrFail();
 
-        if ($existingBooking) {
+            if ($this->hasOverlappingBooking(
+                $validated['facility_id'],
+                $validated['booking_date'],
+                $validated['start_time'],
+                $validated['end_time'],
+                $facilityBooking->id
+            )) {
+                return false;
+            }
+
+            $facilityBooking->update([
+                'facility_id' => $validated['facility_id'],
+                'flat_id' => $validated['flat_id'],
+                'booking_date' => $validated['booking_date'],
+                'start_time' => $validated['start_time'],
+                'end_time' => $validated['end_time'],
+                'purpose' => $validated['purpose'] ?? null,
+                'expected_guests' => $validated['expected_guests'] ?? 0,
+                'booking_amount' => $facility->booking_charge ?? 0,
+            ]);
+
+            return true;
+        });
+
+        if (!$updated) {
             return back()->with('error', 'This time slot is already booked. Please select a different time.');
         }
-
-        $facilityBooking->update([
-            'facility_id' => $validated['facility_id'],
-            'flat_id' => $validated['flat_id'],
-            'booking_date' => $validated['booking_date'],
-            'start_time' => $validated['start_time'],
-            'end_time' => $validated['end_time'],
-            'purpose' => $validated['purpose'],
-            'expected_guests' => $validated['expected_guests'] ?? 0,
-            'booking_amount' => $facility->booking_charge ?? 0,
-        ]);
 
         return redirect()->route('facility-bookings.index')
             ->with('success', 'Booking updated successfully.');

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Flat;
 use App\Models\Visitor;
+use App\Services\AccessPassService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -45,7 +46,7 @@ class GuardController extends BaseController
     private function todaysStats(int $societyId): array
     {
         $counts = Visitor::where('society_id', $societyId)
-            ->whereDate('expected_entry_time', today())
+            ->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())
             ->selectRaw('approval_status, entry_status, COUNT(*) as total')
             ->groupBy('approval_status', 'entry_status')
             ->get();
@@ -89,7 +90,7 @@ class GuardController extends BaseController
         $expected = Visitor::where('society_id', $societyId)
             ->where('approval_status', 'allowed')
             ->where('entry_status', 'pending')
-            ->whereDate('expected_entry_time', today())
+            ->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())
             ->with($relations)
             ->orderBy('expected_entry_time')
             ->limit(25)
@@ -150,8 +151,36 @@ class GuardController extends BaseController
             'entry_status'        => 'pending',
         ]);
 
+        $this->notifyOccupants($visitor, $flat);
+
         return redirect()->route('guard.dashboard')
             ->with('success', $visitor->visitor_name . ' registered. Awaiting resident approval.');
+    }
+
+    /**
+     * Tell the property's tenant (or owner, if not rented) that someone is
+     * at the gate. The request also appears as Pending in their Visitors
+     * list, where they Approve/Deny it - a push is best-effort on top.
+     */
+    private function notifyOccupants(Visitor $visitor, Flat $flat): void
+    {
+        try {
+            $push = app(\App\Services\PushNotificationService::class);
+
+            foreach (\App\Support\VisitorPropertyScope::occupantUsers($flat) as $occupant) {
+                $push->sendToUser($occupant, 'visitor_arrived', [
+                    'visitor_name'  => $visitor->visitor_name,
+                    'visitor_phone' => $visitor->visitor_phone,
+                    'visitor_type'  => ucfirst($visitor->visitor_type),
+                    'flat_number'   => \App\Support\VisitorPropertyScope::unitLabel($flat),
+                ], [
+                    'visitor_id' => $visitor->id,
+                    'action'     => 'visitor_approval',
+                ]);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Visitor occupant notification failed: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -306,6 +335,97 @@ class GuardController extends BaseController
             ->paginate(20);
 
         return view('guard.history', compact('visitors'));
+    }
+
+    /** SCAN QR - the guard's primary action (brief: "scan, verify, move on"). */
+    public function scanForm()
+    {
+        return view('guard.scan');
+    }
+
+    /**
+     * One endpoint for every kind of QR this gate accepts: a recurring-
+     * staff/temporary-service AccessPass, or a pre-approved guest's
+     * visitors.qr_token. Both are opaque tokens looked up server-side -
+     * nothing about the person, property or authorisation is trusted from
+     * the scanned payload itself.
+     */
+    public function scan(Request $request, AccessPassService $passes)
+    {
+        $request->validate(['token' => 'required|string|max:64']);
+        $token = trim($request->token);
+        $societyId = $this->societyId();
+
+        // Pre-approved guest first - a visitor row already exists and is
+        // simply waiting to be marked entered (reuses checkIn() below).
+        $guest = Visitor::where('qr_token', $token)->first();
+        if ($guest) {
+            if ((int) $guest->society_id !== $societyId) {
+                return $this->scanResponse($request, false, 'QR code not recognised.');
+            }
+            if ($guest->approval_status !== 'allowed') {
+                return $this->scanResponse($request, false, 'This guest has not been approved yet.');
+            }
+            if ($guest->entry_status !== 'pending') {
+                return $this->scanResponse($request, false, 'This guest is already checked in.');
+            }
+
+            $guest->update(['entry_status' => 'entered', 'actual_entry_time' => now()]);
+            $guest->addLog(auth()->user(), 'entry', 'Guest QR scanned in');
+
+            return $this->scanResponse($request, true, $guest->visitor_name . ' - entry allowed.', $guest);
+        }
+
+        $result = $passes->verify($token, $societyId);
+
+        if (!$result['ok']) {
+            return $this->scanResponse($request, false, $this->scanFailureMessage($result['reason']), null, $result['pass']);
+        }
+
+        $pass = $result['pass'];
+
+        // Society-wide staff have no single visit to check in/out of via
+        // "Visitors Inside" - the same QR toggles them out on the scan that
+        // finds them already in, instead of being refused as a duplicate.
+        if ($pass->isSocietyWide() && $pass->currently_inside) {
+            $passes->checkOutSocietyWide($pass);
+
+            return $this->scanResponse($request, true, $pass->person_name . ' - checked out.', null, $pass);
+        }
+
+        $visitor = $passes->checkIn($pass, auth()->user());
+
+        return $this->scanResponse($request, true, $pass->person_name . ' - entry allowed.', $visitor, $pass);
+    }
+
+    private function scanFailureMessage(?string $reason): string
+    {
+        return match ($reason) {
+            AccessPassService::REASON_NOT_FOUND, AccessPassService::REASON_WRONG_SOCIETY => 'QR code not recognised.',
+            AccessPassService::REASON_REVOKED => 'Access revoked.',
+            AccessPassService::REASON_EXPIRED => 'This pass has expired.',
+            AccessPassService::REASON_NOT_YET_VALID => 'This pass is not valid yet.',
+            AccessPassService::REASON_BLOCKED_TODAY => 'Access blocked for today.',
+            AccessPassService::REASON_WRONG_DAY => 'Not an authorised day for this pass.',
+            AccessPassService::REASON_WRONG_TIME => 'Outside the authorised time window.',
+            AccessPassService::REASON_ALREADY_INSIDE => 'Already checked in - check out first.',
+            default => 'Access denied.',
+        };
+    }
+
+    private function scanResponse(Request $request, bool $success, string $message, $visitor = null, $pass = null)
+    {
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => $success,
+                'message' => $message,
+                'person'  => $pass?->person_name ?? $visitor?->visitor_name,
+                'category' => $pass?->category ?? $visitor?->purpose,
+                'stats'   => $this->todaysStats($this->societyId()),
+            ], $success ? 200 : 422);
+        }
+
+        return back()->with($success ? 'success' : 'error', $message);
     }
 
     /**

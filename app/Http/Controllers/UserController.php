@@ -8,10 +8,42 @@ use App\Events\UserCreated;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Spatie\Permission\Models\Role;
 
 class UserController extends BaseController
 {
+    /**
+     * Roles the acting admin is allowed to assign.
+     *
+     * CRITICAL: hiding "Super Admin" from the dropdown is not enough - the
+     * form used to render every role via Role::all() regardless of who was
+     * viewing it, and store()/update() validated the submitted role only
+     * against `exists:roles,name`. An Admin (a society-level role) could
+     * therefore POST role=Super Admin directly - by request-crafting, not
+     * even needing the dropdown to show it - and grant a brand new account,
+     * or an existing user in their own society, platform-wide authority.
+     * Super Admin itself keeps unrestricted access; every other caller of
+     * this controller is already limited to Admin by authorizeRole() above,
+     * so excluding Super Admin here is the entire fix.
+     *
+     * @return \Illuminate\Support\Collection<int,\Spatie\Permission\Models\Role>
+     */
+    protected function assignableRoles()
+    {
+        // Villa Owner / Apartment Owner are legacy role names kept only for
+        // users not yet migrated (php artisan users:migrate-to-owner-role) -
+        // every new assignment should use the canonical 'Owner' role, so
+        // they never appear as a choice here.
+        $roles = Role::all()->reject(fn (Role $role) => in_array($role->name, ['Villa Owner', 'Apartment Owner'], true));
+
+        if (auth()->user()->hasRole('Super Admin')) {
+            return $roles->values();
+        }
+
+        return $roles->reject(fn (Role $role) => $role->name === 'Super Admin')->values();
+    }
+
     public function index()
     {
         // Only admin and super admin can access this
@@ -31,9 +63,12 @@ class UserController extends BaseController
                 ->get();
         }
         
-        // Get available roles for the dropdown
-        $roles = Role::all();
-        
+        // Get available roles for the dropdown - the same modals on this
+        // page post to store()/update(), which now enforce this same set
+        // server-side, but the picker should not offer Super Admin at all
+        // to a caller who could never actually grant it.
+        $roles = $this->assignableRoles();
+
         return view('users.index', compact('users', 'roles'));
     }
     
@@ -41,9 +76,9 @@ class UserController extends BaseController
     {
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
-        
-        // Get available roles
-        $roles = Role::all();
+
+        // Get available roles (never Super Admin for a caller who is not one)
+        $roles = $this->assignableRoles();
 
         // Super Admin has no society of their own, so the form must let them
         // pick one; store() rejected every Super Admin submission otherwise.
@@ -63,10 +98,12 @@ class UserController extends BaseController
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
             'phone' => 'required|string|max:20',
-            'role' => 'required|exists:roles,name',
+            // In addition to existing as a role at all, it must be one this
+            // caller is allowed to grant - never trust the dropdown alone.
+            'role' => ['required', Rule::in($this->assignableRoles()->pluck('name'))],
             'avatar' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
-        
+
         $currentUser = auth()->user();
         $societyId = $this->getSocietyId();
 
@@ -125,15 +162,22 @@ class UserController extends BaseController
         
         $currentUser = auth()->user();
         $societyId = $this->getSocietyId();
-        
-        // Verify user belongs to the same society (for Admin only)
-        if ($currentUser->hasRole('Admin') && $user->society_id !== $societyId) {
+
+        // Was `if ($currentUser->hasRole('Admin') && ...)`. Not independently
+        // exploitable - authorizeRole('Super Admin', 'Admin') above already
+        // limits callers to those two roles, and Admin is exactly the one
+        // the && named. Rewritten anyway (CLAUDE.md §3: scope by default,
+        // exempt Super Admin explicitly) so it stops depending on the
+        // permission map never granting user management to a third role,
+        // and so a user holding both Admin and Super Admin is still exempt.
+        // Response shape (redirect-with-error, not abort) is unchanged.
+        if (!$currentUser->hasRole('Super Admin') && $user->society_id !== $societyId) {
             return back()->with('error', 'User not found.');
         }
-        
-        // Get available roles
-        $roles = Role::all();
-        
+
+        // Get available roles (never Super Admin for a caller who is not one)
+        $roles = $this->assignableRoles();
+
         return view('users.edit', compact('user', 'roles'));
     }
     
@@ -145,10 +189,11 @@ class UserController extends BaseController
         $currentUser = auth()->user();
         $societyId = $this->getSocietyId();
         
-        // Verify user belongs to the same society (for Admin only).
+        // Was `if ($currentUser->hasRole('Admin') && ...)` - see edit() above
+        // for why this is defensive hardening rather than a live exploit fix.
         // These early returns used to be JSON-only, so the standalone edit
         // form (a normal browser POST) received raw JSON instead of a page.
-        if ($currentUser->hasRole('Admin') && $user->society_id !== $societyId) {
+        if (!$currentUser->hasRole('Super Admin') && $user->society_id !== $societyId) {
             abort(404, 'User not found.');
         }
 
@@ -164,7 +209,10 @@ class UserController extends BaseController
         $request->validate([
             'name' => 'required|string|max:255',
             'phone' => 'required|string|max:20',
-            'role' => 'required|exists:roles,name',
+            // Same rule as store(): never let a caller grant a role beyond
+            // what they themselves are allowed to assign, regardless of
+            // what the edit form's dropdown happened to render.
+            'role' => ['required', Rule::in($this->assignableRoles()->pluck('name'))],
             'status' => 'required|in:active,inactive',
             'avatar' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
@@ -204,6 +252,36 @@ class UserController extends BaseController
             ->with('success', 'User updated successfully!');
     }
     
+    /**
+     * Admin/Super Admin sets a new password for any normal user's account -
+     * Owner, Tenant, Staff, Guard, Accountant, or any other role. The one
+     * shared AdminPasswordResetService is the same code OwnerController's
+     * resetPassword() uses, so there is a single place that hashes and
+     * saves a password and revokes tokens, not one per role. This only
+     * ever changes the password - role, email, society and any
+     * property/tenancy assignment are untouched.
+     */
+    public function resetPassword(Request $request, User $user, \App\Services\AdminPasswordResetService $passwordReset)
+    {
+        $this->authorizeRole('Super Admin', 'Admin');
+        $this->authorizeSocietyAccess($user);
+
+        // An ordinary Admin must never be able to reach a Super Admin
+        // account through this generic endpoint - preserve the existing
+        // privilege hierarchy. Super Admin itself is unrestricted.
+        if ($user->hasRole('Super Admin') && !auth()->user()->hasRole('Super Admin')) {
+            abort(403, 'You are not authorized to reset this account.');
+        }
+
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $passwordReset->reset($user, $validated['password']);
+
+        return back()->with('success', 'Password updated. The user can log in with the new password immediately.');
+    }
+
     public function destroy(User $user)
     {
         // Only admin and super admin can access this
@@ -211,9 +289,9 @@ class UserController extends BaseController
         
         $currentUser = auth()->user();
         $societyId = $this->getSocietyId();
-        
-        // Verify user belongs to the same society (for Admin only)
-        if ($currentUser->hasRole('Admin') && $user->society_id !== $societyId) {
+
+        // Was `if ($currentUser->hasRole('Admin') && ...)` - see edit() above.
+        if (!$currentUser->hasRole('Super Admin') && $user->society_id !== $societyId) {
             abort(404, 'User not found.');
         }
 

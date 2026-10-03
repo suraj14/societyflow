@@ -22,14 +22,6 @@
             </a>
         </div>
 
-        @if(session('success'))
-            <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">
-                <div class="flex items-center">
-                    <i class="fas fa-check-circle mr-3"></i>
-                    <p class="font-medium">{{ session('success') }}</p>
-                </div>
-            </div>
-        @endif
 
         <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             @if($templates->count() > 0)

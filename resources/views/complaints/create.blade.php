@@ -21,6 +21,7 @@
             <div class="bg-white rounded-lg shadow-md">
                 <form id="complaint-form" action="{{ route('complaints.store') }}" method="POST" enctype="multipart/form-data" class="p-6 space-y-6">
                     @csrf
+                    @include('partials.idempotency')
 
                     <!-- Requested By (Auto-filled) -->
                     <div>
@@ -52,7 +53,7 @@
                     </div>
 
                     <!-- Property Selection (for owners) -->
-                    @if(auth()->user()->hasRole('Villa Owner') || auth()->user()->hasRole('Apartment Owner'))
+                    @if(auth()->user()->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner']))
                         @if($properties->count() > 0)
                             <div>
                                 <label for="flat_id" class="block text-sm font-medium text-gray-700 mb-2">

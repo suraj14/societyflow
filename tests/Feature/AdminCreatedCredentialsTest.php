@@ -98,19 +98,30 @@ class AdminCreatedCredentialsTest extends TestCase
     }
 
     /**
-     * Owner + login account + role assignment are one unit of work.
-     * Before the transaction, a missing role (RoleDoesNotExist) left an
-     * orphaned Owner row and a User who could sign in with no role at all.
+     * Owner + login account + role assignment are one unit of work inside
+     * a DB::transaction() in OwnerController::store(). 'Owner' is now the
+     * canonical role and is guarded with Role::firstOrCreate(), so a missing
+     * role can no longer be the failure trigger for this test. Instead, a
+     * one-off Owner::created listener forces a deterministic failure after
+     * the Owner row is created but before the transaction commits, so the
+     * original guarantee - no orphaned Owner, no orphaned User - is still
+     * exercised end to end.
      */
     public function test_failed_owner_creation_leaves_no_partial_records(): void
     {
         $society  = $this->makeSociety();
         $building = $this->makeBuilding($society);
         $admin    = $this->makeUserWithRole($society, 'Admin');
-        // 'Apartment Owner' deliberately NOT created: assignRole will throw.
+        \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Owner', 'guard_name' => 'web']);
 
         $ownersBefore = \App\Models\Owner::count();
         $usersBefore  = User::count();
+
+        $listener = \App\Models\Owner::created(function ($owner) {
+            if ($owner->email === 'doomed@test.local') {
+                throw new \RuntimeException('forced test failure to verify transaction rollback');
+            }
+        });
 
         try {
             $this->actingAs($admin)->post('/owners', [
@@ -124,6 +135,8 @@ class AdminCreatedCredentialsTest extends TestCase
             ]);
         } catch (\Throwable $e) {
             // The 500 is expected; what matters is what it left behind.
+        } finally {
+            Event::forget('eloquent.created: ' . \App\Models\Owner::class);
         }
 
         $this->assertSame($ownersBefore, \App\Models\Owner::count(), 'orphaned Owner row survived a failed create');

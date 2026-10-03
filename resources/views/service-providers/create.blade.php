@@ -20,6 +20,7 @@
         <div class="bg-white rounded-lg shadow-md overflow-hidden">
             <form action="{{ route('service-providers.store') }}" method="POST" enctype="multipart/form-data" class="p-6 space-y-6">
                 @csrf
+                @include('partials.idempotency')
 
                 <!-- Service Type -->
                 <div>

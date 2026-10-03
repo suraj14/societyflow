@@ -19,17 +19,7 @@
     </div>
 
     <!-- Success/Error Messages -->
-    @if(session('success'))
-        <x-alert type="success" autoDismiss="true">
-            {{ session('success') }}
-        </x-alert>
-    @endif
 
-    @if(session('error'))
-        <x-alert type="error" autoDismiss="false">
-            {{ session('error') }}
-        </x-alert>
-    @endif
 
     <!-- Filters -->
     <div class="bg-white rounded-lg shadow-md p-4 mb-6">

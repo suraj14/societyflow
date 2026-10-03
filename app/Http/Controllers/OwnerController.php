@@ -178,16 +178,15 @@ class OwnerController extends BaseController
                 'status' => $validated['status'],
             ]);
 
-            // Assign appropriate role based on property type
-            $propertyType = $validated['property_type'] ?? null;
-            if ($propertyType === 'apartment') {
-                $ownerUser->assignRole('Apartment Owner');
-            } elseif ($propertyType === 'villa') {
-                $ownerUser->assignRole('Villa Owner');
-            } else {
-                // If no property type specified, assign both roles for flexibility
-                $ownerUser->assignRole(['Apartment Owner', 'Villa Owner']);
-            }
+            // Owner is the canonical business role now - property type
+            // (apartment/villa) lives on the flat/owner record, not the
+            // role, so every new owner gets the same role regardless.
+            // firstOrCreate guards a DB that hasn't run
+            // RolesAndPermissionsSeeder yet (fresh test DBs, an install
+            // mid-migration) - assignRole('Owner') would otherwise throw
+            // RoleDoesNotExist and 500 the whole request.
+            \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Owner', 'guard_name' => 'web']);
+            $ownerUser->assignRole('Owner');
 
             return $ownerUser;
         });
@@ -361,18 +360,14 @@ class OwnerController extends BaseController
                     'status' => $validated['status'],
                 ]);
 
-                // Update user roles based on property type
-                $ownerUser->syncRoles([]); // Clear existing roles
-                
-                if ($validated['property_type'] === 'apartment') {
-                    $ownerUser->assignRole('Apartment Owner');
-                } elseif ($validated['property_type'] === 'villa') {
-                    $ownerUser->assignRole('Villa Owner');
-                } else {
-                    // If no property type specified, assign both roles for flexibility
-                    $ownerUser->assignRole(['Apartment Owner', 'Villa Owner']);
-                }
-                
+                // Owner is the canonical role - this used to clear all roles
+                // and reassign Villa Owner/Apartment Owner by property type,
+                // which would silently strip 'Owner' back to a legacy role
+                // on every edit. Property type lives on the flat/owner
+                // record now, not the role.
+                \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Owner', 'guard_name' => 'web']);
+                $ownerUser->syncRoles(['Owner']);
+
                 // Clear user cache
                 $this->clearModelCache($ownerUser);
             }
@@ -386,6 +381,31 @@ class OwnerController extends BaseController
 
         return redirect()->route('owners.index')
             ->with('success', 'Owner updated successfully!');
+    }
+
+    /**
+     * Admin/Super Admin sets a new password for the Owner's login account.
+     * Never reads or displays the existing password - only replaces it.
+     * Renting the property never touches this account; this is the
+     * separate, explicit path for when the owner's own password is lost.
+     */
+    public function resetPassword(Request $request, Owner $owner, \App\Services\AdminPasswordResetService $passwordReset)
+    {
+        $this->authorizeSocietyAccess($owner);
+
+        $validated = $request->validate([
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $ownerUser = $owner->user;
+
+        if (!$ownerUser) {
+            return back()->with('error', 'This owner has no login account to reset.');
+        }
+
+        $passwordReset->reset($ownerUser, $validated['password']);
+
+        return back()->with('success', 'Password updated. The owner can log in with the new password immediately.');
     }
 
     public function destroy(Owner $owner)

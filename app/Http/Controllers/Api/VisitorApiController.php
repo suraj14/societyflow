@@ -243,7 +243,7 @@ class VisitorApiController extends Controller
     {
         $user = $request->user();
         $societyId = $user->society_id;
-        $today = now()->toDateString();
+        $today = \App\Support\SocietyClock::dayBounds($societyId);
         $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
 
         if ($isStaff) {
@@ -279,10 +279,10 @@ class VisitorApiController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'today_total' => (clone $base)->whereDate('expected_entry_time', $today)->count(),
+                'today_total' => (clone $base)->whereBetween('expected_entry_time', $today)->count(),
                 'pending'     => (clone $base)->where('approval_status', 'pending')->count(),
                 'checked_in'  => (clone $base)->where('entry_status', 'entered')->count(),
-                'checked_out' => (clone $base)->where('entry_status', 'exited')->whereDate('actual_exit_time', $today)->count(),
+                'checked_out' => (clone $base)->where('entry_status', 'exited')->whereBetween('actual_exit_time', $today)->count(),
             ],
         ]);
     }

@@ -2,157 +2,159 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Flat;
-use App\Models\UtilityBill;
+use App\Models\MaintenanceBill;
 use App\Models\Payment;
-use App\Models\SystemSetting;
+use App\Services\FinancialReportService;
+use App\Support\ReportPeriod;
+use App\Support\UserFlatResolver;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
+use Illuminate\Validation\ValidationException;
 use PDF;
 
+/**
+ * Two reports, kept deliberately separate:
+ *
+ *  - Maintenance Report: "how much maintenance was billed and collected?"
+ *  - Financial Report:   "how is the society doing financially, and where
+ *                         is its money going?" - income, society expenses
+ *                         by category, collections, dues, net position.
+ *
+ * Both resolve their period through ReportPeriod (so the queried period,
+ * the on-screen label and the PDF can never disagree) and the financial
+ * report's numbers come from FinancialReportService for the page and the
+ * PDF alike - there is no second calculation path.
+ */
 class ReportController extends Controller
 {
+    private const MAINTENANCE_ROLES = ['Super Admin', 'Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant'];
+    private const FINANCIAL_ROLES   = ['Super Admin', 'Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Accountant'];
+
+    /** Roles that see the society-wide report rather than their own units. */
+    private const SOCIETY_WIDE_ROLES = ['Super Admin', 'Admin', 'Accountant'];
+
     public function __construct()
     {
         $this->middleware('auth');
     }
 
-    /**
-     * Show Maintenance Report page
-     */
+    // ------------------------------------------------------------------
+    // Maintenance report
+    // ------------------------------------------------------------------
+
     public function maintenanceReport(Request $request)
     {
         $user = auth()->user();
-        $societyId = $user->society_id;
 
-        // Check access
-        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Owner', 'Tenant'])) {
+        if (!$user->hasAnyRole(self::MAINTENANCE_ROLES)) {
             abort(403, 'Unauthorized access to reports.');
         }
 
-        $reportType = $request->get('report_type', 'monthly');
-        $month = $request->get('month', now()->month);
-        $year = $request->get('year', now()->year);
+        try {
+            $period = ReportPeriod::fromRequest($request);
+        } catch (ValidationException $e) {
+            return redirect()->route('reports.maintenance')->withErrors($e->errors());
+        }
 
-        return view('reports.maintenance', compact('reportType', 'month', 'year'));
+        $data = $this->getMaintenanceData($user->society_id, $period, $user);
+
+        return view('reports.maintenance', [
+            'period'     => $period,
+            'reportType' => $period->type,
+            'month'      => $period->month ?? now()->month,
+            'year'       => $period->year,
+            'data'       => $data,
+        ]);
     }
 
-    /**
-     * Download Maintenance Report as PDF
-     */
     public function downloadMaintenanceReport(Request $request)
     {
-        try {
-            $user = auth()->user();
-            $societyId = $user->society_id;
-
-            // Check access
-            if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Owner', 'Tenant'])) {
-                abort(403, 'Unauthorized access to reports.');
-            }
-
-            $reportType = $request->get('report_type', 'monthly');
-            $month = $request->get('month', now()->month);
-            $year = $request->get('year', now()->year);
-
-            // Get society name
-            $society = $user->society;
-
-            // Prepare data based on report type
-            if ($reportType === 'monthly') {
-                $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-                $endDate = $startDate->copy()->endOfMonth();
-                $periodLabel = $startDate->format('F Y');
-            } else {
-                $startDate = Carbon::createFromDate($year, 1, 1)->startOfYear();
-                $endDate = $startDate->copy()->endOfYear();
-                $periodLabel = $year;
-            }
-
-            // Get maintenance data (from payments/bills)
-            $maintenanceData = $this->getMaintenanceData($societyId, $startDate, $endDate, $user);
-
-            $pdf = PDF::loadView('reports.maintenance-pdf', [
-                'society' => $society,
-                'reportType' => $reportType,
-                'periodLabel' => $periodLabel,
-                'data' => $maintenanceData,
-            ]);
-
-            $filename = "Maintenance-Report-{$periodLabel}.pdf";
-            return $pdf->download($filename);
-        } catch (\Exception $e) {
-            Log::error('PDF Generation Error: ' . $e->getMessage(), ['exception' => $e]);
-            return back()->with('error', 'Failed to generate PDF: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Show Financial Report page
-     */
-    public function financialReport(Request $request)
-    {
         $user = auth()->user();
-        $societyId = $user->society_id;
 
-        // Check access
-        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Owner', 'Tenant'])) {
+        if (!$user->hasAnyRole(self::MAINTENANCE_ROLES)) {
             abort(403, 'Unauthorized access to reports.');
         }
 
-        $reportType = $request->get('report_type', 'monthly');
-        $month = (int)$request->get('month', now()->month);
-        $year = (int)$request->get('year', now()->year);
-
-        // Get financial data
-        $financialData = $this->getFinancialData($societyId, $reportType, $month, $year, $user);
-
-        return view('reports.financial', compact('reportType', 'month', 'year', 'financialData'));
-    }
-
-    /**
-     * Download Financial Report as PDF
-     */
-    public function downloadFinancialReport(Request $request)
-    {
         try {
-            $user = auth()->user();
-            $societyId = $user->society_id;
+            $period = ReportPeriod::fromRequest($request);
+        } catch (ValidationException $e) {
+            return redirect()->route('reports.maintenance')->withErrors($e->errors());
+        }
 
-            // Check access
-            if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Owner', 'Tenant'])) {
-                abort(403, 'Unauthorized access to reports.');
-            }
+        try {
+            $data = $this->getMaintenanceData($user->society_id, $period, $user);
 
-            $reportType = $request->get('report_type', 'monthly');
-            $month = $request->get('month', now()->month);
-            $year = $request->get('year', now()->year);
-
-            // Get society name
-            $society = $user->society;
-
-            // Prepare period label
-            if ($reportType === 'monthly') {
-                $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-                $periodLabel = $startDate->format('F Y');
-            } else {
-                $periodLabel = $year;
-            }
-
-            // Get financial data
-            $financialData = $this->getFinancialData($societyId, $reportType, $month, $year, $user);
-
-            $pdf = PDF::loadView('reports.financial-pdf', [
-                'society' => $society,
-                'reportType' => $reportType,
-                'periodLabel' => $periodLabel,
-                'data' => $financialData,
+            $pdf = PDF::loadView('reports.maintenance-pdf', [
+                'society'     => $user->society,
+                'reportType'  => $period->type,
+                'periodLabel' => $period->label(),
+                'data'        => $data,
             ]);
 
-            $filename = "Financial-Report-{$periodLabel}.pdf";
-            return $pdf->download($filename);
+            return $pdf->download("Maintenance-Report-{$period->slug()}.pdf");
+        } catch (\Exception $e) {
+            Log::error('PDF Generation Error: ' . $e->getMessage(), ['exception' => $e]);
+            return back()->with('error', 'Failed to generate PDF: ' . $e->getMessage());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Financial report
+    // ------------------------------------------------------------------
+
+    public function financialReport(Request $request, FinancialReportService $service)
+    {
+        $user = auth()->user();
+
+        if (!$user->hasAnyRole(self::FINANCIAL_ROLES)) {
+            abort(403, 'Unauthorized access to reports.');
+        }
+
+        try {
+            $period = ReportPeriod::fromRequest($request);
+        } catch (ValidationException $e) {
+            return redirect()->route('reports.financial')->withErrors($e->errors());
+        }
+
+        $report = $this->financialReportFor($user, $period, $service);
+
+        return view('reports.financial', [
+            'period'     => $period,
+            'reportType' => $period->type,
+            'month'      => $period->month ?? now()->month,
+            'year'       => $period->year,
+            'report'     => $report,
+            'society'    => $user->society,
+        ]);
+    }
+
+    public function downloadFinancialReport(Request $request, FinancialReportService $service)
+    {
+        $user = auth()->user();
+
+        if (!$user->hasAnyRole(self::FINANCIAL_ROLES)) {
+            abort(403, 'Unauthorized access to reports.');
+        }
+
+        try {
+            $period = ReportPeriod::fromRequest($request);
+        } catch (ValidationException $e) {
+            return redirect()->route('reports.financial')->withErrors($e->errors());
+        }
+
+        try {
+            // Exactly the same array the page rendered. Screen = PDF.
+            $report = $this->financialReportFor($user, $period, $service);
+
+            $pdf = PDF::loadView('reports.financial-pdf', [
+                'society'     => $user->society,
+                'period'      => $period,
+                'periodLabel' => $period->label(),
+                'report'      => $report,
+                'generatedBy' => $user->name,
+            ]);
+
+            return $pdf->download("Financial-Report-{$period->slug()}.pdf");
         } catch (\Exception $e) {
             Log::error('PDF Generation Error: ' . $e->getMessage(), ['exception' => $e]);
             return back()->with('error', 'Failed to generate PDF: ' . $e->getMessage());
@@ -160,221 +162,85 @@ class ReportController extends Controller
     }
 
     /**
-     * Get maintenance data for report
+     * Society-wide for finance roles; a resident sees only their own units
+     * (bills, payments, property charges) and never the society's internal
+     * expense management.
+     *
+     * Returns null when there is no society to report on (a Super Admin
+     * who has not switched into a society).
      */
-    private function getMaintenanceData($societyId, $startDate, $endDate, $user)
+    private function financialReportFor($user, ReportPeriod $period, FinancialReportService $service): ?array
     {
-        // Get maintenance charges from payments through maintenance bills
-        $query = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-            ->whereBetween('payments.payment_date', [$startDate, $endDate])
-            ->where('payments.society_id', $societyId);
+        $societyId = $user->society_id;
 
-        // If owner, only their properties
-        if ($user->hasRole('Owner')) {
-            $flatIds = Flat::where('society_id', $societyId)
-                ->whereHas('residents', function ($q) use ($user) {
-                    $q->where('user_id', $user->id);
-                })
-                ->pluck('id');
-
-            $query->whereIn('maintenance_bills.flat_id', $flatIds);
+        if (!$societyId) {
+            return null;
         }
 
-        $payments = $query->select('payments.*')->get();
+        if ($user->hasAnyRole(self::SOCIETY_WIDE_ROLES)) {
+            return $service->build((int) $societyId, $period);
+        }
 
-        return [
-            'total_maintenance' => $payments->sum('amount'),
-            'count' => $payments->count(),
-            'payments' => $payments,
-        ];
+        return $service->buildForFlats((int) $societyId, $period, UserFlatResolver::flatIdsFor($user));
     }
 
+    // ------------------------------------------------------------------
+    // Maintenance data
+    // ------------------------------------------------------------------
+
     /**
-     * Get financial data for report
+     * Successful maintenance payments in the period. Residents (owner or
+     * tenant) see only their own units, resolved server-side.
      */
-    private function getFinancialData($societyId, $reportType, $month, $year, $user)
+    private function getMaintenanceData(?int $societyId, ReportPeriod $period, $user): array
     {
-        // Get apartments/villas
-        $flats = Flat::where('society_id', $societyId)->where('property_type', '!=', 'villa')->get();
-        $villas = Flat::where('society_id', $societyId)->villas()->get();
-
-        $data = [];
-        
-        // Check if utility_bills table exists
-        $utilityBillsTableExists = \Schema::hasTable('utility_bills');
-
-        // Process apartments
-        foreach ($flats as $flat) {
-            // If owner, only show their own
-            if ($user->hasRole('Owner')) {
-                $isUserFlat = $flat->residents()->where('user_id', $user->id)->exists();
-                if (!$isUserFlat) {
-                    continue;
-                }
-            }
-
-            // If tenant, only show their own
-            if ($user->hasRole('Tenant')) {
-                $isUserFlat = $flat->residents()->where('user_id', $user->id)->exists();
-                if (!$isUserFlat) {
-                    continue;
-                }
-            }
-
-            // Get payments through maintenance bills filtered by month/year
-            if ($reportType === 'monthly') {
-                $maintenanceBilled = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $flat->id)
-                    ->where('maintenance_bills.month', $month)
-                    ->where('maintenance_bills.year', $year)
-                    ->sum('payments.amount');
-
-                $maintenancePaid = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $flat->id)
-                    ->where('maintenance_bills.month', $month)
-                    ->where('maintenance_bills.year', $year)
-                    ->where('payments.status', 'paid')
-                    ->sum('payments.amount');
-            } else {
-                // For annual, get all months in that year
-                $maintenanceBilled = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $flat->id)
-                    ->where('maintenance_bills.year', $year)
-                    ->sum('payments.amount');
-
-                $maintenancePaid = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $flat->id)
-                    ->where('maintenance_bills.year', $year)
-                    ->where('payments.status', 'paid')
-                    ->sum('payments.amount');
-            }
-
-            $utilityBilled = 0;
-            $utilityPaid = 0;
-            
-            if ($utilityBillsTableExists) {
-                if ($reportType === 'monthly') {
-                    $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-                    $endDate = $startDate->copy()->endOfMonth();
-                } else {
-                    $startDate = Carbon::createFromDate($year, 1, 1)->startOfYear();
-                    $endDate = $startDate->copy()->endOfYear();
-                }
-
-                $utilityBilled = UtilityBill::where('flat_id', $flat->id)
-                    ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('bill_amount');
-
-                $utilityPaid = UtilityBill::where('flat_id', $flat->id)
-                    ->where('status', 'paid')
-                    ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('bill_amount');
-            }
-
-            $totalPaid = $maintenancePaid + $utilityPaid;
-            $totalDues = ($maintenanceBilled - $maintenancePaid) + ($utilityBilled - $utilityPaid);
-
-            // Only include if there's data for this period
-            if ($maintenanceBilled > 0 || $utilityBilled > 0) {
-                $data[] = [
-                    'unit' => $flat->flat_number ?? $flat->name,
-                    'type' => 'Apartment',
-                    'maintenance_billed' => $maintenanceBilled,
-                    'maintenance_paid' => $maintenancePaid,
-                    'utility_billed' => $utilityBilled,
-                    'utility_paid' => $utilityPaid,
-                    'total_paid' => $totalPaid,
-                    'total_dues' => $totalDues,
-                ];
-            }
+        if (!$societyId) {
+            return ['total_maintenance' => 0.0, 'count' => 0, 'payments' => collect(), 'billed' => 0.0, 'outstanding' => 0.0];
         }
 
-        // Process villas
-        foreach ($villas as $villa) {
-            // If owner, only show their own
-            if ($user->hasRole('Owner')) {
-                $isUserVilla = $villa->residents()->where('user_id', $user->id)->exists();
-                if (!$isUserVilla) {
-                    continue;
-                }
-            }
+        [$start, $end] = FinancialReportService::bounds($period);
 
-            // If tenant, only show their own
-            if ($user->hasRole('Tenant')) {
-                $isUserVilla = $villa->residents()->where('user_id', $user->id)->exists();
-                if (!$isUserVilla) {
-                    continue;
-                }
-            }
+        // A maintenance payment is one recorded against a maintenance bill
+        // OR an ad-hoc payment whose own bill_type says maintenance (the
+        // payment form allows both). Rent shares the bills table and is
+        // never maintenance; the old report counted it - and counted
+        // pending payments - which is where "₹36,800 / 3 transactions" for a
+        // year with no maintenance collected at all came from.
+        $query = Payment::query()
+            ->leftJoin('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
+            ->where('payments.society_id', $societyId)
+            ->where('payments.status', 'success')
+            ->whereBetween('payments.payment_date', [$start, $end])
+            ->where(function ($q) {
+                $q->where('maintenance_bills.bill_type', 'maintenance')
+                  ->orWhere(function ($q2) {
+                      $q2->whereNull('payments.maintenance_bill_id')
+                         ->whereRaw('LOWER(payments.bill_type) LIKE ?', ['%maint%']);
+                  });
+            });
 
-            // Get payments through maintenance bills filtered by month/year
-            if ($reportType === 'monthly') {
-                $maintenanceBilled = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $villa->id)
-                    ->where('maintenance_bills.month', $month)
-                    ->where('maintenance_bills.year', $year)
-                    ->sum('payments.amount');
+        $bills = MaintenanceBill::query()
+            ->where('society_id', $societyId)
+            ->where('bill_type', 'maintenance')
+            ->whereBetween('bill_date', [$start, $end]);
 
-                $maintenancePaid = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $villa->id)
-                    ->where('maintenance_bills.month', $month)
-                    ->where('maintenance_bills.year', $year)
-                    ->where('payments.status', 'paid')
-                    ->sum('payments.amount');
-            } else {
-                // For annual, get all months in that year
-                $maintenanceBilled = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $villa->id)
-                    ->where('maintenance_bills.year', $year)
-                    ->sum('payments.amount');
-
-                $maintenancePaid = Payment::join('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-                    ->where('maintenance_bills.flat_id', $villa->id)
-                    ->where('maintenance_bills.year', $year)
-                    ->where('payments.status', 'paid')
-                    ->sum('payments.amount');
-            }
-
-            $utilityBilled = 0;
-            $utilityPaid = 0;
-            
-            if ($utilityBillsTableExists) {
-                if ($reportType === 'monthly') {
-                    $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-                    $endDate = $startDate->copy()->endOfMonth();
-                } else {
-                    $startDate = Carbon::createFromDate($year, 1, 1)->startOfYear();
-                    $endDate = $startDate->copy()->endOfYear();
-                }
-
-                $utilityBilled = UtilityBill::where('flat_id', $villa->id)
-                    ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('bill_amount');
-
-                $utilityPaid = UtilityBill::where('flat_id', $villa->id)
-                    ->where('status', 'paid')
-                    ->whereBetween('created_at', [$startDate, $endDate])
-                    ->sum('bill_amount');
-            }
-
-            $totalPaid = $maintenancePaid + $utilityPaid;
-            $totalDues = ($maintenanceBilled - $maintenancePaid) + ($utilityBilled - $utilityPaid);
-
-            // Only include if there's data for this period
-            if ($maintenanceBilled > 0 || $utilityBilled > 0) {
-                $data[] = [
-                    'unit' => $villa->villa_name ?? $villa->flat_number,
-                    'type' => 'Villa',
-                    'maintenance_billed' => $maintenanceBilled,
-                    'maintenance_paid' => $maintenancePaid,
-                    'utility_billed' => $utilityBilled,
-                    'utility_paid' => $utilityPaid,
-                    'total_paid' => $totalPaid,
-                    'total_dues' => $totalDues,
-                ];
-            }
+        if (!$user->hasAnyRole(self::SOCIETY_WIDE_ROLES)) {
+            $flatIds = UserFlatResolver::flatIdsFor($user) ?: [0];
+            $query->where(function ($q) use ($flatIds) {
+                $q->whereIn('maintenance_bills.flat_id', $flatIds)
+                  ->orWhereIn('payments.flat_id', $flatIds);
+            });
+            $bills->whereIn('flat_id', $flatIds);
         }
 
-        return $data;
+        $payments = $query->select('payments.*')->with('flat')->orderBy('payments.payment_date')->get();
+
+        return [
+            'total_maintenance' => (float) $payments->sum('amount'),
+            'count'             => $payments->count(),
+            'payments'          => $payments,
+            'billed'            => (float) $bills->sum('total_amount'),
+            'outstanding'       => (float) (clone $bills)->sum('balance_amount'),
+        ];
     }
 }

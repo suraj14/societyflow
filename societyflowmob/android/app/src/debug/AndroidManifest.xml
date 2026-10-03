@@ -4,4 +4,10 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Debug builds talk to the local Laravel dev server over plain HTTP
+         (10.0.2.2 / the PC's LAN IP / adb reverse). Release builds do not
+         carry this attribute (see src/main/AndroidManifest.xml) and can only
+         reach the HTTPS production API. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>

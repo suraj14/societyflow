@@ -6,6 +6,7 @@ import '../../../shared/widgets/app_card.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../visitors/providers/visitors_provider.dart';
 import '../../shell/main_shell.dart';
+import 'guard_scan_screen.dart';
 
 class GuardHomeScreen extends ConsumerStatefulWidget {
   const GuardHomeScreen({super.key});
@@ -73,6 +74,10 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
             // Stats grid
             SliverToBoxAdapter(child: _statsGrid(stats)),
 
+            // Scan QR — the primary action ("scan, verify, move on"), not
+            // buried among equally-sized quick actions.
+            SliverToBoxAdapter(child: _scanButton(context)),
+
             // Quick actions
             SliverToBoxAdapter(child: _quickActions(context)),
 
@@ -123,6 +128,31 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
         Expanded(child: _StatTile(label: "Checked\nOut", value: '${stats.checkedOut}', icon: Icons.logout_rounded, color: AppColors.textHint)),
       ]),
     ]),
+  );
+
+  Widget _scanButton(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+    child: SizedBox(
+      height: 64,
+      child: ElevatedButton.icon(
+        onPressed: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const GuardScanScreen()),
+          );
+          // A pass/guest scanned in or out changes the counters and the
+          // "Currently Inside" list the moment the guard returns here.
+          ref.read(visitorsProvider.notifier).loadAll();
+        },
+        icon: const Icon(Icons.qr_code_scanner_rounded, size: 28),
+        label: const Text('SCAN QR', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          elevation: 3,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        ),
+      ),
+    ),
   );
 
   Widget _quickActions(BuildContext context) => Padding(

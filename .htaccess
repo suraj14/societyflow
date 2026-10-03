@@ -1,0 +1,42 @@
+# Under XAMPP, Apache's document root for this app is the project folder
+# itself (htdocs/SocietyFlow), not Laravel's real document root
+# (htdocs/SocietyFlow/public). Left unguarded, that let Apache serve .env
+# (DB credentials, APP_KEY, mail secrets), the dev SQLite database (real PII
+# - see CLAUDE.md), and storage/logs/*.log directly over HTTP, with
+# directory listing on for the whole project tree.
+#
+# This does two things:
+#   1. Blocks direct access to anything outside public/.
+#   2. Sends a browser at http://localhost/SocietyFlow straight into
+#      public/, so starting Apache from the XAMPP control panel is enough -
+#      no `php artisan serve` needed.
+#
+# This has to be an external redirect (R=302), not an internal rewrite:
+# Apache never changes REQUEST_URI to match an internally-rewritten file
+# path, and Laravel/Symfony derives its route from REQUEST_URI vs.
+# SCRIPT_NAME. An internal "forward everything to public/index.php" rewrite
+# left REQUEST_URI as "/SocietyFlow/login" while SCRIPT_NAME became
+# ".../public/index.php" - Symfony's base-path stripping couldn't reconcile
+# the two and every route 404'd even though PHP was executing correctly. A
+# real redirect makes the browser re-request .../public/login directly, so
+# both values line up exactly as they already do for a direct request to
+# public/ (proven working on its own).
+
+Options -Indexes -MultiViews
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/SocietyFlow/public/
+    RewriteRule ^(.*)$ /SocietyFlow/public/$1 [R=302,L]
+</IfModule>
+
+# Belt and braces: even if mod_rewrite is ever disabled, these never serve.
+<FilesMatch "(^\.env|^\.git|\.(sqlite3?|log|lock|key|pem)$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

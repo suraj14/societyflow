@@ -35,7 +35,11 @@ class VillaController extends BaseController
 
         $villas = $query->latest()->paginate(10);
 
-        return view('villas.index', compact('villas'));
+        // Canonical occupancy (tenant / owner / vacant), shared with the
+        // Property & Occupancy hub and the dashboard.
+        $occupancy = \App\Support\PropertyOccupancy::statesFor($villas->getCollection());
+
+        return view('villas.index', compact('villas', 'occupancy'));
     }
 
     public function create()
@@ -80,16 +84,19 @@ class VillaController extends BaseController
             'has_parking' => 'boolean',
             'parking_slots' => 'nullable|integer|min:0',
             'maintenance_amount' => 'nullable|numeric|min:0',
-            'status' => 'required|in:vacant,occupied,on_rent,under_maintenance',
+            // Occupancy is derived from owner/tenant records (Flat model);
+            // only "under maintenance" is a state a person chooses.
+            'status' => 'nullable|in:vacant,occupied,on_rent,maintenance,under_maintenance',
             'description' => 'nullable|string',
         ];
-        
+
         // Only Super Admin can select society, others use their own society
         if ($user->hasRole('Super Admin')) {
             $rules['society_id'] = 'required|exists:societies,id';
         }
 
         $validated = $request->validate($rules);
+        $validated['status'] = FlatController::storedStatusFromRequest($validated['status'] ?? null);
 
         // Set society_id for non-Super Admin users
         if (!$user->hasRole('Super Admin')) {
@@ -102,11 +109,19 @@ class VillaController extends BaseController
 
         $villa = Flat::create($validated);
 
-        // Assign Villa Owner role if owner is set
+        // Assign the Owner role if a login account exists for this owner.
+        //
+        // villa.owner_id is a foreign key to owners.id, never users.id (see
+        // 4e35ffa and the identical fix below in update()) -
+        // User::find($villa->owner_id) read an owners.id as a users.id and,
+        // because the two id spaces overlap, could silently grant Owner
+        // access to an unrelated person who happened to share that number.
         if ($villa->owner_id) {
-            $owner = User::find($villa->owner_id);
-            if ($owner && !$owner->hasRole('Villa Owner')) {
-                $owner->assignRole('Villa Owner');
+            $owner = \App\Models\Owner::find($villa->owner_id);
+            $ownerUser = $owner?->user;
+            if ($ownerUser && !$ownerUser->hasRole('Owner')) {
+                \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Owner', 'guard_name' => 'web']);
+                $ownerUser->assignRole('Owner');
             }
         }
 
@@ -184,16 +199,18 @@ class VillaController extends BaseController
             'has_parking' => 'boolean',
             'parking_slots' => 'nullable|integer|min:0',
             'maintenance_amount' => 'nullable|numeric|min:0',
-            'status' => 'required|in:vacant,occupied,on_rent,under_maintenance',
+            // See store(): occupancy is derived, only maintenance is chosen.
+            'status' => 'nullable|in:vacant,occupied,on_rent,maintenance,under_maintenance',
             'description' => 'nullable|string',
         ];
-        
+
         // Only Super Admin can select society, others use their own society
         if ($user->hasRole('Super Admin')) {
             $rules['society_id'] = 'required|exists:societies,id';
         }
 
         $validated = $request->validate($rules);
+        $validated['status'] = FlatController::storedStatusFromRequest($validated['status'] ?? null);
 
         // Set society_id for non-Super Admin users
         if (!$user->hasRole('Super Admin')) {
@@ -218,8 +235,9 @@ class VillaController extends BaseController
         if ($villa->owner_id && $villa->owner_id !== $oldOwnerId) {
             $owner = \App\Models\Owner::find($villa->owner_id);
             $ownerUser = $owner?->user;
-            if ($ownerUser && !$ownerUser->hasRole('Villa Owner')) {
-                $ownerUser->assignRole('Villa Owner');
+            if ($ownerUser && !$ownerUser->hasRole('Owner')) {
+                \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Owner', 'guard_name' => 'web']);
+                $ownerUser->assignRole('Owner');
             }
         }
 

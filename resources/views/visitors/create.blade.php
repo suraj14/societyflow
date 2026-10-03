@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
-@section('title', 'Add Visitor')
-@section('page-title', 'Add Visitor')
+@section('title', $isResident ? 'Invite Visitor' : 'Add Visitor')
+@section('page-title', $isResident ? 'Invite Visitor' : 'Add Visitor')
 
 @section('content')
 <div class="container mx-auto px-4 py-6">
@@ -10,8 +10,10 @@
             <i class="fas fa-arrow-left"></i>
         </a>
         <div>
-            <h1 class="text-3xl font-bold text-gray-900">Add New Visitor</h1>
-            <p class="text-gray-600 mt-1">Register a new visitor entry</p>
+            <h1 class="text-3xl font-bold text-gray-900">{{ $isResident ? 'Invite Visitor' : 'Add New Visitor' }}</h1>
+            <p class="text-gray-600 mt-1">
+                {{ $isResident ? 'Your visitor is pre-approved - security can verify them at the gate.' : 'Register a new visitor entry' }}
+            </p>
         </div>
     </div>
 
@@ -19,11 +21,20 @@
         <div class="px-6 py-4 border-b border-gray-200">
             <h2 class="text-lg font-semibold text-gray-900">Visitor Information</h2>
         </div>
-        
+
         <form action="{{ route('visitors.store') }}" method="POST" enctype="multipart/form-data" class="px-6 py-6">
             @csrf
-            
+            @include('partials.idempotency')
+
             <div class="space-y-6">
+                {{-- Destination. The server already knows a single-property
+                     resident's unit, so nothing is submitted for it. --}}
+                @if($fixedProperty)
+                    <div class="px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700 flex items-center gap-2">
+                        <i class="fas fa-{{ $fixedProperty->property_type === 'villa' ? 'house-user' : 'building' }} text-gray-400"></i>
+                        <span>Visiting: <span class="font-semibold text-gray-900">{{ $fixedPropertyLabel }}</span></span>
+                    </div>
+                @endif
                 <!-- Visitor Details -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -68,77 +79,27 @@
                         @enderror
                     </div>
 
-                    @include('partials.property-type-field', [
-                        'sfLabel'    => 'Visiting Property',
-                        'sfOnChange' => 'handlePropertyTypeChange()',
-                    ])
+                    @unless($fixedProperty)
+                        <div>
+                            <label for="flat_id" class="block text-sm font-medium text-gray-700 mb-2">
+                                Visiting Property <span class="text-red-500">*</span>
+                            </label>
+                            <select name="flat_id" id="flat_id" required
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('flat_id') border-red-500 @enderror">
+                                <option value="">{{ count($properties) ? 'Select Property' : 'No properties set up yet' }}</option>
+                                @foreach($properties as $id => $label)
+                                    <option value="{{ $id }}" {{ (string) old('flat_id') === (string) $id ? 'selected' : '' }}>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                            @if(!count($properties))
+                                <p class="mt-1 text-xs text-gray-500">Add villas or flats to this society before registering visitors.</p>
+                            @endif
+                            @error('flat_id')
+                                <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
+                            @enderror
+                        </div>
+                    @endunless
                 </div>
-
-                <!-- Apartment Selection -->
-                <div id="apartment_section" style="display: none;">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div>
-                            <label for="tower_select" class="block text-sm font-medium text-gray-700 mb-2">
-                                Select Tower <span class="text-red-500">*</span>
-                            </label>
-                            <select id="tower_select" onchange="updateFloorOptions()"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Tower</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label for="floor_select" class="block text-sm font-medium text-gray-700 mb-2">
-                                Select Floor <span class="text-red-500">*</span>
-                            </label>
-                            <select id="floor_select" onchange="updateFlatOptions()"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Floor</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label for="flat_select" class="block text-sm font-medium text-gray-700 mb-2">
-                                Flat No. <span class="text-red-500">*</span>
-                            </label>
-                            <select id="flat_select" onchange="updateFlatId()"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Flat</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Villa Selection -->
-                <div id="villa_section" style="display: none;">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="villa_area_select" class="block text-sm font-medium text-gray-700 mb-2">
-                                Villa Areas <span class="text-red-500">*</span>
-                            </label>
-                            <select id="villa_area_select" onchange="updateVillaOptions()"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Villa Area</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label for="villa_select" class="block text-sm font-medium text-gray-700 mb-2">
-                                Villa No. <span class="text-red-500">*</span>
-                            </label>
-                            <select id="villa_select" onchange="updateFlatId()"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Villa</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Hidden field to store the selected flat_id -->
-                <input type="hidden" name="flat_id" id="flat_id" value="{{ old('flat_id') }}">
-                @error('flat_id')
-                    <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                @enderror
 
                 <!-- Visit Details -->
                 <div class="border-t border-gray-200 pt-6">
@@ -147,7 +108,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label for="expected_entry_time" class="block text-sm font-medium text-gray-700 mb-2">
-                                Date Of Visit <span class="text-red-500">*</span>
+                                Expected Date <span class="text-red-500">*</span>
                             </label>
                             <input type="date" name="expected_entry_time" id="expected_entry_time" required
                                    value="{{ old('expected_entry_time', now()->format('Y-m-d')) }}"
@@ -159,48 +120,12 @@
 
                         <div>
                             <label for="in_time" class="block text-sm font-medium text-gray-700 mb-2">
-                                In Time <span class="text-red-500">*</span>
+                                Expected Time <span class="text-red-500">*</span>
                             </label>
                             <input type="time" name="in_time" id="in_time" required
                                    value="{{ old('in_time', now()->format('H:i')) }}"
                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('in_time') border-red-500 @enderror">
                             @error('in_time')
-                                <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                            @enderror
-                        </div>
-
-                        <div>
-                            <label for="expected_exit_time" class="block text-sm font-medium text-gray-700 mb-2">
-                                Date Of Exit
-                            </label>
-                            <input type="date" name="expected_exit_time" id="expected_exit_time"
-                                   value="{{ old('expected_exit_time') }}"
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('expected_exit_time') border-red-500 @enderror">
-                            @error('expected_exit_time')
-                                <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                            @enderror
-                        </div>
-
-                        <div>
-                            <label for="out_time" class="block text-sm font-medium text-gray-700 mb-2">
-                                Out Time
-                            </label>
-                            <input type="time" name="out_time" id="out_time"
-                                   value="{{ old('out_time') }}"
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('out_time') border-red-500 @enderror">
-                            @error('out_time')
-                                <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
-                            @enderror
-                        </div>
-
-                        <div>
-                            <label for="expected_count" class="block text-sm font-medium text-gray-700 mb-2">
-                                Number of Visitors
-                            </label>
-                            <input type="number" name="expected_count" id="expected_count" min="1" max="50"
-                                   value="{{ old('expected_count', 1) }}"
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 @error('expected_count') border-red-500 @enderror">
-                            @error('expected_count')
                                 <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                             @enderror
                         </div>
@@ -271,7 +196,7 @@
                 </a>
                 <button type="submit" 
                         class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors">
-                    Register Visitor
+                    {{ $isResident ? 'Invite Visitor' : 'Register Visitor' }}
                 </button>
             </div>
         </form>
@@ -279,274 +204,6 @@
 </div>
 
 <script>
-// Fetch all flats data
-let allFlats = [];
-
-fetch('/api/flats')
-    .then(response => {
-        console.log('API Response status:', response.status);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        allFlats = data;
-        console.log('Flats loaded:', allFlats.length);
-        console.log('All flats data:', allFlats);
-        
-        // Debug villa data specifically
-        const villaFlats = allFlats.filter(flat => flat.property_type === 'villa');
-        console.log('Villa flats found:', villaFlats.length);
-        console.log('Villa flats:', villaFlats);
-        
-        const villaFlatsWithAreas = villaFlats.filter(flat => flat.villa_area);
-        console.log('Villa flats with areas:', villaFlatsWithAreas.length);
-        console.log('Villa flats with areas:', villaFlatsWithAreas);
-        
-        if (villaFlatsWithAreas.length > 0) {
-            console.log('Sample villa flat structure:', villaFlatsWithAreas[0]);
-        }
-    })
-    .catch(error => {
-        console.error('Error fetching flats:', error);
-    });
-
-function handlePropertyTypeChange() {
-    const propertyType = document.getElementById('property_type').value;
-    const apartmentSection = document.getElementById('apartment_section');
-    const villaSection = document.getElementById('villa_section');
-    
-    console.log('Property type selected:', propertyType);
-    
-    // Reset all dropdowns
-    resetAllDropdowns();
-    
-    if (propertyType === 'apartment') {
-        apartmentSection.style.display = 'block';
-        villaSection.style.display = 'none';
-        loadTowers();
-    } else if (propertyType === 'villa') {
-        apartmentSection.style.display = 'none';
-        villaSection.style.display = 'block';
-        loadVillaAreas();
-    } else {
-        apartmentSection.style.display = 'none';
-        villaSection.style.display = 'none';
-    }
-}
-
-function resetAllDropdowns() {
-    document.getElementById('tower_select').innerHTML = '<option value="">Select Tower</option>';
-    document.getElementById('floor_select').innerHTML = '<option value="">Select Floor</option>';
-    document.getElementById('flat_select').innerHTML = '<option value="">Select Flat</option>';
-    document.getElementById('villa_area_select').innerHTML = '<option value="">Select Villa Area</option>';
-    document.getElementById('villa_select').innerHTML = '<option value="">Select Villa</option>';
-    document.getElementById('flat_id').value = '';
-}
-
-function loadTowers() {
-    console.log('Loading towers...');
-    console.log('All flats:', allFlats);
-    
-    const apartments = allFlats.filter(flat => {
-        console.log('Checking flat:', flat.id, 'property_type:', flat.property_type, 'building:', flat.building);
-        return flat.property_type === 'apartment' && flat.building;
-    });
-    console.log('Apartments found:', apartments.length, apartments);
-    
-    if (apartments.length === 0) {
-        console.warn('No apartment flats with buildings found!');
-        const towerSelect = document.getElementById('tower_select');
-        towerSelect.innerHTML = '<option value="">No towers available</option>';
-        return;
-    }
-    
-    const towers = [...new Map(apartments.map(flat => [flat.building.id, flat.building])).values()];
-    console.log('Towers map:', towers);
-    
-    const towerSelect = document.getElementById('tower_select');
-    towerSelect.innerHTML = '<option value="">Select Tower</option>';
-    
-    towers.forEach(tower => {
-        const option = document.createElement('option');
-        option.value = tower.id;
-        option.textContent = tower.name;
-        towerSelect.appendChild(option);
-        console.log('Added tower option:', tower.name);
-    });
-    
-    console.log('Tower dropdown populated with', towers.length, 'options');
-}
-
-function updateFloorOptions() {
-    const towerId = document.getElementById('tower_select').value;
-    const floorSelect = document.getElementById('floor_select');
-    const flatSelect = document.getElementById('flat_select');
-    
-    console.log('Updating floor options for tower ID:', towerId);
-    
-    floorSelect.innerHTML = '<option value="">Select Floor</option>';
-    flatSelect.innerHTML = '<option value="">Select Flat</option>';
-    document.getElementById('flat_id').value = '';
-    
-    if (!towerId) return;
-    
-    const apartments = allFlats.filter(flat => {
-        const match = flat.property_type === 'apartment' && 
-                     flat.building && 
-                     flat.building.id == towerId;
-        return match;
-    });
-    
-    console.log('Apartments for tower', towerId, ':', apartments.length);
-    
-    if (apartments.length === 0) {
-        floorSelect.innerHTML = '<option value="">No floors available</option>';
-        return;
-    }
-    
-    const floors = [...new Set(apartments.map(flat => flat.floor))].sort((a, b) => a - b);
-    console.log('Floors found:', floors);
-    
-    floors.forEach(floor => {
-        const option = document.createElement('option');
-        option.value = floor;
-        option.textContent = `Floor ${floor}`;
-        floorSelect.appendChild(option);
-        console.log('Added floor option:', floor);
-    });
-    
-    console.log('Floor dropdown populated with', floors.length, 'options');
-}
-
-function updateFlatOptions() {
-    const towerId = document.getElementById('tower_select').value;
-    const floor = document.getElementById('floor_select').value;
-    const flatSelect = document.getElementById('flat_select');
-    
-    console.log('Updating flat options for tower', towerId, 'floor', floor);
-    
-    flatSelect.innerHTML = '<option value="">Select Flat</option>';
-    document.getElementById('flat_id').value = '';
-    
-    if (!towerId || !floor) return;
-    
-    const flats = allFlats.filter(flat => {
-        const match = flat.property_type === 'apartment' && 
-                     flat.building && 
-                     flat.building.id == towerId && 
-                     flat.floor == floor;
-        if (match) {
-            console.log('Found matching flat:', flat.id, flat.flat_number);
-        }
-        return match;
-    });
-    
-    console.log('Flats for tower', towerId, 'floor', floor, ':', flats.length);
-    
-    if (flats.length === 0) {
-        flatSelect.innerHTML = '<option value="">No flats available</option>';
-        return;
-    }
-    
-    flats.forEach(flat => {
-        const option = document.createElement('option');
-        option.value = flat.id;
-        option.textContent = flat.flat_number;
-        flatSelect.appendChild(option);
-        console.log('Added flat option:', flat.flat_number);
-    });
-    
-    console.log('Flat dropdown populated with', flats.length, 'options');
-}
-
-function loadVillaAreas() {
-    console.log('Loading villa areas...');
-    console.log('All flats:', allFlats);
-    
-    const villas = allFlats.filter(flat => {
-        console.log('Checking flat:', flat.id, 'property_type:', flat.property_type, 'villa_area:', flat.villa_area);
-        return flat.property_type === 'villa' && flat.villa_area;
-    });
-    console.log('Villas found:', villas.length, villas);
-    
-    if (villas.length === 0) {
-        console.warn('No villa flats with villa areas found!');
-        const villaAreaSelect = document.getElementById('villa_area_select');
-        villaAreaSelect.innerHTML = '<option value="">No villa areas available</option>';
-        return;
-    }
-    
-    const villaAreas = [...new Map(villas.map(flat => [flat.villa_area.id, flat.villa_area])).values()];
-    console.log('Villa areas map:', villaAreas);
-    
-    const villaAreaSelect = document.getElementById('villa_area_select');
-    villaAreaSelect.innerHTML = '<option value="">Select Villa Area</option>';
-    
-    villaAreas.forEach(area => {
-        const option = document.createElement('option');
-        option.value = area.id;
-        option.textContent = area.name;
-        villaAreaSelect.appendChild(option);
-        console.log('Added villa area option:', area.name);
-    });
-    
-    console.log('Villa area dropdown populated with', villaAreas.length, 'options');
-}
-
-function updateVillaOptions() {
-    const villaAreaId = document.getElementById('villa_area_select').value;
-    const villaSelect = document.getElementById('villa_select');
-    
-    console.log('Updating villa options for area ID:', villaAreaId);
-    
-    villaSelect.innerHTML = '<option value="">Select Villa</option>';
-    document.getElementById('flat_id').value = '';
-    
-    if (!villaAreaId) return;
-    
-    const villas = allFlats.filter(flat => {
-        const match = flat.property_type === 'villa' && 
-                     flat.villa_area && 
-                     flat.villa_area.id == villaAreaId;
-        if (match) {
-            console.log('Found matching villa:', flat.id, flat.villa_name, flat.flat_number);
-        }
-        return match;
-    });
-    
-    console.log('Villas for area', villaAreaId, ':', villas.length);
-    
-    if (villas.length === 0) {
-        villaSelect.innerHTML = '<option value="">No villas available in this area</option>';
-        return;
-    }
-    
-    villas.forEach(villa => {
-        const option = document.createElement('option');
-        option.value = villa.id;
-        option.textContent = villa.villa_name ? `${villa.villa_name} (${villa.flat_number})` : villa.flat_number;
-        villaSelect.appendChild(option);
-        console.log('Added villa option:', option.textContent);
-    });
-    
-    console.log('Villa dropdown populated with', villas.length, 'options');
-}
-
-function updateFlatId() {
-    const propertyType = document.getElementById('property_type').value;
-    let flatId = '';
-    
-    if (propertyType === 'apartment') {
-        flatId = document.getElementById('flat_select').value;
-    } else if (propertyType === 'villa') {
-        flatId = document.getElementById('villa_select').value;
-    }
-    
-    document.getElementById('flat_id').value = flatId;
-}
-
 // Photo preview function
 function previewPhoto(input) {
     if (input.files && input.files[0]) {

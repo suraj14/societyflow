@@ -13,17 +13,7 @@
     </div>
 
     <!-- Success/Error Messages -->
-    @if(session('success'))
-    <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-6">
-        {{ session('success') }}
-    </div>
-    @endif
 
-    @if(session('error'))
-    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-        {{ session('error') }}
-    </div>
-    @endif
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Unassigned Tenants -->
@@ -38,18 +28,18 @@
             <div class="p-6">
                 @if($unassignedTenants->count() > 0)
                     <div class="space-y-4">
-                        @foreach($unassignedTenants as $user)
+                        @foreach($unassignedTenants as $tenant)
                         <div class="border border-gray-200 rounded-lg p-4">
                             <div class="flex items-center justify-between">
                                 <div>
-                                    <h3 class="font-semibold text-gray-900">{{ $user->name }}</h3>
-                                    <p class="text-sm text-gray-600">{{ $user->email }}</p>
-                                    <p class="text-sm text-gray-600">{{ $user->phone }}</p>
+                                    <h3 class="font-semibold text-gray-900">{{ $tenant->name }}</h3>
+                                    <p class="text-sm text-gray-600">{{ $tenant->email }}</p>
+                                    <p class="text-sm text-gray-600">{{ $tenant->phone }}</p>
                                     <span class="inline-block bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full mt-1">
                                         No Unit Assigned
                                     </span>
                                 </div>
-                                <button onclick="openAssignModal({{ $user->id }}, '{{ $user->name }}')" 
+                                <button onclick="openAssignModal({{ $tenant->id }}, '{{ $tenant->name }}')"
                                         class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors">
                                     Assign Unit
                                 </button>
@@ -131,34 +121,34 @@
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
-                        @foreach($assignedTenants as $user)
+                        @foreach($assignedTenants as $tenant)
                         <tr>
                             <td class="px-4 py-2">
                                 <div>
-                                    <div class="font-medium text-gray-900">{{ $user->name }}</div>
-                                    <div class="text-sm text-gray-600">{{ $user->email }}</div>
-                                    <div class="text-sm text-gray-600">{{ $user->phone }}</div>
+                                    <div class="font-medium text-gray-900">{{ $tenant->name }}</div>
+                                    <div class="text-sm text-gray-600">{{ $tenant->email }}</div>
+                                    <div class="text-sm text-gray-600">{{ $tenant->phone }}</div>
                                 </div>
                             </td>
                             <td class="px-4 py-2">
-                                <div class="font-medium text-gray-900">{{ $user->resident->flat->flat_number ?? $user->resident->flat->villa_name }}</div>
+                                <div class="font-medium text-gray-900">{{ $tenant->flat->flat_number ?? $tenant->flat->villa_name }}</div>
                                 <span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">
                                     Assigned
                                 </span>
                             </td>
                             <td class="px-4 py-2 text-sm text-gray-900">
-                                {{ $user->resident->flat->building->name ?? $user->resident->flat->villaArea->name ?? 'No Area' }}
+                                {{ $tenant->flat->building->name ?? $tenant->flat->villaArea->name ?? 'No Area' }}
                             </td>
                             <td class="px-4 py-2 text-sm text-gray-900">
-                                {{ $user->resident->move_in_date ? \Carbon\Carbon::parse($user->resident->move_in_date)->format('M d, Y') : 'N/A' }}
+                                {{ $tenant->move_in_date ? $tenant->move_in_date->format('M d, Y') : 'N/A' }}
                             </td>
                             <td class="px-4 py-2">
                                 <div class="flex space-x-2">
-                                    <button onclick="openReassignModal({{ $user->id }}, '{{ $user->name }}', '{{ $user->resident->flat->flat_number ?? $user->resident->flat->villa_name }}')" 
+                                    <button onclick="openReassignModal({{ $tenant->id }}, '{{ $tenant->name }}', '{{ $tenant->flat->flat_number ?? $tenant->flat->villa_name }}')"
                                             class="text-blue-600 hover:text-blue-800 text-sm font-medium">
                                         Reassign
                                     </button>
-                                    <button onclick="confirmUnassign({{ $user->id }}, '{{ $user->name }}', '{{ $user->resident->flat->flat_number ?? $user->resident->flat->villa_name }}')" 
+                                    <button onclick="confirmUnassign({{ $tenant->id }}, '{{ $tenant->name }}', '{{ $tenant->flat->flat_number ?? $tenant->flat->villa_name }}')"
                                             class="text-red-600 hover:text-red-800 text-sm font-medium">
                                         Unassign
                                     </button>
@@ -182,11 +172,11 @@
                 <h3 class="text-lg font-semibold text-gray-900 mb-4">Assign Unit to Tenant</h3>
                 <form id="assignForm" method="POST" action="{{ route('admin.tenant-assignments.assign') }}">
                     @csrf
-                    <input type="hidden" id="assign_user_id" name="user_id">
-                    
+                    <input type="hidden" id="assign_tenant_id" name="tenant_id">
+
                     <div class="mb-4">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Tenant</label>
-                        <p id="assign_user_name" class="text-gray-900 font-medium"></p>
+                        <p id="assign_tenant_name" class="text-gray-900 font-medium"></p>
                     </div>
                     
                     <div class="mb-4">
@@ -224,11 +214,11 @@
                 <h3 class="text-lg font-semibold text-gray-900 mb-4">Reassign Tenant Unit</h3>
                 <form id="reassignForm" method="POST" action="{{ route('admin.tenant-assignments.reassign') }}">
                     @csrf
-                    <input type="hidden" id="reassign_user_id" name="current_user_id">
-                    
+                    <input type="hidden" id="reassign_tenant_id" name="current_tenant_id">
+
                     <div class="mb-4">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Tenant</label>
-                        <p id="reassign_user_name" class="text-gray-900 font-medium"></p>
+                        <p id="reassign_tenant_name" class="text-gray-900 font-medium"></p>
                     </div>
                     
                     <div class="mb-4">
@@ -266,13 +256,13 @@
 <!-- Unassign Form (Hidden) -->
 <form id="unassignForm" method="POST" action="{{ route('admin.tenant-assignments.unassign') }}" style="display: none;">
     @csrf
-    <input type="hidden" id="unassign_user_id" name="user_id">
+    <input type="hidden" id="unassign_tenant_id" name="tenant_id">
 </form>
 
 <script>
-function openAssignModal(userId, userName) {
-    document.getElementById('assign_user_id').value = userId;
-    document.getElementById('assign_user_name').textContent = userName;
+function openAssignModal(tenantId, tenantName) {
+    document.getElementById('assign_tenant_id').value = tenantId;
+    document.getElementById('assign_tenant_name').textContent = tenantName;
     document.getElementById('assignModal').classList.remove('hidden');
 }
 
@@ -280,9 +270,9 @@ function closeAssignModal() {
     document.getElementById('assignModal').classList.add('hidden');
 }
 
-function openReassignModal(userId, userName, currentUnit) {
-    document.getElementById('reassign_user_id').value = userId;
-    document.getElementById('reassign_user_name').textContent = userName;
+function openReassignModal(tenantId, tenantName, currentUnit) {
+    document.getElementById('reassign_tenant_id').value = tenantId;
+    document.getElementById('reassign_tenant_name').textContent = tenantName;
     document.getElementById('reassign_current_unit').textContent = currentUnit;
     document.getElementById('reassignModal').classList.remove('hidden');
 }
@@ -291,9 +281,9 @@ function closeReassignModal() {
     document.getElementById('reassignModal').classList.add('hidden');
 }
 
-function confirmUnassign(userId, userName, unitName) {
-    if (confirm(`Are you sure you want to unassign unit "${unitName}" from tenant "${userName}"? This action cannot be undone.`)) {
-        document.getElementById('unassign_user_id').value = userId;
+function confirmUnassign(tenantId, tenantName, unitName) {
+    if (confirm(`Are you sure you want to unassign unit "${unitName}" from tenant "${tenantName}"? This will move the tenant out and preserve their history.`)) {
+        document.getElementById('unassign_tenant_id').value = tenantId;
         document.getElementById('unassignForm').submit();
     }
 }

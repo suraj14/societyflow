@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -106,7 +108,11 @@ class AuthController extends Controller
             return redirect()->route('dashboard');
         }
 
-        if ($user->hasRole('Villa Owner')) {
+        // Villa Owner is a legacy role name; an 'Owner' holder with only a
+        // villa (no apartment) routes the same way. DashboardController's
+        // own index() is the authority on this - this just picks the
+        // initial redirect target.
+        if ($user->hasRole('Villa Owner') || ($user->hasRole('Owner') && $user->ownedVilla && !$user->ownedFlat)) {
             return redirect()->route('villa-owner.dashboard');
         }
 
@@ -115,7 +121,7 @@ class AuthController extends Controller
             return redirect()->route('guard.dashboard');
         }
 
-        if ($user->hasAnyRole(['Apartment Owner', 'Tenant', 'Staff', 'Accountant', 'Manager'])) {
+        if ($user->hasAnyRole(['Owner', 'Apartment Owner', 'Tenant', 'Staff', 'Accountant', 'Manager'])) {
             return redirect()->route('dashboard');
         }
 
@@ -154,17 +160,69 @@ class AuthController extends Controller
     }
 
     /**
-     * Handle forgot password request
+     * Handle forgot password request. Uses Laravel's own password broker
+     * (the ->exists:users,email rule this used to have told an attacker
+     * which emails are registered via the validation error alone; the
+     * broker's own response is enumeration-safe by design, so the same
+     * generic message is shown either way).
      */
     public function forgotPassword(Request $request)
     {
         $request->validate([
-            'email' => 'required|email|exists:users,email',
+            'email' => 'required|email',
         ]);
 
-        // TODO: Implement password reset email logic
-        
-        return back()->with('success', 'Password reset link has been sent to your email.');
+        Password::sendResetLink($request->only('email'));
+
+        return back()->with('success', 'If an account exists for that email, a password reset link has been sent.');
+    }
+
+    /**
+     * Show the reset-password form for a mailed token.
+     */
+    public function showResetPassword(Request $request, string $token)
+    {
+        return view('auth.reset-password', [
+            'token' => $token,
+            'email' => $request->query('email'),
+        ]);
+    }
+
+    /**
+     * Complete a password reset via the mailed token.
+     */
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'token' => 'required',
+            'email' => 'required|email',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function ($user, $password) {
+                $user->forceFill([
+                    'password' => Hash::make($password),
+                ])->setRememberToken(Str::random(60));
+
+                $user->save();
+
+                // A password only the account holder now knows must
+                // invalidate any API tokens issued under the old one.
+                if (method_exists($user, 'tokens')) {
+                    $user->tokens()->delete();
+                }
+
+                event(new PasswordReset($user));
+            }
+        );
+
+        if ($status === Password::PASSWORD_RESET) {
+            return redirect()->route('login')->with('success', 'Your password has been reset. Please log in.');
+        }
+
+        return back()->withErrors(['email' => __($status)])->onlyInput('email');
     }
 
     /**

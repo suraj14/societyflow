@@ -272,8 +272,18 @@
                         </a>
                         @endif
 
-                        {{-- REPORTS COLLAPSIBLE - Admin, Tenant only (HIDDEN FOR STAFF) --}}
-                        @if(($isAdmin || $isTenant) && !$isStaff)
+                        {{-- RENT - Accountant only (read-only; Admin/Tenant have their own rent
+                             entry points elsewhere in this menu) --}}
+                        @if($isAccountant)
+                        <a href="{{ route('admin.rents.index') }}" @click="mobileMenuOpen = false"
+                           class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.rents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                            <i class="fas fa-key w-5 text-center"></i>
+                            <span class="ml-3">Rent</span>
+                        </a>
+                        @endif
+
+                        {{-- REPORTS COLLAPSIBLE - Admin, Tenant, Owner, Accountant (HIDDEN FOR STAFF) --}}
+                        @if(($isAdmin || $isTenant || $isOwner || $isAccountant) && !$isStaff)
                         <div x-data="{ open: {{ request()->routeIs('reports.*') ? 'true' : 'false' }} }">
                             <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
                                 <div class="flex items-center">
@@ -283,10 +293,12 @@
                                 <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': open }"></i>
                             </button>
                             <div x-show="open" x-collapse class="ml-8 mt-1 space-y-1">
+                                @unless($isAccountant)
                                 <a href="{{ route('reports.maintenance') }}" @click="mobileMenuOpen = false" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('reports.maintenance') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                     <i class="fas fa-wrench w-4 text-center mr-2"></i>
                                     Maintenance Report
                                 </a>
+                                @endunless
                                 <a href="{{ route('reports.financial') }}" @click="mobileMenuOpen = false" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('reports.financial') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
                                     <i class="fas fa-chart-line w-4 text-center mr-2"></i>
                                     Financial Report

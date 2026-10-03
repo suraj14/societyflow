@@ -335,7 +335,7 @@ class EmailNotificationService
             case 'event_reminder':
                 $query = User::where('society_id', $societyId)
                            ->whereHas('roles', function($q) {
-                               $q->whereIn('name', ['Apartment Owner', 'Villa Owner', 'Tenant']);
+                               $q->whereIn('name', ['Owner', 'Apartment Owner', 'Villa Owner', 'Tenant']);
                            });
 
                 if (isset($context['visible_roles']) && is_array($context['visible_roles'])) {

@@ -15,17 +15,7 @@
         </a>
     </div>
 
-    @if(session('success'))
-        <div class="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
-            {{ session('success') }}
-        </div>
-    @endif
 
-    @if(session('error'))
-        <div class="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            {{ session('error') }}
-        </div>
-    @endif
 
     <!-- Villas Table -->
     <div class="bg-white rounded-xl border border-gray-200">
@@ -59,9 +49,10 @@
                                 {{ $villa->villaArea->name ?? '-' }}
                             </td>
                             <td class="px-6 py-4">
-                                @if($villa->ownerModel)
-                                    <p class="text-sm font-medium text-gray-800">{{ $villa->ownerModel->name }}</p>
-                                    <p class="text-xs text-gray-500">{{ $villa->ownerModel->phone ?? $villa->ownerModel->email }}</p>
+                                @php $sfVillaOwner = $occupancy[$villa->id]['owner'] ?? null; @endphp
+                                @if($sfVillaOwner)
+                                    <p class="text-sm font-medium text-gray-800">{{ $sfVillaOwner->name }}</p>
+                                    <p class="text-xs text-gray-500">{{ $sfVillaOwner->phone ?? $sfVillaOwner->email }}</p>
                                 @else
                                     <span class="text-sm text-gray-400">Not Assigned</span>
                                 @endif
@@ -80,13 +71,9 @@
                                 </div>
                             </td>
                             <td class="px-6 py-4">
-                                <span class="px-2 py-1 text-xs rounded-full 
-                                    {{ $villa->status === 'occupied' ? 'bg-red-100 text-red-700' : '' }}
-                                    {{ $villa->status === 'vacant' ? 'bg-green-100 text-green-700' : '' }}
-                                    {{ $villa->status === 'on_rent' ? 'bg-blue-100 text-blue-700' : '' }}
-                                    {{ $villa->status === 'under_maintenance' ? 'bg-orange-100 text-orange-700' : '' }}
-                                    {{ $villa->status === 'maintenance' ? 'bg-yellow-100 text-yellow-700' : '' }}">
-                                    {{ ucfirst(str_replace('_', ' ', $villa->status)) }}
+                                @php $sfState = $occupancy[$villa->id]['state'] ?? 'vacant'; @endphp
+                                <span class="px-2 py-1 text-xs rounded-full {{ \App\Support\PropertyOccupancy::badgeClass($sfState) }}">
+                                    {{ \App\Support\PropertyOccupancy::label($sfState) }}
                                 </span>
                             </td>
                             <td class="px-6 py-4">

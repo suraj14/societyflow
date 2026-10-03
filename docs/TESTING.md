@@ -38,6 +38,17 @@ DB_CONNECTION=mysql DB_DATABASE=societyflow_test \
 DB_USERNAME=... DB_PASSWORD=... ./vendor/bin/phpunit
 ```
 
+On the XAMPP dev box (MariaDB 10.4, root with no password, database
+`societyflow_test` already created), from PowerShell:
+
+```powershell
+$env:DB_CONNECTION='mysql'; $env:DB_HOST='127.0.0.1'; $env:DB_DATABASE='societyflow_test'
+$env:DB_USERNAME='root'; $env:DB_PASSWORD=''
+G:\xampp\php\php.exe vendor/bin/phpunit
+```
+
+The MariaDB run is slower (~40 min) than SQLite (~20 min).
+
 ## What the suites cover
 
 | File | Guards against |

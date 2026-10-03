@@ -51,6 +51,8 @@ Route::middleware('guest')->group(function () {
     Route::post('/register', [App\Http\Controllers\AuthController::class, 'register'])->name('register.submit');
     Route::get('/forgot-password', [App\Http\Controllers\AuthController::class, 'showForgotPassword'])->name('password.request');
     Route::post('/forgot-password', [App\Http\Controllers\AuthController::class, 'forgotPassword'])->name('password.email');
+    Route::get('/reset-password/{token}', [App\Http\Controllers\AuthController::class, 'showResetPassword'])->name('password.reset');
+    Route::post('/reset-password', [App\Http\Controllers\AuthController::class, 'resetPassword'])->name('password.update');
 });
 
 Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout'])->name('logout')->middleware('auth');
@@ -150,6 +152,11 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
     
     // Villa Assignment Management (Admin & Super Admin only)
     Route::middleware('role:Super Admin|Admin')->group(function () {
+        // Property & Occupancy: the one sidebar entry point for "who lives
+        // where" (brief §15/§16). Links out to the screens below rather
+        // than replacing them - see PropertyOccupancyController's docblock.
+        Route::get('/property-occupancy', [App\Http\Controllers\Admin\PropertyOccupancyController::class, 'index'])->name('property-occupancy.index');
+
         Route::get('/villa-assignments', [App\Http\Controllers\Admin\UserVillaAssignmentController::class, 'index'])->name('villa-assignments.index');
         Route::post('/villa-assignments/assign', [App\Http\Controllers\Admin\UserVillaAssignmentController::class, 'assign'])->name('villa-assignments.assign');
         Route::post('/villa-assignments/unassign', [App\Http\Controllers\Admin\UserVillaAssignmentController::class, 'unassign'])->name('villa-assignments.unassign');
@@ -169,21 +176,19 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
         Route::get('/tenants/{tenant}/edit', [App\Http\Controllers\Admin\TenantController::class, 'edit'])->name('tenants.edit');
         Route::put('/tenants/{tenant}', [App\Http\Controllers\Admin\TenantController::class, 'update'])->name('tenants.update');
         Route::delete('/tenants/{tenant}', [App\Http\Controllers\Admin\TenantController::class, 'destroy'])->name('tenants.destroy');
+        Route::post('/tenants/{tenant}/move-out', [App\Http\Controllers\Admin\TenantController::class, 'moveOut'])->name('tenants.move-out');
         
-        // Rent Management
-        Route::get('/rents', [App\Http\Controllers\Admin\RentController::class, 'index'])->name('rents.index');
+        // Rent Management - writes stay Admin-only
         Route::get('/rents/create', [App\Http\Controllers\Admin\RentController::class, 'create'])->name('rents.create');
         Route::post('/rents', [App\Http\Controllers\Admin\RentController::class, 'store'])->name('rents.store');
         Route::get('/rents/{rent}/edit', [App\Http\Controllers\Admin\RentController::class, 'edit'])->name('rents.edit');
         Route::put('/rents/{rent}', [App\Http\Controllers\Admin\RentController::class, 'update'])->name('rents.update');
         Route::delete('/rents/{rent}', [App\Http\Controllers\Admin\RentController::class, 'destroy'])->name('rents.destroy');
-        Route::get('/rents/{rent}/receipt', [App\Http\Controllers\Admin\RentController::class, 'receipt'])->name('rents.receipt');
         Route::post('/rents/add-payment', [App\Http\Controllers\Admin\RentController::class, 'addPayment'])->name('rents.add-payment');
-        
+
         // Rent API endpoints for simplified form
-        Route::get('api/rent/units', [App\Http\Controllers\Admin\RentController::class, 'getUnitsOnRent'])->name('api.rent.units');
         Route::post('api/rent/validate', [App\Http\Controllers\Admin\RentController::class, 'validateRentRecord'])->name('api.rent.validate');
-        
+
         // Removed: an unnamed `api/rent/debug` route that dumped every villa
         // in the society with its tenants and their names as JSON. It was
         // unreferenced by any view or script, and its `?? 1` fallback meant a
@@ -194,6 +199,15 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
         Route::post('/tenant-assignments/assign', [App\Http\Controllers\Admin\UserTenantAssignmentController::class, 'assign'])->name('tenant-assignments.assign');
         Route::post('/tenant-assignments/unassign', [App\Http\Controllers\Admin\UserTenantAssignmentController::class, 'unassign'])->name('tenant-assignments.unassign');
         Route::post('/tenant-assignments/reassign', [App\Http\Controllers\Admin\UserTenantAssignmentController::class, 'reassign'])->name('tenant-assignments.reassign');
+    });
+
+    // Rent: read access also for Accountant (finance role, no tenant/rent
+    // write authority) - was bundled with the Admin-only writes above,
+    // which meant Accountant could not even view the rent register.
+    Route::middleware('role:Super Admin|Admin|Accountant')->group(function () {
+        Route::get('/rents', [App\Http\Controllers\Admin\RentController::class, 'index'])->name('rents.index');
+        Route::get('/rents/{rent}/receipt', [App\Http\Controllers\Admin\RentController::class, 'receipt'])->name('rents.receipt');
+        Route::get('api/rent/units', [App\Http\Controllers\Admin\RentController::class, 'getUnitsOnRent'])->name('api.rent.units');
     });
 });
 
@@ -235,21 +249,41 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
 
 // Resident Management Routes (Admin & Super Admin only) - RESTRICTED FOR STAFF
 Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(function () {
-    Route::resource('residents', ResidentController::class);
+    // index excluded: ResidentController::index() is unreachable by design
+    // (see its own docblock) - the named residents.index route below
+    // redirects it to /owners instead. Registering both a resource index
+    // and a second GET /residents route is not just redundant: Laravel's
+    // RouteCollection keys routes by [method][uri], so the second
+    // registration silently overwrote the first, which had already broken
+    // POST /residents too (see the redirect below).
+    Route::resource('residents', ResidentController::class)->except(['index']);
 });
 
 // User Management Routes (Admin & Super Admin only) - RESTRICTED FOR STAFF
 Route::middleware(['auth', 'role:Super Admin|Admin|Society Admin', 'restrict.staff'])->group(function () {
     Route::resource('users', App\Http\Controllers\UserController::class);
+    Route::post('users/{user}/reset-password', [App\Http\Controllers\UserController::class, 'resetPassword'])->name('users.reset-password');
 });
 
-// Redirect /residents to /owners (Phase 8 refactor - Residents deprecated)
-Route::redirect('/residents', '/owners');
+// Redirect /residents to /owners (Phase 8 refactor - Residents deprecated).
+//
+// This used to be Route::redirect('/residents', '/owners'), which registers
+// with any(), matching every HTTP verb - not just the GET this comment
+// describes. That silently intercepted POST /residents too, so every Add
+// Resident submission redirected to /owners instead of reaching
+// ResidentController::store() - the create screen's form has never actually
+// been able to save a resident. Naming this route residents.index (with
+// index excluded from the resource above) keeps route('residents.index')
+// working while matching only GET|HEAD.
+Route::get('/residents', fn () => redirect('/owners'))
+    ->middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])
+    ->name('residents.index');
 
 // Owner Management Routes (Admin & Super Admin only) - RESTRICTED FOR STAFF
 Route::middleware(['auth', 'role:Super Admin|Admin|Society Admin', 'restrict.staff'])->group(function () {
     Route::resource('owners', App\Http\Controllers\OwnerController::class);
     Route::post('owners/convert-resident', [App\Http\Controllers\OwnerController::class, 'convertFromResident'])->name('owners.convert-resident');
+    Route::post('owners/{owner}/reset-password', [App\Http\Controllers\OwnerController::class, 'resetPassword'])->name('owners.reset-password');
     
     // API endpoints for cascading dropdowns
     Route::get('api/owners/buildings', [App\Http\Controllers\OwnerController::class, 'getBuildings'])->name('api.owners.buildings');
@@ -263,6 +297,8 @@ Route::middleware(['auth', 'role:Super Admin|Admin|Society Admin', 'restrict.sta
 Route::middleware(['auth', 'restrict.staff'])->group(function () {
     Route::resource('payments', PaymentController::class);
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt'])->name('payments.receipt');
+    Route::post('payments/{payment}/approve', [PaymentController::class, 'approve'])->name('payments.approve');
+    Route::post('payments/{payment}/reject', [PaymentController::class, 'reject'])->name('payments.reject');
     Route::get('bills/{bill}/upi-link', [PaymentController::class, 'upiLink'])->name('bills.upi-link');
     // Route::resource('utility-bills', UtilityBillController::class);
     // Route::patch('utility-bills/{utilityBill}/payment', [UtilityBillController::class, 'addPayment'])->name('utility-bills.add-payment');
@@ -288,6 +324,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('api/payments/flats', [PaymentController::class, 'getFlats'])->name('api.payments.flats');
     Route::get('api/payments/villa-areas', [PaymentController::class, 'getVillaAreas'])->name('api.payments.villa-areas');
     Route::get('api/payments/villas', [PaymentController::class, 'getVillas'])->name('api.payments.villas');
+    Route::get('api/payments/outstanding-bills', [PaymentController::class, 'getOutstandingBills'])->name('api.payments.outstanding-bills');
 });
 
 // Complaint Management Routes (All authenticated users)
@@ -470,22 +507,45 @@ Route::prefix('my')->name('villa-owner.')->middleware(['auth'])->group(function 
     Route::get('/notices/{notice}', [VillaOwnerNoticeController::class, 'show'])->name('notices.show');
 });
 
-// Apartment Owner Routes - My Apartment (View Only)
-Route::middleware(['auth', 'role:Apartment Owner'])->group(function () {
+// My Apartment (View Only) - canonical 'Owner' added; the controller itself
+// resolves the actual owned apartment (see App\Http\Controllers\ApartmentOwner\MyApartmentController)
+Route::middleware(['auth', 'role:Apartment Owner|Owner'])->group(function () {
     Route::get('/my-apartment', [App\Http\Controllers\ApartmentOwner\MyApartmentController::class, 'show'])->name('my-apartment');
 });
 
-// Villa Owner Routes - My Villa (View Only)
-Route::middleware(['auth', 'role:Villa Owner'])->group(function () {
+// My Villa (View Only) - canonical 'Owner' added; the controller itself
+// resolves the actual owned villa (see App\Http\Controllers\VillaOwner\MyVillaController)
+Route::middleware(['auth', 'role:Villa Owner|Owner'])->group(function () {
     Route::get('/my-villa', [App\Http\Controllers\VillaOwner\MyVillaController::class, 'show'])->name('my-villa');
 });
 
-// Reports Routes (Super Admin, Admin, Owner, Tenant) - RESTRICTED FOR STAFF
-Route::middleware(['auth', 'role:Super Admin|Admin|Owner|Tenant', 'restrict.staff'])->group(function () {
+// Reports Routes - RESTRICTED FOR STAFF
+//
+// Was `role:Super Admin|Admin|Owner|Tenant` - 'Owner' is not a role this
+// application has (CLAUDE.md §2); every real Villa Owner/Apartment Owner was
+// blocked from their own maintenance/financial reports by this middleware
+// before the controller's own (also-broken, see ReportController) check
+// ever ran.
+Route::middleware(['auth', 'role:Super Admin|Admin|Owner|Villa Owner|Apartment Owner|Tenant', 'restrict.staff'])->group(function () {
     Route::get('/reports/maintenance', [App\Http\Controllers\ReportController::class, 'maintenanceReport'])->name('reports.maintenance');
     Route::post('/reports/maintenance/download', [App\Http\Controllers\ReportController::class, 'downloadMaintenanceReport'])->name('reports.download-maintenance');
+});
+
+// Financial report only: also open to Accountant, the finance role - it has
+// no property to see a maintenance report about.
+Route::middleware(['auth', 'role:Super Admin|Admin|Owner|Villa Owner|Apartment Owner|Tenant|Accountant', 'restrict.staff'])->group(function () {
     Route::get('/reports/financial', [App\Http\Controllers\ReportController::class, 'financialReport'])->name('reports.financial');
     Route::post('/reports/financial/download', [App\Http\Controllers\ReportController::class, 'downloadFinancialReport'])->name('reports.download-financial');
+});
+
+// Society Expenses - finance roles only. Owners/tenants/guards/staff never
+// see society-wide expense management (ExpenseController re-checks roles
+// and society on every method; this gate is the first line).
+Route::middleware(['auth', 'role:Super Admin|Admin|Accountant', 'restrict.staff'])->group(function () {
+    Route::get('/expenses/categories', [App\Http\Controllers\ExpenseController::class, 'categories'])->name('expenses.categories');
+    Route::post('/expenses/categories', [App\Http\Controllers\ExpenseController::class, 'storeCategory'])->name('expenses.categories.store');
+    Route::patch('/expenses/categories/{category}/toggle', [App\Http\Controllers\ExpenseController::class, 'toggleCategory'])->name('expenses.categories.toggle');
+    Route::resource('expenses', App\Http\Controllers\ExpenseController::class);
 });
 
 // Events Routes (All authenticated users)
@@ -511,4 +571,20 @@ Route::prefix('guard')->name('guard.')->middleware(['auth', 'role:Guard|Admin|Su
     Route::post('/visitors/{visitor}/check-in', [App\Http\Controllers\GuardController::class, 'checkIn'])->name('visitors.check-in');
     Route::post('/visitors/{visitor}/check-out', [App\Http\Controllers\GuardController::class, 'checkOut'])->name('visitors.check-out');
     Route::get('/history', [App\Http\Controllers\GuardController::class, 'history'])->name('history');
+    Route::get('/scan', [App\Http\Controllers\GuardController::class, 'scanForm'])->name('scan');
+    Route::post('/scan', [App\Http\Controllers\GuardController::class, 'scan'])->name('scan.submit');
+});
+
+// Access passes (recurring staff / temporary service provider gate access) -
+// residents manage their own, Admin/Super Admin manage any in their society.
+// Staff/Accountant/Guard have no property to authorise access for, so they
+// are excluded the same way they are from every other property-scoped
+// write in this app - not because the controller couldn't also block them
+// (it does, via UserFlatResolver), but so they never even see the entry
+// point for something that is not their job.
+Route::middleware(['auth', 'role:Super Admin|Admin|Owner|Villa Owner|Apartment Owner|Tenant'])->group(function () {
+    Route::resource('access-passes', App\Http\Controllers\AccessPassController::class)
+        ->only(['index', 'create', 'store', 'show']);
+    Route::post('access-passes/{accessPass}/block-today', [App\Http\Controllers\AccessPassController::class, 'blockToday'])->name('access-passes.block-today');
+    Route::post('access-passes/{accessPass}/revoke', [App\Http\Controllers\AccessPassController::class, 'revoke'])->name('access-passes.revoke');
 });

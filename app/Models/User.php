@@ -142,17 +142,23 @@ class User extends Authenticatable
 
     public function isResident(): bool
     {
-        return $this->hasAnyRole(['Apartment Owner', 'Villa Owner', 'Tenant']);
+        return $this->hasAnyRole(['Owner', 'Apartment Owner', 'Villa Owner', 'Tenant']);
     }
 
+    /**
+     * Owner is the canonical business role; Villa Owner/Apartment Owner are
+     * legacy names for the same role, kept only for users not yet migrated
+     * by `php artisan users:migrate-to-owner-role`.
+     */
     public function isOwner(): bool
     {
-        return $this->hasAnyRole(['Apartment Owner', 'Villa Owner']);
+        return $this->hasAnyRole(['Owner', 'Apartment Owner', 'Villa Owner']);
     }
 
     public function isApartmentOwner(): bool
     {
-        return $this->hasRole('Apartment Owner');
+        return $this->hasRole('Apartment Owner')
+            || ($this->hasRole('Owner') && $this->ownedFlat?->property_type === 'apartment');
     }
 
     public function isTenant(): bool
@@ -167,7 +173,8 @@ class User extends Authenticatable
 
     public function isVillaOwner(): bool
     {
-        return $this->hasRole('Villa Owner');
+        return $this->hasRole('Villa Owner')
+            || ($this->hasRole('Owner') && $this->ownedVilla !== null);
     }
 
     /**

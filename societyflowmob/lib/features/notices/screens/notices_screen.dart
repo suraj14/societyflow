@@ -4,6 +4,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/error_view.dart';
 import '../../../shared/widgets/network_image_widget.dart';
 import '../../../core/utils/auto_refresh_mixin.dart';
 import '../providers/notices_provider.dart';
@@ -35,16 +36,24 @@ class _NoticesScreenState extends ConsumerState<NoticesScreen> with AutoRefreshM
       body: RefreshIndicator(
         onRefresh: () => ref.read(noticesProvider.notifier).loadNotices(),
         color: AppColors.primary,
+        // A load failure must show an error + Retry, never the "No notices"
+        // empty state - that used to be shown for a dead API/network just
+        // as readily as for a genuinely empty list, which told the resident
+        // nothing was posted when the real problem was that the request
+        // never succeeded. Only a successful response with zero eligible
+        // notices reaches the empty state now.
         child: state.isLoading
             ? const ListSkeleton()
-            : state.notices.isEmpty
-                ? const EmptyState(icon: Icons.campaign_outlined, title: 'No notices', subtitle: 'Society notices will appear here')
-                : ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: state.notices.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (_, i) => _NoticeCard(notice: state.notices[i]),
-                  ),
+            : state.error != null && state.notices.isEmpty
+                ? ErrorView(message: state.error!, onRetry: () => ref.read(noticesProvider.notifier).loadNotices())
+                : state.notices.isEmpty
+                    ? const EmptyState(icon: Icons.campaign_outlined, title: 'No notices', subtitle: 'Society notices will appear here')
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: state.notices.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (_, i) => _NoticeCard(notice: state.notices[i]),
+                      ),
       ),
     );
   }

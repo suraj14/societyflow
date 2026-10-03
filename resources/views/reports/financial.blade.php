@@ -5,255 +5,261 @@
 
 @section('content')
 <div class="container mx-auto px-4 py-6">
-    <!-- Header -->
     <div class="mb-6">
         <h1 class="text-3xl font-bold text-gray-900">Financial Report</h1>
-        <p class="text-gray-600 mt-1">Financial Report Description</p>
+        <p class="text-gray-600 mt-1">
+            @if($report && $report['mode'] === 'property')
+                Your bills, payments and property charges for the selected period.
+            @else
+                Track society income, common expenses, collections and outstanding dues for the selected period.
+            @endif
+        </p>
     </div>
 
-    <!-- Report Form -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-        <form id="filterForm" method="GET" action="{{ route('reports.financial') }}" class="space-y-6">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- Report Type Selection -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-3">Report Type</label>
-                    <div class="space-y-3">
-                        <div class="flex items-center">
-                            <input type="radio" id="monthly" name="report_type" value="monthly" 
-                                   {{ $reportType === 'monthly' ? 'checked' : '' }} 
-                                   class="h-4 w-4 text-blue-600 cursor-pointer"
-                                   onchange="toggleMonthDropdown()">
-                            <label for="monthly" class="ml-3 cursor-pointer">
-                                <span class="font-medium text-gray-900">Monthly</span>
-                            </label>
-                        </div>
-                        <div class="flex items-center">
-                            <input type="radio" id="annually" name="report_type" value="annually" 
-                                   {{ $reportType === 'annually' ? 'checked' : '' }} 
-                                   class="h-4 w-4 text-blue-600 cursor-pointer"
-                                   onchange="toggleMonthDropdown()">
-                            <label for="annually" class="ml-3 cursor-pointer">
-                                <span class="font-medium text-gray-900">Annually</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
+    @if($errors->any())
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
+            <ul class="list-disc list-inside text-sm">
+                @foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach
+            </ul>
+        </div>
+    @endif
+    @if(session('error'))
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">{{ session('error') }}</div>
+    @endif
 
-                <!-- Month Dropdown (visible only when Monthly selected) -->
-                <div id="monthContainer" class="{{ $reportType === 'monthly' ? '' : 'hidden' }}">
-                    <label for="month" class="block text-sm font-medium text-gray-700 mb-2">Month</label>
-                    <select name="month" id="month" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        @php
-                            $months = [
-                                1 => 'January', 2 => 'February', 3 => 'March', 4 => 'April',
-                                5 => 'May', 6 => 'June', 7 => 'July', 8 => 'August',
-                                9 => 'September', 10 => 'October', 11 => 'November', 12 => 'December'
-                            ];
-                        @endphp
-                        @foreach($months as $num => $name)
-                            <option value="{{ $num }}" {{ $month == $num ? 'selected' : '' }}>{{ $name }}</option>
+    @include('reports._period-filter', [
+        'filterRoute'   => route('reports.financial'),
+        'downloadRoute' => route('reports.download-financial'),
+    ])
+
+    @php $label = $period->label(); @endphp
+
+    @if(!$report)
+        <div class="bg-white rounded-lg shadow-md p-10 text-center text-gray-500">
+            <i class="fas fa-building text-3xl mb-2 block opacity-50"></i>
+            No society selected. Super Admin: use "Login as Admin" on a society to view its financial report.
+        </div>
+
+    @elseif($report['mode'] === 'society')
+        @php $o = $report['overview']; @endphp
+
+        {{-- A. OVERVIEW --}}
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+                <p class="text-gray-500 text-sm font-medium">Total Income</p>
+                <p class="text-2xl font-bold text-green-700 mt-1">₹{{ number_format($o['total_income'], 2) }}</p>
+                <p class="text-xs text-gray-500 mt-1">Maintenance ₹{{ number_format($o['maintenance_collected'], 0) }} &middot; Other ₹{{ number_format($o['other_income'], 0) }}</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+                <p class="text-gray-500 text-sm font-medium">Total Society Expenses</p>
+                <p class="text-2xl font-bold text-red-700 mt-1">₹{{ number_format($o['total_society_expenses'], 2) }}</p>
+                <p class="text-xs text-gray-500 mt-1">{{ $report['expenses']['count'] }} {{ \Illuminate\Support\Str::plural('transaction', $report['expenses']['count']) }}</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+                <p class="text-gray-500 text-sm font-medium">Net Position</p>
+                <p class="text-2xl font-bold mt-1 {{ $o['net_position'] >= 0 ? 'text-gray-900' : 'text-red-700' }}">{{ $o['net_position'] < 0 ? '−' : '' }}₹{{ number_format(abs($o['net_position']), 2) }}</p>
+                <p class="text-xs text-gray-500 mt-1">Income − society expenses, {{ $label }}</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5">
+                <p class="text-gray-500 text-sm font-medium">Outstanding Dues</p>
+                <p class="text-2xl font-bold text-orange-700 mt-1">₹{{ number_format($o['outstanding_dues'], 2) }}</p>
+                <p class="text-xs text-gray-500 mt-1">Unpaid maintenance, all bills to date</p>
+            </div>
+        </div>
+
+        @if(!$report['has_data'])
+            <div class="bg-white rounded-lg shadow-md p-10 text-center text-gray-500 mb-6">
+                <i class="fas fa-inbox text-3xl mb-2 block opacity-50"></i>
+                <p class="font-medium text-gray-700">No financial data available for {{ $label }}.</p>
+                <p class="text-sm mt-1">No transactions recorded for this period.</p>
+            </div>
+        @else
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {{-- B. INCOME --}}
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-base font-semibold text-gray-900">Income &middot; {{ $label }}</h2>
+                    <p class="text-xs text-gray-500">Payments received (status: success) by what they paid for.</p>
+                </div>
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs">
+                        <tr><th class="px-6 py-3">Source</th><th class="px-6 py-3 text-right">Transactions</th><th class="px-6 py-3 text-right">Amount</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @forelse($report['income']['rows'] as $row)
+                            <tr><td class="px-6 py-3 text-gray-900">{{ $row['source'] }}</td><td class="px-6 py-3 text-right text-gray-600">{{ $row['count'] }}</td><td class="px-6 py-3 text-right font-medium">₹{{ number_format($row['amount'], 2) }}</td></tr>
+                        @empty
+                            <tr><td colspan="3" class="px-6 py-6 text-center text-gray-500">No income recorded for {{ $label }}.</td></tr>
+                        @endforelse
+                        <tr class="bg-gray-100 font-bold border-t-2 border-gray-300">
+                            <td class="px-6 py-3">Total Income</td><td class="px-6 py-3 text-right">{{ $report['income']['count'] }}</td><td class="px-6 py-3 text-right">₹{{ number_format($report['income']['total'], 2) }}</td>
+                        </tr>
+                        @if($o['rent_collected'] > 0)
+                            <tr class="text-gray-500 text-xs"><td class="px-6 py-2" colspan="2">Rent collected on owners' behalf (not society income)</td><td class="px-6 py-2 text-right">₹{{ number_format($o['rent_collected'], 2) }}</td></tr>
+                        @endif
+                    </tbody>
+                </table>
+            </div>
+
+            {{-- C. SOCIETY EXPENSES --}}
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-base font-semibold text-gray-900">Society Expenses &middot; {{ $label }}</h2>
+                    <p class="text-xs text-gray-500">Where the society spent its money on common operations.</p>
+                </div>
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs">
+                        <tr><th class="px-6 py-3">Category</th><th class="px-6 py-3 text-right">Transactions</th><th class="px-6 py-3 text-right">Amount</th><th class="px-6 py-3 text-right">% of Total</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @forelse($report['expenses']['rows'] as $row)
+                            <tr>
+                                <td class="px-6 py-3 text-gray-900">{{ $row['category'] }}</td>
+                                <td class="px-6 py-3 text-right text-gray-600">{{ $row['count'] }}</td>
+                                <td class="px-6 py-3 text-right font-medium">₹{{ number_format($row['amount'], 2) }}</td>
+                                <td class="px-6 py-3 text-right text-gray-600">{{ $row['percent'] }}%</td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="4" class="px-6 py-6 text-center text-gray-500">No society/common expenses recorded for this period.</td></tr>
+                        @endforelse
+                        <tr class="bg-gray-100 font-bold border-t-2 border-gray-300">
+                            <td class="px-6 py-3">Total Society Expenses</td><td class="px-6 py-3 text-right">{{ $report['expenses']['count'] }}</td><td class="px-6 py-3 text-right">₹{{ number_format($report['expenses']['total'], 2) }}</td><td class="px-6 py-3 text-right">{{ $report['expenses']['total'] > 0 ? '100%' : '—' }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {{-- D. COLLECTIONS & DUES --}}
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-base font-semibold text-gray-900">Maintenance Billing &middot; {{ $label }}</h2>
+                    <p class="text-xs text-gray-500">Maintenance bills dated in this period ({{ $report['billing']['bills_count'] }} {{ \Illuminate\Support\Str::plural('bill', $report['billing']['bills_count']) }}). Rent bills are not society billing and are excluded.</p>
+                </div>
+                <table class="w-full text-sm">
+                    <tbody class="divide-y divide-gray-100">
+                        <tr><td class="px-6 py-3 text-gray-700">Total Billed</td><td class="px-6 py-3 text-right font-medium">₹{{ number_format($report['billing']['billed'], 2) }}</td></tr>
+                        <tr><td class="px-6 py-3 text-gray-700">Collected against these bills</td><td class="px-6 py-3 text-right font-medium text-green-700">₹{{ number_format($report['billing']['collected'], 2) }}</td></tr>
+                        <tr><td class="px-6 py-3 text-gray-700">Outstanding on these bills</td><td class="px-6 py-3 text-right font-medium text-red-700">₹{{ number_format($report['billing']['outstanding'], 2) }}</td></tr>
+                        @if(count($report['billing']['charges']) > 1)
+                            <tr><td class="px-6 pt-4 pb-1 text-xs uppercase text-gray-500" colspan="2">Billed charges breakdown</td></tr>
+                            @foreach($report['billing']['charges'] as $charge)
+                                <tr><td class="px-6 py-2 text-gray-600 pl-10">{{ $charge['label'] }}</td><td class="px-6 py-2 text-right text-gray-700">₹{{ number_format($charge['amount'], 2) }}</td></tr>
+                            @endforeach
+                        @endif
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-base font-semibold text-gray-900">Collections &amp; Dues</h2>
+                    <p class="text-xs text-gray-500">What came in during {{ $label }}, and what the society is still owed.</p>
+                </div>
+                <table class="w-full text-sm">
+                    <tbody class="divide-y divide-gray-100">
+                        <tr><td class="px-6 py-3 text-gray-700">Maintenance collected in {{ $label }}</td><td class="px-6 py-3 text-right font-medium">₹{{ number_format($o['maintenance_collected'], 2) }}</td></tr>
+                        <tr><td class="px-6 py-3 text-gray-700">Other collections in {{ $label }}</td><td class="px-6 py-3 text-right font-medium">₹{{ number_format($o['other_income'], 2) }}</td></tr>
+                        <tr class="font-semibold"><td class="px-6 py-3 text-gray-900">Total collected</td><td class="px-6 py-3 text-right">₹{{ number_format($o['total_income'], 2) }}</td></tr>
+                        <tr><td class="px-6 py-3 text-gray-700">Outstanding maintenance dues (all bills to date)</td><td class="px-6 py-3 text-right font-medium text-red-700">₹{{ number_format($o['outstanding_dues'], 2) }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {{-- E. PROPERTY DETAILS --}}
+        @if(count($report['properties']) > 0)
+        <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-base font-semibold text-gray-900">Property-wise Maintenance &middot; {{ $label }}</h2>
+                <p class="text-xs text-gray-500">Per property, for maintenance bills dated in this period.</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs">
+                        <tr><th class="px-6 py-3">Property</th><th class="px-6 py-3 text-right">Billed</th><th class="px-6 py-3 text-right">Paid</th><th class="px-6 py-3 text-right">Due</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @foreach($report['properties'] as $row)
+                            <tr>
+                                <td class="px-6 py-3 text-gray-900">{{ $row['property'] }}</td>
+                                <td class="px-6 py-3 text-right">₹{{ number_format($row['billed'], 2) }}</td>
+                                <td class="px-6 py-3 text-right text-green-700">₹{{ number_format($row['paid'], 2) }}</td>
+                                <td class="px-6 py-3 text-right {{ $row['due'] > 0 ? 'text-red-700 font-medium' : 'text-gray-500' }}">₹{{ number_format($row['due'], 2) }}</td>
+                            </tr>
                         @endforeach
-                    </select>
-                </div>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        @endif
 
-                <!-- Year Dropdown (always visible) -->
-                <div>
-                    <label for="year" class="block text-sm font-medium text-gray-700 mb-2">Year</label>
-                    <select name="year" id="year" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                        @php
-                            $currentYear = now()->year;
-                            for ($y = $currentYear - 5; $y <= $currentYear; $y++) {
-                                echo "<option value=\"$y\" " . ($year == $y ? 'selected' : '') . ">$y</option>";
-                            }
-                        @endphp
-                    </select>
-                </div>
+        {{-- PROPERTY EXPENSES - separate, never in society totals --}}
+
+        @endif {{-- has_data --}}
+
+    @else
+        {{-- Resident view: own units only --}}
+        @php $o = $report['overview']; @endphp
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5"><p class="text-gray-500 text-sm font-medium">Billed</p><p class="text-2xl font-bold text-gray-900 mt-1">₹{{ number_format($o['total_billed'], 2) }}</p><p class="text-xs text-gray-500 mt-1">Bills dated {{ $label }}</p></div>
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5"><p class="text-gray-500 text-sm font-medium">Paid</p><p class="text-2xl font-bold text-green-700 mt-1">₹{{ number_format($o['total_paid'], 2) }}</p><p class="text-xs text-gray-500 mt-1">Payments in {{ $label }}</p></div>
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5"><p class="text-gray-500 text-sm font-medium">Due on these bills</p><p class="text-2xl font-bold text-red-700 mt-1">₹{{ number_format($o['period_due'], 2) }}</p></div>
+            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-5"><p class="text-gray-500 text-sm font-medium">Total Outstanding</p><p class="text-2xl font-bold text-orange-700 mt-1">₹{{ number_format($o['outstanding_dues'], 2) }}</p><p class="text-xs text-gray-500 mt-1">All your bills to date</p></div>
+        </div>
+
+        @if(!$report['has_data'])
+            <div class="bg-white rounded-lg shadow-md p-10 text-center text-gray-500">
+                <i class="fas fa-inbox text-3xl mb-2 block opacity-50"></i>
+                <p class="font-medium text-gray-700">No financial data available for {{ $label }}.</p>
+                <p class="text-sm mt-1">No transactions recorded for this period.</p>
+            </div>
+        @else
+            <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+                <div class="px-6 py-4 border-b border-gray-200"><h2 class="text-base font-semibold text-gray-900">Bills &middot; {{ $label }}</h2></div>
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs"><tr><th class="px-6 py-3">Date</th><th class="px-6 py-3">Property</th><th class="px-6 py-3">Bill</th><th class="px-6 py-3">Type</th><th class="px-6 py-3 text-right">Billed</th><th class="px-6 py-3 text-right">Paid</th><th class="px-6 py-3 text-right">Due</th></tr></thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @forelse($report['bills']['rows'] as $row)
+                            <tr><td class="px-6 py-3">{{ $row['date'] }}</td><td class="px-6 py-3">{{ $row['property'] }}</td><td class="px-6 py-3">{{ $row['number'] }}</td><td class="px-6 py-3">{{ $row['type'] }}</td><td class="px-6 py-3 text-right">₹{{ number_format($row['billed'], 2) }}</td><td class="px-6 py-3 text-right text-green-700">₹{{ number_format($row['paid'], 2) }}</td><td class="px-6 py-3 text-right {{ $row['due'] > 0 ? 'text-red-700' : '' }}">₹{{ number_format($row['due'], 2) }}</td></tr>
+                        @empty
+                            <tr><td colspan="7" class="px-6 py-6 text-center text-gray-500">No bills dated {{ $label }}.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
             </div>
 
-            <!-- Filter and Download Buttons -->
-            <div class="flex justify-between items-center gap-3">
-                <button type="submit" name="action" value="filter" class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded-lg font-medium transition-colors inline-flex items-center">
-                    <i class="fas fa-filter mr-2"></i>
-                    Filter
-                </button>
-                
-                <!-- Download PDF Button -->
-                <button type="button" onclick="downloadPDF()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors inline-flex items-center">
-                    <i class="fas fa-download mr-2"></i>
-                    Download PDF
-                </button>
+            <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+                <div class="px-6 py-4 border-b border-gray-200"><h2 class="text-base font-semibold text-gray-900">Payments &middot; {{ $label }}</h2></div>
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs"><tr><th class="px-6 py-3">Date</th><th class="px-6 py-3">Property</th><th class="px-6 py-3">For</th><th class="px-6 py-3">Receipt</th><th class="px-6 py-3 text-right">Amount</th></tr></thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @forelse($report['payments']['rows'] as $row)
+                            <tr><td class="px-6 py-3">{{ $row['date'] }}</td><td class="px-6 py-3">{{ $row['property'] }}</td><td class="px-6 py-3">{{ $row['type'] }}</td><td class="px-6 py-3">{{ $row['receipt'] ?: '—' }}</td><td class="px-6 py-3 text-right font-medium">₹{{ number_format($row['amount'], 2) }}</td></tr>
+                        @empty
+                            <tr><td colspan="5" class="px-6 py-6 text-center text-gray-500">No payments in {{ $label }}.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
             </div>
-        </form>
 
-        <!-- Period Display -->
-        <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p class="text-sm text-blue-800">
-                <strong>Showing data for:</strong>
-                @if($reportType === 'monthly')
-                    @php
-                        $monthName = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][$month] ?? 'Unknown';
-                    @endphp
-                    {{ $monthName }} {{ $year }}
-                @else
-                    Year {{ $year }}
-                @endif
-            </p>
-        </div>
-    </div>
+            @if(count($report['utility_bills']['rows']) > 0)
+            <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+                <div class="px-6 py-4 border-b border-gray-200"><h2 class="text-base font-semibold text-gray-900">Utility Bills &middot; {{ $label }}</h2></div>
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-left text-gray-500 uppercase text-xs"><tr><th class="px-6 py-3">Date</th><th class="px-6 py-3">Property</th><th class="px-6 py-3">Type</th><th class="px-6 py-3">Status</th><th class="px-6 py-3 text-right">Amount</th></tr></thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @foreach($report['utility_bills']['rows'] as $row)
+                            <tr><td class="px-6 py-3">{{ $row['date'] }}</td><td class="px-6 py-3">{{ $row['property'] }}</td><td class="px-6 py-3">{{ $row['type'] }}</td><td class="px-6 py-3">{{ $row['status'] }}</td><td class="px-6 py-3 text-right">₹{{ number_format($row['amount'], 2) }}</td></tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+            @endif
 
-    <!-- Financial Report Table -->
-    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="w-full">
-                <thead class="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Apartment</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Maintenance Billed</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Maintenance Paid</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Utility Billed</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Utility Paid</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Total Paid</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Total Dues</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                    @php
-                        $currencySymbol = \App\Models\SystemSetting::get('currency', 'symbol', '₹', auth()->user()->society_id);
-                        $totals = [
-                            'maintenance_billed' => 0,
-                            'maintenance_paid' => 0,
-                            'utility_billed' => 0,
-                            'utility_paid' => 0,
-                            'total_paid' => 0,
-                            'total_dues' => 0,
-                        ];
-                    @endphp
-                    @forelse($financialData as $row)
-                        @php
-                            $totals['maintenance_billed'] += $row['maintenance_billed'];
-                            $totals['maintenance_paid'] += $row['maintenance_paid'];
-                            $totals['utility_billed'] += $row['utility_billed'];
-                            $totals['utility_paid'] += $row['utility_paid'];
-                            $totals['total_paid'] += $row['total_paid'];
-                            $totals['total_dues'] += $row['total_dues'];
-                        @endphp
-                        <tr class="hover:bg-gray-50 transition-colors">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {{ $row['unit'] }} <span class="text-gray-500 text-xs">({{ $row['type'] }})</span>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ $currencySymbol }}{{ number_format($row['maintenance_billed'], 2) }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ $currencySymbol }}{{ number_format($row['maintenance_paid'], 2) }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ $currencySymbol }}{{ number_format($row['utility_billed'], 2) }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                                {{ $currencySymbol }}{{ number_format($row['utility_paid'], 2) }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-green-600">
-                                {{ $currencySymbol }}{{ number_format($row['total_paid'], 2) }}
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-red-600">
-                                {{ $currencySymbol }}{{ number_format($row['total_dues'], 2) }}
-                            </td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="7" class="px-6 py-8 text-center text-gray-500">
-                                <i class="fas fa-inbox text-3xl mb-2 block opacity-50"></i>
-                                No data available for the selected period
-                            </td>
-                        </tr>
-                    @endforelse
-
-                    <!-- Totals Row -->
-                    @if(count($financialData) > 0)
-                    <tr class="bg-gray-100 font-bold border-t-2 border-gray-300">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Total</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ $currencySymbol }}{{ number_format($totals['maintenance_billed'], 2) }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ $currencySymbol }}{{ number_format($totals['maintenance_paid'], 2) }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ $currencySymbol }}{{ number_format($totals['utility_billed'], 2) }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ $currencySymbol }}{{ number_format($totals['utility_paid'], 2) }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ $currencySymbol }}{{ number_format($totals['total_paid'], 2) }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ $currencySymbol }}{{ number_format($totals['total_dues'], 2) }}
-                        </td>
-                    </tr>
-                    @endif
-                </tbody>
-            </table>
-        </div>
-    </div>
+        @endif
+    @endif
 </div>
-
-<script>
-function toggleMonthDropdown() {
-    const monthContainer = document.getElementById('monthContainer');
-    const reportType = document.querySelector('input[name="report_type"]:checked').value;
-    
-    if (reportType === 'monthly') {
-        monthContainer.classList.remove('hidden');
-    } else {
-        monthContainer.classList.add('hidden');
-    }
-}
-
-function downloadPDF() {
-    const reportType = document.querySelector('input[name="report_type"]:checked').value;
-    const month = document.getElementById('month').value;
-    const year = document.getElementById('year').value;
-    
-    // Create a hidden form for PDF download
-    const downloadForm = document.createElement('form');
-    downloadForm.method = 'POST';
-    downloadForm.action = '{{ route("reports.download-financial") }}';
-    
-    // Add CSRF token
-    const csrfToken = document.querySelector('meta[name="csrf-token"]');
-    if (csrfToken) {
-        const tokenInput = document.createElement('input');
-        tokenInput.type = 'hidden';
-        tokenInput.name = '_token';
-        tokenInput.value = csrfToken.content;
-        downloadForm.appendChild(tokenInput);
-    }
-    
-    // Add form fields
-    const reportTypeInput = document.createElement('input');
-    reportTypeInput.type = 'hidden';
-    reportTypeInput.name = 'report_type';
-    reportTypeInput.value = reportType;
-    downloadForm.appendChild(reportTypeInput);
-    
-    const monthInput = document.createElement('input');
-    monthInput.type = 'hidden';
-    monthInput.name = 'month';
-    monthInput.value = month;
-    downloadForm.appendChild(monthInput);
-    
-    const yearInput = document.createElement('input');
-    yearInput.type = 'hidden';
-    yearInput.name = 'year';
-    yearInput.value = year;
-    downloadForm.appendChild(yearInput);
-    
-    document.body.appendChild(downloadForm);
-    downloadForm.submit();
-    document.body.removeChild(downloadForm);
-}
-</script>
 @endsection

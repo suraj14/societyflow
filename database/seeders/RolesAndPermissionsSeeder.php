@@ -80,6 +80,11 @@ class RolesAndPermissionsSeeder extends Seeder
         // Create Roles and assign permissions
         $this->createSuperAdmin();
         $this->createAdmin();
+        $this->createOwner();
+        // Villa Owner / Apartment Owner are kept registered (not assigned to
+        // new users) so historical role_has_permissions rows and any
+        // still-unmigrated account stay valid - see
+        // OwnerRoleNormalizationTest and the 2026_09_22 migration command.
         $this->createVillaOwner();
         $this->createApartmentOwner();
         $this->createTenant();
@@ -130,6 +135,32 @@ class RolesAndPermissionsSeeder extends Seeder
             'approve_visitor',
             'create_notice',
             'create_event',
+        ]);
+    }
+
+    /**
+     * The canonical business role. Villa Owner and Apartment Owner had
+     * identical permission sets (see below) - they only ever encoded a
+     * property type, not a different capability. Property type belongs to
+     * the flat/villa record, not the role.
+     */
+    private function createOwner(): void
+    {
+        $role = Role::firstOrCreate(['name' => 'Owner', 'guard_name' => 'web']);
+        $role->syncPermissions([
+            'view_facility',
+            'book_facility',
+            'view_own_bookings',
+            'view_own_visitors',
+            'create_visitor',
+            'approve_visitor',
+            'create_ticket',
+            'view_own_ticket',
+            'view_own_bills',
+            'pay_bill',
+            'view_services',
+            'clock_service',
+            'view_notices',
         ]);
     }
 

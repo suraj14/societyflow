@@ -163,13 +163,14 @@ class NoticeController extends BaseController
 
     public function show(Notice $notice)
     {
-        $user = auth()->user();
-        
-        // Verify notice belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $notice->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
-        
+        // Was `if ($user->hasRole('Admin') && $notice->society_id !== ...)`.
+        // Unlike edit/update/destroy/approve/reject, show() has no
+        // authorize('manage_notices') gate, so every authenticated role
+        // reached it and the && skipped the society check for all of them -
+        // a Tenant, Owner, Guard or Accountant could read any notice in any
+        // society by id, including other societies' drafts.
+        $this->authorizeSocietyAccess($notice);
+
         $notice->load(['society', 'createdBy', 'approvedBy', 'reads.user']);
         return view('notices.show', compact('notice'));
     }
@@ -182,9 +183,15 @@ class NoticeController extends BaseController
         $user = auth()->user();
         
         // Verify notice belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $notice->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
+        // Defence in depth. These five are reached only through
+        // authorize('manage_notices'), which today admits Admin and Super
+        // Admin alone, so the && was not exploitable here as it was in
+        // show(). But CLAUDE.md §2 notes the 36 permissions are only partly
+        // wired: the day manage_notices reaches another role, this check
+        // would silently stop applying. authorizeSocietyAccess() is
+        // equivalent for both current roles (it exempts Super Admin) and
+        // does not depend on the permission map staying as it is.
+        $this->authorizeSocietyAccess($notice);
         
         // If user is Super Admin, show all societies; otherwise, only their society
         if ($user->hasRole('Super Admin')) {
@@ -205,9 +212,15 @@ class NoticeController extends BaseController
         $user = auth()->user();
         
         // Verify notice belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $notice->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
+        // Defence in depth. These five are reached only through
+        // authorize('manage_notices'), which today admits Admin and Super
+        // Admin alone, so the && was not exploitable here as it was in
+        // show(). But CLAUDE.md §2 notes the 36 permissions are only partly
+        // wired: the day manage_notices reaches another role, this check
+        // would silently stop applying. authorizeSocietyAccess() is
+        // equivalent for both current roles (it exempts Super Admin) and
+        // does not depend on the permission map staying as it is.
+        $this->authorizeSocietyAccess($notice);
         
         // Validation rules
         $rules = [
@@ -276,9 +289,15 @@ class NoticeController extends BaseController
         $user = auth()->user();
         
         // Verify notice belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $notice->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
+        // Defence in depth. These five are reached only through
+        // authorize('manage_notices'), which today admits Admin and Super
+        // Admin alone, so the && was not exploitable here as it was in
+        // show(). But CLAUDE.md §2 notes the 36 permissions are only partly
+        // wired: the day manage_notices reaches another role, this check
+        // would silently stop applying. authorizeSocietyAccess() is
+        // equivalent for both current roles (it exempts Super Admin) and
+        // does not depend on the permission map staying as it is.
+        $this->authorizeSocietyAccess($notice);
         
         if ($notice->image) {
             // Don't try to delete - just skip it
@@ -298,9 +317,15 @@ class NoticeController extends BaseController
         $user = auth()->user();
         
         // Verify notice belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $notice->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
+        // Defence in depth. These five are reached only through
+        // authorize('manage_notices'), which today admits Admin and Super
+        // Admin alone, so the && was not exploitable here as it was in
+        // show(). But CLAUDE.md §2 notes the 36 permissions are only partly
+        // wired: the day manage_notices reaches another role, this check
+        // would silently stop applying. authorizeSocietyAccess() is
+        // equivalent for both current roles (it exempts Super Admin) and
+        // does not depend on the permission map staying as it is.
+        $this->authorizeSocietyAccess($notice);
         
         // Additional check to ensure only Admin or Super Admin roles can approve
         if (!auth()->user()->hasRole(['Admin', 'Super Admin'])) {
@@ -321,9 +346,15 @@ class NoticeController extends BaseController
         $user = auth()->user();
         
         // Verify notice belongs to user's society (for Admin only)
-        if ($user->hasRole('Admin') && $notice->society_id !== $user->society_id) {
-            abort(403, 'Unauthorized access.');
-        }
+        // Defence in depth. These five are reached only through
+        // authorize('manage_notices'), which today admits Admin and Super
+        // Admin alone, so the && was not exploitable here as it was in
+        // show(). But CLAUDE.md §2 notes the 36 permissions are only partly
+        // wired: the day manage_notices reaches another role, this check
+        // would silently stop applying. authorizeSocietyAccess() is
+        // equivalent for both current roles (it exempts Super Admin) and
+        // does not depend on the permission map staying as it is.
+        $this->authorizeSocietyAccess($notice);
         
         // Additional check to ensure only Admin or Super Admin roles can reject
         if (!auth()->user()->hasRole(['Admin', 'Super Admin'])) {

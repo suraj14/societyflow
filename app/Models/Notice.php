@@ -64,14 +64,25 @@ class Notice extends Model
     }
 
     // Scopes
+    /**
+     * Visible to a resident: published and its publish_date has started.
+     *
+     * Does NOT exclude a notice whose expiry_date has passed. The web
+     * Notice Board (NoticeController::index, used by every role including
+     * residents) never filters by expiry_date at all - a published notice
+     * stays listed indefinitely. This scope backs the mobile API
+     * (Api\NoticeApiController), which used to also require
+     * expiry_date >= now(): a notice that was published and fully visible
+     * on web simply vanished from the mobile app once its expiry_date
+     * passed, with no way for a resident to know it had ever existed. Kept
+     * in step with web deliberately, not loosened independently of it -
+     * both now agree a notice's own `status` column is what decides
+     * whether it is still live, not a date column nothing else enforces.
+     */
     public function scopePublished($query)
     {
         return $query->where('status', 'published')
-            ->where('publish_date', '<=', now())
-            ->where(function ($q) {
-                $q->whereNull('expiry_date')
-                  ->orWhere('expiry_date', '>=', now());
-            });
+            ->where('publish_date', '<=', now());
     }
 
     public function scopePendingApproval($query)

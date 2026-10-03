@@ -36,23 +36,7 @@
         </div>
 
         <!-- Success/Error Messages -->
-        @if(session('success'))
-            <div class="mb-6 bg-green-50 border-l-4 border-green-500 p-4 rounded-r-lg shadow-sm">
-                <div class="flex items-center">
-                    <i class="fas fa-check-circle text-green-500 mr-3 text-lg"></i>
-                    <p class="text-green-800 font-medium">{{ session('success') }}</p>
-                </div>
-            </div>
-        @endif
 
-        @if(session('error'))
-            <div class="mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg shadow-sm">
-                <div class="flex items-center">
-                    <i class="fas fa-exclamation-circle text-red-500 mr-3 text-lg"></i>
-                    <p class="text-red-800 font-medium">{{ session('error') }}</p>
-                </div>
-            </div>
-        @endif
 
         @if($templates->count() > 0)
             <!-- Stats Cards -->

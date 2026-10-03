@@ -23,23 +23,24 @@ class UserApartmentAssignmentController extends BaseController
         
         $societyId = $this->getSocietyId();
         
-        // Get apartment owners without assigned apartments
+        // Get apartment owners without assigned apartments ('Owner' is
+        // canonical; 'Apartment Owner' kept for users not yet migrated)
         $unassignedApartmentOwners = User::bySociety($societyId)
-            ->role('Apartment Owner')
+            ->role(['Owner', 'Apartment Owner'])
             ->whereDoesntHave('ownedFlat')
             ->with('resident')
             ->get();
-        
+
         // Get available apartments (not assigned to any owner)
         $availableApartments = Flat::bySociety($societyId)
             ->apartments()
             ->whereNull('owner_id')
             ->with('building')
             ->get();
-        
+
         // Get assigned apartment owners
         $assignedApartmentOwners = User::bySociety($societyId)
-            ->role('Apartment Owner')
+            ->role(['Owner', 'Apartment Owner'])
             ->whereHas('ownedFlat')
             ->with(['ownedFlat.building', 'resident'])
             ->get();
@@ -64,9 +65,9 @@ class UserApartmentAssignmentController extends BaseController
         $user = User::findOrFail($request->user_id);
         $apartment = Flat::findOrFail($request->apartment_id);
         
-        // Verify user is an apartment owner
-        if (!$user->hasRole('Apartment Owner')) {
-            return back()->with('error', 'User must have Apartment Owner role to be assigned an apartment.');
+        // Verify user is an owner
+        if (!$user->hasAnyRole(['Owner', 'Apartment Owner'])) {
+            return back()->with('error', 'User must have the Owner role to be assigned an apartment.');
         }
         
         // Verify apartment is available

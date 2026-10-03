@@ -35,8 +35,8 @@ class ServiceProviderPolicy
             return $user->society_id === $serviceProvider->society_id;
         }
 
-        // Allow other roles to view service providers (Villa Owner, Apartment Owner, Tenant, Staff)
-        if ($user->hasAnyRole(['Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'])) {
+        // Allow other roles to view service providers (Owner, Tenant, Staff)
+        if ($user->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner', 'Tenant', 'Staff'])) {
             return true;
         }
 

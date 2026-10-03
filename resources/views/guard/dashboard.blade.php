@@ -44,10 +44,17 @@
         @endforeach
     </div>
 
-    {{-- The primary action, impossible to miss. --}}
-    <a href="{{ route('guard.visitors.create') }}"
+    {{-- The primary action, impossible to miss: scan first. Recurring staff,
+         temporary service providers and pre-approved guests all go through
+         here with nothing to type - "Register Visitor" is for the one case
+         that genuinely has no pass: an unannounced, unknown visitor. --}}
+    <a href="{{ route('guard.scan') }}"
        class="tap-target w-full bg-purple-700 hover:bg-purple-800 text-white rounded-xl flex items-center justify-center gap-3 text-lg font-semibold shadow py-4">
-        <i class="fas fa-user-plus"></i> Register Visitor
+        <i class="fas fa-qrcode"></i> Scan QR
+    </a>
+    <a href="{{ route('guard.visitors.create') }}"
+       class="tap-target w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center justify-center gap-3 text-base font-medium py-3">
+        <i class="fas fa-user-plus"></i> Register Unknown Visitor
     </a>
 
     {{-- Waiting on resident approval --}}

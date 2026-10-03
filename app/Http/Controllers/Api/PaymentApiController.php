@@ -26,7 +26,7 @@ class PaymentApiController extends Controller
                 ->map(fn($b) => $this->formatBill($b))
             : [];
 
-        $payments = Payment::where('user_id', $user->id)
+        $payments = $this->ownPayments($user, $flatIds)
             ->where('status', 'success')
             ->latest('payment_date')
             ->take(20)
@@ -68,7 +68,8 @@ class PaymentApiController extends Controller
 
     public function history(Request $request): JsonResponse
     {
-        $payments = Payment::where('user_id', $request->user()->id)
+        $user = $request->user();
+        $payments = $this->ownPayments($user, $this->userFlatIds($user))
             ->latest('payment_date')
             ->paginate(20);
 
@@ -81,6 +82,23 @@ class PaymentApiController extends Controller
                 'total'        => $payments->total(),
             ],
         ]);
+    }
+
+    /**
+     * Payments that belong to this person: ones they made themselves, and
+     * ones recorded against a unit they own or rent (an admin recording a
+     * tenant's rent at the office writes user_id = admin, and the tenant
+     * still has to see it). Society-scoped, grouped OR (CLAUDE.md §3).
+     */
+    private function ownPayments($user, array $flatIds)
+    {
+        return Payment::where('society_id', $user->society_id)
+            ->where(function ($q) use ($user, $flatIds) {
+                $q->where('user_id', $user->id);
+                if ($flatIds) {
+                    $q->orWhereIn('flat_id', $flatIds);
+                }
+            });
     }
 
     private function formatBill(MaintenanceBill $b): array

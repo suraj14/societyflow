@@ -47,6 +47,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Society (business) Timezone
+    |--------------------------------------------------------------------------
+    |
+    | The calendar a society runs on when it has no societies.timezone of its
+    | own, and the timezone the scheduler's clock-time jobs (bill reminders)
+    | fire in. Storage stays in `timezone` above; App\Support\SocietyClock
+    | converts between the two. Indian societies are the product's target,
+    | so this defaults to IST. See docs/PRODUCTION_CHECKLIST.md "Timezone".
+    |
+    */
+
+    'society_timezone' => env('SOCIETY_TIMEZONE', 'Asia/Kolkata'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Trusted Proxies
+    |--------------------------------------------------------------------------
+    |
+    | Behind a reverse proxy / load balancer / Cloudflare, the app only sees
+    | HTTPS (and so only issues secure cookies and https:// URLs) if it
+    | trusts the X-Forwarded-* headers from that proxy. Comma-separated IPs
+    | or CIDRs, or "*" to trust every proxy (only when the app is reachable
+    | solely through the proxy). Empty = trust none (direct exposure).
+    |
+    */
+
+    'trusted_proxies' => env('TRUSTED_PROXIES'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     */

@@ -22,6 +22,7 @@
                             <div class="w-12 h-12 rounded-lg flex items-center justify-center
                                 @if($role->name === 'Super Admin') bg-red-100
                                 @elseif($role->name === 'Admin') bg-purple-100
+                                @elseif($role->name === 'Owner') bg-green-100
                                 @elseif($role->name === 'Villa Owner') bg-green-100
                                 @elseif($role->name === 'Apartment Owner') bg-blue-100
                                 @elseif($role->name === 'Tenant') bg-yellow-100
@@ -30,6 +31,7 @@
                                 <i class="fas 
                                     @if($role->name === 'Super Admin') fa-crown text-red-600
                                     @elseif($role->name === 'Admin') fa-user-shield text-purple-600
+                                    @elseif($role->name === 'Owner') fa-home text-green-600
                                     @elseif($role->name === 'Villa Owner') fa-house-user text-green-600
                                     @elseif($role->name === 'Apartment Owner') fa-door-open text-blue-600
                                     @elseif($role->name === 'Tenant') fa-user text-yellow-600
