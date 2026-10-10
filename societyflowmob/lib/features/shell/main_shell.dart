@@ -58,13 +58,22 @@ class _MainShellState extends ConsumerState<MainShell> {
     ];
   }
 
-  void switchTab(int index) => setState(() => _currentIndex = index);
+  void switchTab(int index) => setState(() {
+        _currentIndex = index;
+        _visited.add(index);
+      });
+
+  /// Tabs are built the first time they are opened, not all at login: every
+  /// screen loads its data in initState, so building all nine fired ~9 API
+  /// calls at startup (and resident-only ones for guards).
+  final Set<int> _visited = {0};
 
   // Called from home cards / guard quick actions
   void openNotices()    => switchTab(_noticesIndex);
   void openFacilities() => switchTab(_facilitiesIndex);
   void openServices()   => switchTab(_servicesIndex);
   void openEvents()     => switchTab(_eventsIndex);
+  void openComplaints() => switchTab(3);
 
   bool get _isFeatureTab => _currentIndex >= 5;
 
@@ -74,7 +83,20 @@ class _MainShellState extends ConsumerState<MainShell> {
     final screens = _screens;
 
     return Scaffold(
-      body: IndexedStack(index: _currentIndex, children: screens),
+      body: PopScope(
+        // Android Back on any tab other than Home goes Home instead of
+        // closing the app.
+        canPop: _currentIndex == 0,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) switchTab(0);
+        },
+        child: IndexedStack(
+          index: _currentIndex,
+          children: [
+            for (var i = 0; i < screens.length; i++) _visited.contains(i) ? screens[i] : const SizedBox.shrink(),
+          ],
+        ),
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -93,19 +115,19 @@ class _MainShellState extends ConsumerState<MainShell> {
                   label: isGuard ? 'Guard' : 'Home',
                   index: 0,
                   current: _isFeatureTab ? 0 : _currentIndex,
-                  onTap: (i) => setState(() => _currentIndex = i),
+                  onTap: switchTab,
                 ),
-                _NavItem(icon: Icons.people_alt_rounded,    label: 'Visitors', index: 1, current: _isFeatureTab ? 0 : _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
+                _NavItem(icon: Icons.people_alt_rounded,    label: 'Visitors', index: 1, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
                 // Guard doesn't use Bills/Tickets tabs but they remain for consistency
                 // For guard, Bills → Services, Tickets → Notices
                 if (isGuard) ...[
-                  _NavItem(icon: Icons.build_rounded,           label: 'Services', index: 7, current: _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
-                  _NavItem(icon: Icons.campaign_rounded,        label: 'Notices',  index: 5, current: _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
+                  _NavItem(icon: Icons.build_rounded,           label: 'Services', index: 7, current: _currentIndex, onTap: switchTab),
+                  _NavItem(icon: Icons.campaign_rounded,        label: 'Notices',  index: 5, current: _currentIndex, onTap: switchTab),
                 ] else ...[
-                  _NavItem(icon: Icons.receipt_long_rounded,    label: 'Bills',    index: 2, current: _isFeatureTab ? 0 : _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
-                  _NavItem(icon: Icons.support_agent_rounded,   label: 'Tickets',  index: 3, current: _isFeatureTab ? 0 : _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
+                  _NavItem(icon: Icons.receipt_long_rounded,    label: 'Bills',    index: 2, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
+                  _NavItem(icon: Icons.support_agent_rounded,   label: 'Tickets',  index: 3, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
                 ],
-                _NavItem(icon: Icons.person_rounded,        label: 'Profile',  index: 4, current: _isFeatureTab ? 0 : _currentIndex, onTap: (i) => setState(() => _currentIndex = i)),
+                _NavItem(icon: Icons.person_rounded,        label: 'Profile',  index: 4, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
               ],
             ),
           ),

@@ -75,6 +75,11 @@ class _ComplaintsScreenState extends ConsumerState<ComplaintsScreen>
                     ),
             ),
       floatingActionButton: FloatingActionButton.extended(
+        // The shell's IndexedStack keeps every tab mounted at once, so two
+        // FABs with the default hero tag live in one subtree and Flutter
+        // reports "multiple heroes share the same tag". Each FAB gets its
+        // own tag.
+        heroTag: 'fab-complaints',
         onPressed: () => showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (_) => const _RaiseComplaintSheet()),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.add_rounded, color: Colors.white),

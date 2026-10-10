@@ -8,8 +8,12 @@ import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/status_badge.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../../core/services/document_scan_service.dart';
 import '../providers/visitors_provider.dart';
+import '../models/id_document.dart';
+import '../models/visitor_lookup.dart';
 import '../models/visitor_model.dart';
+import 'document_scan_screen.dart';
 
 class VisitorsScreen extends ConsumerStatefulWidget {
   const VisitorsScreen({super.key});
@@ -140,6 +144,9 @@ class _VisitorsScreenState extends ConsumerState<VisitorsScreen>
         ),
       ]),
       floatingActionButton: FloatingActionButton.extended(
+        // See the note on the complaints FAB: tabs stay mounted together in
+        // the shell's IndexedStack, so every FAB needs a distinct hero tag.
+        heroTag: 'fab-visitors',
         onPressed: () => _showAddVisitorSheet(context),
         backgroundColor: AppColors.primary,
         icon: const Icon(Icons.person_add_rounded, color: Colors.white),
@@ -734,6 +741,18 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
   bool _isLoading = false;
   bool _showMore = false;
 
+  /// What a scanned ID gave us, if the guard scanned one. Held so the ID
+  /// proof travels with the visitor and the capture can be cleaned up.
+  ScannedIdentity? _scanned;
+  final FocusNode _nameFocus = FocusNode();
+
+  /// What the gate already knows about the number being typed, and which
+  /// number that answer was for - so the lookup runs once per number
+  /// rather than on every keystroke.
+  VisitorLookup? _lookup;
+  String? _lookedUpPhone;
+  bool _dismissedLookup = false;
+
   static const _types = [
     {'value': 'guest',       'label': 'Guest',       'icon': '👤'},
     {'value': 'delivery',    'label': 'Delivery',    'icon': '📦'},
@@ -752,7 +771,116 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
   void dispose() {
     _phoneCtrl.dispose(); _nameCtrl.dispose();
     _vehicleCtrl.dispose(); _purposeCtrl.dispose();
+    _nameFocus.dispose();
+    // The captured page does not outlive the form that used it.
+    DocumentScanService.discardCapture(_scanned?.imagePath);
     super.dispose();
+  }
+
+  /// Ask the gate whether this number has been here before.
+  ///
+  /// Runs as soon as a full ten digits are present. A null answer (offline,
+  /// an error, a resident account) simply leaves the form alone: the lookup
+  /// is a convenience, never a gate on registering someone.
+  Future<void> _maybeLookup(String raw) async {
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+
+    if (digits.length < 10) {
+      if (_lookup != null) {
+        setState(() {
+          _lookup = null;
+          _lookedUpPhone = null;
+        });
+      }
+      return;
+    }
+    if (digits == _lookedUpPhone) return;
+
+    _lookedUpPhone = digits;
+    final found = await ref.read(visitorsProvider.notifier).lookupByPhone(digits);
+    if (!mounted || digits != _lookedUpPhone) return;
+
+    setState(() {
+      _lookup = (found?.found ?? false) ? found : null;
+      _dismissedLookup = false;
+    });
+  }
+
+  /// Reuse what is on file: the name and visitor type carry over, the
+  /// destination does not - who they are visiting is a fact about *this*
+  /// visit, so the guard still chooses it.
+  void _useExisting({required bool forEditing}) {
+    final existing = _lookup?.visitor;
+    if (existing == null) return;
+
+    setState(() {
+      _nameCtrl.text = existing.visitorName;
+      if (_types.any((t) => t['value'] == existing.visitorType)) {
+        _selectedType = existing.visitorType;
+      }
+      _showMore = forEditing;
+      _dismissedLookup = true;
+    });
+    if (forEditing) _nameFocus.requestFocus();
+  }
+
+  /// Let an already-approved visitor straight in, instead of creating a
+  /// second record for the same person.
+  Future<void> _checkInExisting() async {
+    final existing = _lookup?.visitor;
+    if (existing == null) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(visitorsProvider.notifier).checkIn(existing.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('\u2705 ${existing.visitorName} checked in.'),
+        backgroundColor: AppColors.secondary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Open the ID scanner, then fill in what it managed to read.
+  ///
+  /// The review step lives inside [DocumentScanScreen], so anything arriving
+  /// here has already been seen and accepted by the guard. A `null` result
+  /// means they cancelled or chose to type instead - this sheet is the
+  /// manual form, so there is nothing to undo.
+  Future<void> _scanDocument() async {
+    final scanned = await Navigator.of(context).push<ScannedIdentity>(
+      MaterialPageRoute(builder: (_) => const DocumentScanScreen()),
+    );
+    if (!mounted || scanned == null) return;
+
+    setState(() {
+      _scanned = scanned;
+      if ((scanned.name ?? '').isNotEmpty) _nameCtrl.text = scanned.name!;
+      // Open the details section so the filled-in name is visible rather
+      // than hidden behind "More Details".
+      _showMore = true;
+    });
+  }
+
+  void _enterManually() {
+    setState(() => _showMore = true);
+    _nameFocus.requestFocus();
+  }
+
+  void _clearScan() {
+    DocumentScanService.discardCapture(_scanned?.imagePath);
+    setState(() => _scanned = null);
   }
 
   Future<void> _submit() async {
@@ -770,6 +898,10 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
         name: _nameCtrl.text.trim(),
         vehicleNumber: _vehicleCtrl.text.trim(),
         purpose: _purposeCtrl.text.trim(),
+        idProof: _scanned?.documentType.apiValue,
+        // Already redacted for Aadhaar by the scan flow; the API redacts
+        // again on arrival rather than trusting this client.
+        idNumber: _scanned?.documentReference,
       );
       if (mounted) {
         Navigator.pop(context);
@@ -814,6 +946,45 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
             ),
             const SizedBox(height: 20),
 
+            // Scan ID / Document - guard and staff only. It sits at the top
+            // because at a gate the usual move is "take the card, scan it";
+            // typing is the fallback, not the default. A resident inviting
+            // their own guest has no business scanning anyone's ID.
+            if (widget.isStaff) ...[
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton.icon(
+                  onPressed: _isLoading ? null : _scanDocument,
+                  icon: const Icon(Icons.document_scanner_outlined, size: 20, color: Colors.white),
+                  label: const Text('Scan ID / Document',
+                    style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: _isLoading ? null : _enterManually,
+                  icon: const Icon(Icons.keyboard_rounded, size: 18, color: AppColors.primary),
+                  label: const Text('Enter Manually',
+                    style: TextStyle(color: AppColors.primary, fontSize: 14, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.primary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+              ),
+              if (_scanned != null) _scannedIdChip(),
+              const SizedBox(height: 18),
+            ],
+
             // Visitor type chips
             const Text('Visitor Type *', style: AppTextStyles.label),
             const SizedBox(height: 8),
@@ -848,7 +1019,9 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
                 prefixIcon: Icon(Icons.phone_rounded, color: AppColors.textHint),
               ),
               validator: (v) => (v?.isEmpty ?? true) ? 'Mobile number required' : null,
+              onChanged: widget.isStaff ? _maybeLookup : null,
             ),
+            if (widget.isStaff && _lookup != null && !_dismissedLookup) _existingVisitorCard(),
             const SizedBox(height: 12),
 
             // Flat picker (guard only)
@@ -882,7 +1055,8 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
 
             if (_showMore) ...[
               const SizedBox(height: 12),
-              TextFormField(controller: _nameCtrl,
+              TextFormField(controller: _nameCtrl, focusNode: _nameFocus,
+                textCapitalization: TextCapitalization.words,
                 decoration: const InputDecoration(hintText: 'Visitor name', prefixIcon: Icon(Icons.person_outlined, color: AppColors.textHint))),
               const SizedBox(height: 10),
               TextFormField(controller: _vehicleCtrl,
@@ -910,4 +1084,121 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
       ),
     );
   }
+
+  /// "Existing visitor found" - the duplicate the gate would otherwise
+  /// create. Shown the moment a known number is typed, with the three things
+  /// a guard actually wants to do about it.
+  Widget _existingVisitorCard() {
+    final lookup = _lookup!;
+    final existing = lookup.visitor;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.info.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.info.withValues(alpha: 0.35)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.history_rounded, size: 16, color: AppColors.info),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('Existing visitor found',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            ),
+            GestureDetector(
+              onTap: () => setState(() => _dismissedLookup = true),
+              child: const Icon(Icons.close_rounded, size: 16, color: AppColors.textHint),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          if (existing != null)
+            Text(
+              [
+                existing.visitorName,
+                existing.visitorType,
+                if ((existing.flatNumber ?? '').isNotEmpty) 'last visited ${existing.flatNumber}',
+              ].join(' • '),
+              style: AppTextStyles.caption,
+            ),
+          if (lookup.hasPass)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Active pass: ${lookup.passPersonName}'
+                '${(lookup.passCategory ?? '').isNotEmpty ? ' (${lookup.passCategory})' : ''}'
+                '${lookup.passCurrentlyInside ? ' - currently inside' : ''}',
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: AppColors.secondary),
+              ),
+            ),
+          if (existing != null) ...[
+            const SizedBox(height: 10),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              _lookupAction('Use Existing', Icons.person_rounded,
+                  () => _useExisting(forEditing: false)),
+              _lookupAction('Update Details', Icons.edit_rounded,
+                  () => _useExisting(forEditing: true)),
+              if (lookup.canCheckInExisting)
+                _lookupAction('Check In', Icons.login_rounded, _checkInExisting, primary: true),
+            ]),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _lookupAction(String label, IconData icon, VoidCallback onTap, {bool primary = false}) =>
+    GestureDetector(
+      onTap: _isLoading ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: primary ? AppColors.secondary : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: primary ? AppColors.secondary : AppColors.divider),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 14, color: primary ? Colors.white : AppColors.textSecondary),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(
+            fontSize: 12, fontWeight: FontWeight.w600,
+            color: primary ? Colors.white : AppColors.textSecondary)),
+        ]),
+      ),
+    );
+
+  /// What the scan contributed, in one line the guard can check and remove.
+  /// Only the redacted reference is ever shown here - the same string that
+  /// will be stored.
+  Widget _scannedIdChip() => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.secondary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.secondary.withValues(alpha: 0.35)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.badge_outlined, size: 16, color: AppColors.secondary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            [
+              _scanned!.documentType.label,
+              if ((_scanned!.documentReference ?? '').isNotEmpty) _scanned!.documentReference!,
+            ].join(' • '),
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
+          ),
+        ),
+        GestureDetector(
+          onTap: _clearScan,
+          child: const Icon(Icons.close_rounded, size: 16, color: AppColors.textHint),
+        ),
+      ]),
+    ),
+  );
 }

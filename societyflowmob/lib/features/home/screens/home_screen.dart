@@ -4,6 +4,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/status_badge.dart';
+import '../../access_passes/screens/access_passes_screen.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../shell/main_shell.dart';
 import '../../../core/utils/auto_refresh_mixin.dart';
@@ -239,6 +240,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
           color: AppColors.warning,
           onTap: () => mainShellKey.currentState?.openEvents(),
         )),
+      ]),
+      const SizedBox(height: 12),
+      Row(children: [
+        // Gate passes for this household's regular helpers. The server
+        // decides which passes come back, so a resident sees only their
+        // own property's and an admin the whole society's.
+        Expanded(child: _FeatureCard(
+          icon: Icons.badge_rounded,
+          label: 'Access Passes',
+          color: AppColors.primary,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AccessPassesScreen()),
+          ),
+        )),
+        const SizedBox(width: 12),
+        const Expanded(child: SizedBox()),
       ]),
     ]),
   );

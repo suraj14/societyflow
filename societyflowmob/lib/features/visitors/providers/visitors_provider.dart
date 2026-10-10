@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/http_service.dart';
 import '../../../core/config/api_config.dart';
+import '../models/visitor_lookup.dart';
 import '../models/visitor_model.dart';
 
 // ── Dashboard Stats ───────────────────────────────────────────────────────────
@@ -241,6 +242,29 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
     }
   }
 
+  /// Has this number been here before, or does it hold a pass?
+  ///
+  /// Returns null when the question could not be answered - a failed lookup
+  /// must never stop a guard registering someone, so the caller treats null
+  /// as "carry on" rather than as an error.
+  Future<VisitorLookup?> lookupByPhone(String phone) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 10) return null;
+
+    try {
+      final result = await HttpService.instance
+          // POST with a body, not GET: a phone number in a query string lands in
+          // web server and proxy access logs.
+          .post(ApiConfig.visitorsLookup, body: {'phone': digits});
+      final data = result.data?['data'];
+      if (!result.success || data is! Map<String, dynamic>) return null;
+
+      return VisitorLookup.fromJson(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> checkIn(int id) async {
     final result = await HttpService.instance.post('${ApiConfig.visitors}/$id/check-in');
     if (result.success) {
@@ -268,6 +292,8 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
     String? name,
     String? vehicleNumber,
     String? purpose,
+    String? idProof,
+    String? idNumber,
   }) async {
     final body = <String, dynamic>{
       'visitor_phone': phone,
@@ -276,6 +302,10 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
       if (flatId != null)                           'flat_id':        flatId,
       if (vehicleNumber != null && vehicleNumber.isNotEmpty) 'vehicle_number': vehicleNumber,
       if (purpose != null && purpose.isNotEmpty)    'purpose':        purpose,
+      // From a scanned ID. Aadhaar arrives already reduced to its last four
+      // digits, and the API reduces it again rather than trusting us.
+      if (idProof != null && idProof.isNotEmpty)    'visitor_id_proof':  idProof,
+      if (idNumber != null && idNumber.isNotEmpty)  'visitor_id_number': idNumber,
     };
 
     final result = await HttpService.instance.post(ApiConfig.visitors, body: body);

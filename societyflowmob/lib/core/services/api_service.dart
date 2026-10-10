@@ -1,8 +1,10 @@
 import 'dart:developer' as dev;
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kReleaseMode, visibleForTesting;
 import 'package:dio/dio.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config/api_config.dart';
+import '../utils/storage_service.dart';
 import 'server_discovery.dart';
 
 // ── Result model ─────────────────────────────────────────────────────────────
@@ -41,6 +43,21 @@ class ApiService {
 
   ApiService._();
 
+  /// Test seam, same pattern as ServerDiscovery.overrideBaseUrl: swaps in a
+  /// Dio wired to a fake [HttpClientAdapter] so error-mapping (_dioError)
+  /// can be exercised without a real server. Production never calls this.
+  @visibleForTesting
+  static void debugOverrideDio(Dio dio) {
+    instance._dio = dio;
+    instance._currentBaseUrl = dio.options.baseUrl;
+  }
+
+  @visibleForTesting
+  static void debugClearDioOverride() {
+    instance._dio = null;
+    instance._currentBaseUrl = null;
+  }
+
   /// Returns a Dio instance with the correct base URL.
   /// Auto-discovers the server if needed.
   Future<Dio> _getDio() async {
@@ -71,24 +88,24 @@ class ApiService {
         onRequest: (options, handler) async {
           final token = await _getToken();
           if (token != null) options.headers['Authorization'] = 'Bearer $token';
-          dev.log('→ ${options.method} ${options.uri}', name: 'API');
+          dev.log('→ ${options.method} ${options.uri.path}', name: 'API');
           handler.next(options);
         },
         onResponse: (response, handler) {
-          dev.log('← ${response.statusCode} ${response.requestOptions.uri}', name: 'API');
+          dev.log('← ${response.statusCode} ${response.requestOptions.uri.path}', name: 'API');
           handler.next(response);
         },
         onError: (error, handler) async {
-          dev.log('✗ ${error.response?.statusCode} ${error.requestOptions.uri}', name: 'API');
+          dev.log('✗ ${error.response?.statusCode} ${error.requestOptions.uri.path}', name: 'API');
           // 401 on a request that carried a token = session expired/revoked.
           // (Public auth endpoints never attach a token, so they can't trigger this.)
           final hadToken = error.requestOptions.headers['Authorization'] != null;
           if (error.response?.statusCode == 401 && hadToken && !_handlingExpiry) {
             _handlingExpiry = true;
             try {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.remove('auth_token');
-              await prefs.remove('user_data');
+              // Full local sign-out, token included: a 401 on an authenticated
+              // request means the server has already revoked this session.
+              await StorageService.clearAll();
               onSessionExpired?.call();
             } finally {
               _handlingExpiry = false;
@@ -102,10 +119,7 @@ class ApiService {
     return _dio!;
   }
 
-  Future<String?> _getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('auth_token');
-  }
+  Future<String?> _getToken() => StorageService.getToken();
 
   // ── GET ───────────────────────────────────────────────────────────────────
 
@@ -116,6 +130,29 @@ class ApiService {
       return _parse(response);
     } on DioException catch (e) {
       return ApiResult.error(_dioError(e), statusCode: e.response?.statusCode ?? 0);
+    }
+  }
+
+  /// Raw bytes of a protected file (e.g. a society document PDF), fetched
+  /// with the same bearer token as every other call - the file is never
+  /// exposed on a public URL. Null on any failure; [onError] gets the reason.
+  Future<Uint8List?> getBytes(String endpoint, {void Function(String message, int statusCode)? onError}) async {
+    try {
+      final dio = await _getDio();
+      final response = await dio.get<List<int>>(
+        endpoint,
+        options: Options(responseType: ResponseType.bytes, headers: {'Accept': 'application/pdf'}),
+      );
+      final data = response.data;
+      if (data == null || data.isEmpty) {
+        onError?.call('The file is empty.', response.statusCode ?? 0);
+        return null;
+      }
+      return Uint8List.fromList(data);
+    } on DioException catch (e) {
+      final code = e.response?.statusCode ?? 0;
+      onError?.call(code == 404 ? 'This document is no longer available.' : _dioError(e), code);
+      return null;
     }
   }
 
@@ -145,10 +182,14 @@ class ApiService {
 
   // ── Multipart POST ────────────────────────────────────────────────────────
 
+  /// [onSendProgress] reports bytes sent / total while the body uploads, so a
+  /// screen can show a progress bar for a photo. Optional - existing callers
+  /// are unaffected.
   Future<ApiResult> postMultipart(
     String endpoint, {
     required Map<String, String> fields,
     Map<String, String>? filePaths,
+    void Function(int sent, int total)? onSendProgress,
   }) async {
     try {
       final dio = await _getDio();
@@ -158,7 +199,7 @@ class ApiService {
           for (final e in filePaths.entries)
             e.key: await MultipartFile.fromFile(e.value),
       });
-      final response = await dio.post(endpoint, data: formData);
+      final response = await dio.post(endpoint, data: formData, onSendProgress: onSendProgress);
       return _parse(response);
     } on DioException catch (e) {
       return ApiResult.error(_dioError(e), statusCode: e.response?.statusCode ?? 0);
@@ -208,34 +249,120 @@ class ApiService {
 
   // ── Error messages ────────────────────────────────────────────────────────
 
+  /// In debug builds, appends the request that actually failed.
+  ///
+  /// Every transport failure used to surface as "Request timed out. Please
+  /// check your connection", which hid the real cause - a refused
+  /// connection, a 404 from a mismatched endpoint, or a dev server that was
+  /// simply not running. The category and the URL are what a developer
+  /// needs; release builds keep the plain message.
+  String _withDevDetail(String message, DioException e, String category) {
+    if (kReleaseMode) return message;
+    final url = e.requestOptions.uri.toString();
+    return '$message\n\n[dev] $category\n[dev] ${e.requestOptions.method} $url';
+  }
+
   String _dioError(DioException e) {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
+        return _withDevDetail(
+          'Could not connect to the server.',
+          e,
+          'USB debugging connection required for local API. Connect the Android device by USB. '
+              'CONNECTION TIMEOUT - the tunnel did not accept a connection.',
+        );
       case DioExceptionType.sendTimeout:
+        return _withDevDetail('Request timed out while sending.', e, 'SEND TIMEOUT');
       case DioExceptionType.receiveTimeout:
-        return 'Request timed out. Please check your connection.';
+        return _withDevDetail(
+          'The server took too long to respond.',
+          e,
+          'RECEIVE TIMEOUT - connected, but no response in '
+              '${ApiConfig.receiveTimeout.inSeconds}s',
+        );
       case DioExceptionType.connectionError:
         // Invalidate cached URL so next request triggers re-discovery
         _dio = null;
         _currentBaseUrl = null;
         ServerDiscovery.invalidate();
-        return 'Cannot reach server.\n• Make sure Laravel server is running\n• Phone is on same WiFi as PC\n• Run: php artisan serve --host=0.0.0.0 --port=8000';
+        return _withDevDetail(
+          'Cannot reach server.',
+          e,
+          'USB debugging connection required for local API. Connect the Android device by USB. '
+              'CONNECTION REFUSED - nothing is listening on the tunnel. '
+              'Run scripts/run_android_usb.ps1 to start the API and set up adb reverse. '
+              'Underlying: ${e.error}',
+        );
+      case DioExceptionType.badCertificate:
+        return _withDevDetail('Secure connection failed.', e, 'BAD TLS CERTIFICATE');
+      case DioExceptionType.cancel:
+        return _withDevDetail('Request cancelled.', e, 'CANCELLED');
       case DioExceptionType.badResponse:
         final status = e.response?.statusCode;
         final body = e.response?.data;
-        if (status == 401) return 'Session expired. Please login again.';
-        if (status == 403) return 'Access denied.';
-        if (status == 404) return 'Resource not found.';
+        if (status == 401) {
+          // On the login endpoint itself a 401/422 means bad credentials,
+          // not an expired session - don't mislabel it.
+          final isLogin = e.requestOptions.path.contains('/auth/');
+          return _withDevDetail(
+            isLogin ? 'Incorrect email or password.' : 'Session expired. Please login again.',
+            e,
+            'HTTP 401 UNAUTHENTICATED',
+          );
+        }
+        if (status == 403) {
+          return _withDevDetail('Access denied.', e, 'HTTP 403 FORBIDDEN - role/permission check failed');
+        }
+        if (status == 404) {
+          return _withDevDetail(
+            'Resource not found.',
+            e,
+            'HTTP 404 NOT FOUND - the endpoint does not exist on this server. '
+                'Check the path against routes/api.php (prefix /api/v1).',
+          );
+        }
+        if (status == 419) {
+          return _withDevDetail('Session token mismatch.', e, 'HTTP 419 - CSRF/session, the API should be stateless');
+        }
         if (status == 422) {
           final errors = body?['errors'];
-          if (errors != null) return _flattenErrors(errors);
-          return body?['message']?.toString() ?? 'Validation failed.';
+          final msg = errors != null
+              ? _flattenErrors(errors)
+              : (body?['message']?.toString() ?? 'Validation failed.');
+          return _withDevDetail(msg, e, 'HTTP 422 VALIDATION');
         }
-        if (status != null && status >= 500) return 'Server error. Please try again later.';
-        return body?['message']?.toString() ?? 'Request failed (HTTP $status).';
+        if (status == 503) {
+          // 503 is this API's deliberate "I could not complete this, here is
+          // why" status (e.g. send-otp when the SMS provider rejects the
+          // request) - the message is a controlled, written-for-users string,
+          // not leaked exception detail, so it is safe to show as-is. 500/502/504
+          // stay generic below: those bodies can carry raw server error text.
+          final msg = body?['message']?.toString();
+          if (msg != null && msg.isNotEmpty) {
+            return _withDevDetail(msg, e, 'HTTP 503 (${body?['code'] ?? 'service unavailable'})');
+          }
+        }
+        if (status != null && status >= 500) {
+          return _withDevDetail(
+            'Server error. Please try again later.',
+            e,
+            'HTTP $status SERVER ERROR - check storage/logs/laravel.log',
+          );
+        }
+        return _withDevDetail(
+          body?['message']?.toString() ?? 'Request failed (HTTP $status).',
+          e,
+          'HTTP $status',
+        );
       default:
-        if (e.error is SocketException) return 'No internet connection.';
-        return 'Something went wrong. Please try again.';
+        if (e.error is SocketException) {
+          return _withDevDetail(
+            'No internet connection.',
+            e,
+            'SOCKET EXCEPTION - ${e.error}',
+          );
+        }
+        return _withDevDetail('Something went wrong. Please try again.', e, 'UNKNOWN - ${e.error}');
     }
   }
 }

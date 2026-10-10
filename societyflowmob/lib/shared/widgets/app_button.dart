@@ -101,7 +101,16 @@ class AppButton extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: color),
           const SizedBox(width: 8),
-          Text(label, style: TextStyle(fontSize: fontSize ?? 16, fontWeight: FontWeight.w600, color: color)),
+          // Flexible + ellipsis: a long label on a narrow phone with large
+          // system text shrinks to "Request boo..." instead of overflowing.
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: fontSize ?? 16, fontWeight: FontWeight.w600, color: color),
+            ),
+          ),
         ],
       );
     }

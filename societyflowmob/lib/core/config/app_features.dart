@@ -16,7 +16,9 @@ class AppFeatures {
   static const bool enableEvents        = true;
 
   // ── New features (disabled by default — enable when ready) ───────────────
-  static const bool enablePushNotifications = false;
+  // Push notifications removed entirely from SocietyFlow's approved
+  // communication scope (Email/SMS/WhatsApp only) - this flag had zero
+  // readers anywhere in lib/ even before removal.
   static const bool enableQrScanner        = false;
   static const bool enableGatePass         = false;
   static const bool enablePollsAndSurveys  = false;

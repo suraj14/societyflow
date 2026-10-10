@@ -38,6 +38,14 @@ class StatusBadge extends StatelessWidget {
       case 'exited':     return 'Exited';
       case 'success':    return 'Success';
       case 'active':     return 'Active';
+      case 'approved':   return 'Approved';
+      case 'rejected':   return 'Rejected';
+      case 'cancelled':  return 'Cancelled';
+      case 'completed':  return 'Completed';
+      case 'scheduled':  return 'Scheduled';
+      case 'absent':     return 'Absent';
+      case 'replaced':   return 'Replaced';
+      case 'assigned':   return 'Assigned';
       default:           return s.replaceAll('_', ' ').toUpperCase();
     }
   }
@@ -48,14 +56,20 @@ class StatusBadge extends StatelessWidget {
       case 'allowed':
       case 'success':
       case 'active':
-      case 'resolved':   return AppColors.secondary;
+      case 'resolved':
+      case 'approved':
+      case 'completed':  return AppColors.secondary;
       case 'pending':    return AppColors.warning;
       case 'partial':    return AppColors.info;
       case 'overdue':
       case 'denied':
+      case 'rejected':
+      case 'absent':
       case 'closed':     return AppColors.error;
       case 'open':       return AppColors.primary;
-      case 'in_progress':return AppColors.info;
+      case 'in_progress':
+      case 'scheduled':
+      case 'assigned':   return AppColors.info;
       case 'entered':    return AppColors.secondary;
       default:           return AppColors.textHint;
     }

@@ -5,7 +5,11 @@ import '../../../core/utils/auto_refresh_mixin.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../visitors/providers/visitors_provider.dart';
+import '../models/guard_shift_model.dart';
+import '../providers/guard_shift_provider.dart';
+import 'today_shift_card.dart';
 import '../../shell/main_shell.dart';
+import '../../support/screens/emergency_contacts_sheet.dart';
 import 'guard_scan_screen.dart';
 
 class GuardHomeScreen extends ConsumerStatefulWidget {
@@ -18,13 +22,20 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
   @override
   int get refreshIntervalSeconds => 20;
 
+  Future<void> _reload() async {
+    await Future.wait([
+      ref.read(visitorsProvider.notifier).loadAll(),
+      ref.read(guardShiftProvider.notifier).load(),
+    ]);
+  }
+
   @override
-  void onAutoRefresh() => ref.read(visitorsProvider.notifier).loadAll();
+  void onAutoRefresh() => _reload();
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => ref.read(visitorsProvider.notifier).loadAll());
+    Future.microtask(_reload);
     startAutoRefresh();
   }
 
@@ -32,11 +43,12 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
   Widget build(BuildContext context) {
     final user  = ref.watch(currentUserProvider);
     final stats = ref.watch(visitorsProvider).stats;
+    final overview = ref.watch(guardShiftProvider.select((s) => s.overview));
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: RefreshIndicator(
-        onRefresh: () => ref.read(visitorsProvider.notifier).loadAll(),
+        onRefresh: _reload,
         color: AppColors.primary,
         child: CustomScrollView(
           slivers: [
@@ -63,13 +75,16 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
               actions: [
                 IconButton(
                   icon: const Icon(Icons.refresh_rounded, color: AppColors.textHint),
-                  onPressed: () => ref.read(visitorsProvider.notifier).loadAll(),
+                  onPressed: _reload,
                 ),
               ],
             ),
 
             // Welcome strip
-            SliverToBoxAdapter(child: _welcomeStrip(user)),
+            SliverToBoxAdapter(child: _welcomeStrip(user, overview)),
+
+            // Today's shift: gate, shift, timing and status from the roster
+            const SliverToBoxAdapter(child: TodayShiftCard()),
 
             // Stats grid
             SliverToBoxAdapter(child: _statsGrid(stats)),
@@ -91,7 +106,7 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
     );
   }
 
-  Widget _welcomeStrip(user) => Padding(
+  Widget _welcomeStrip(user, GuardShiftOverview? overview) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
     child: GradientCard(
       child: Row(children: [
@@ -102,11 +117,13 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
           const SizedBox(height: 4),
           Text(_greeting(), style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12)),
         ])),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
-          child: const Text('On Duty', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-        ),
+        if (overview != null)
+          Container(
+            key: const Key('duty-badge'),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
+            child: Text(overview.dutyLabel!, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+          ),
       ]),
     ),
   );
@@ -244,22 +261,23 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
       ),
       const SizedBox(height: 10),
       _ModuleRow(
+        icon: Icons.info_outline_rounded,
+        label: 'Society Info',
+        subtitle: 'Society details, committee and gate rules',
+        color: AppColors.info,
+        onTap: () => Navigator.of(context).pushNamed('/society-documents'),
+      ),
+      const SizedBox(height: 10),
+      _ModuleRow(
         icon: Icons.phone_rounded,
         label: 'Emergency Contacts',
         subtitle: 'Quick dial for emergencies',
         color: AppColors.error,
-        onTap: () => _showEmergencyContacts(context),
+        onTap: () => showEmergencyContacts(context),
       ),
     ]),
   );
 
-  void _showEmergencyContacts(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _EmergencySheet(),
-    );
-  }
 
   String _greeting() {
     final h = DateTime.now().hour;
@@ -340,45 +358,6 @@ class _ModuleRow extends StatelessWidget {
         Text(subtitle, style: AppTextStyles.caption),
       ])),
       const Icon(Icons.arrow_forward_ios_rounded, size: 13, color: AppColors.textHint),
-    ]),
-  );
-}
-
-class _EmergencySheet extends StatelessWidget {
-  const _EmergencySheet();
-
-  static const _contacts = [
-    {'label': 'Society Manager',    'phone': '1800-XXX-XXX', 'icon': Icons.manage_accounts_rounded, 'color': 0xFF2196F3},
-    {'label': 'Security Supervisor','phone': '1800-XXX-XXX', 'icon': Icons.security_rounded,          'color': 0xFF4CAF50},
-    {'label': 'Maintenance Team',   'phone': '1800-XXX-XXX', 'icon': Icons.build_rounded,             'color': 0xFFFF9800},
-    {'label': 'Police',             'phone': '100',           'icon': Icons.local_police_rounded,      'color': 0xFF3F51B5},
-    {'label': 'Ambulance',          'phone': '108',           'icon': Icons.emergency_rounded,         'color': 0xFFF44336},
-    {'label': 'Fire Department',    'phone': '101',           'icon': Icons.local_fire_department_rounded, 'color': 0xFFFF5722},
-  ];
-
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-    padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2))),
-      const Text('☎ Emergency Contacts', style: AppTextStyles.h3),
-      const SizedBox(height: 16),
-      ..._contacts.map((c) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: AppCard(
-          padding: const EdgeInsets.all(14),
-          child: Row(children: [
-            Container(width: 40, height: 40, decoration: BoxDecoration(color: Color(c['color'] as int).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)), child: Icon(c['icon'] as IconData, color: Color(c['color'] as int), size: 20)),
-            const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(c['label'] as String, style: AppTextStyles.label),
-              Text(c['phone'] as String, style: AppTextStyles.caption),
-            ])),
-            Icon(Icons.call_rounded, color: Color(c['color'] as int), size: 22),
-          ]),
-        ),
-      )),
     ]),
   );
 }

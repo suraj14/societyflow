@@ -6,6 +6,8 @@ import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/network_image_widget.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/family_members_provider.dart';
+import '../../support/screens/about_screen.dart';
+import '../../support/screens/help_support_screen.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -42,16 +44,20 @@ class ProfileScreen extends ConsumerWidget {
           AppCard(
             padding: const EdgeInsets.all(16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Property Details', style: AppTextStyles.label),
+              Text(user?.hasUnit == true ? 'Property Details' : 'Account Details', style: AppTextStyles.label),
               const SizedBox(height: 12),
               // "Villa" / "Apartment" / "Property" per the society's own
               // configuration, so a villa township never says "Apartment".
-              _InfoRow(
-                icon: Icons.home_rounded,
-                label: user?.society.propertyNoun ?? 'Unit',
-                value: user?.displayUnit ?? 'N/A',
-              ),
-              const Divider(height: 20),
+              // Only for someone who has a unit: a guard used to see
+              // "Villa: <society name>" from displayUnit's fallback.
+              if (user?.hasUnit == true) ...[
+                _InfoRow(
+                  icon: Icons.home_rounded,
+                  label: user!.society.propertyNoun,
+                  value: user.displayUnit,
+                ),
+                const Divider(height: 20),
+              ],
               _InfoRow(icon: Icons.phone_rounded,     label: 'Phone',   value: user?.phone ?? 'N/A'),
               const Divider(height: 20),
               _InfoRow(icon: Icons.apartment_rounded, label: 'Society', value: user?.societyName ?? 'N/A'),
@@ -70,9 +76,14 @@ class ProfileScreen extends ConsumerWidget {
               const Divider(height: 1, indent: 56),
               _MenuItem(icon: Icons.lock_rounded,         label: 'Change Password',   onTap: () => Navigator.pushNamed(context, '/change-password')),
               const Divider(height: 1, indent: 56),
-              _MenuItem(icon: Icons.help_outline_rounded, label: 'Help & Support',    onTap: () {}),
+              // Staff/Accountant have no access to society documents (server returns 403).
+              if (!const {'Staff', 'Accountant'}.contains(user?.role)) ...[
+                _MenuItem(icon: Icons.menu_book_rounded, label: 'Society Info', onTap: () => Navigator.pushNamed(context, '/society-documents')),
+                const Divider(height: 1, indent: 56),
+              ],
+              _MenuItem(icon: Icons.help_outline_rounded, label: 'Help & Support',    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpSupportScreen()))),
               const Divider(height: 1, indent: 56),
-              _MenuItem(icon: Icons.info_outline_rounded, label: 'About SocietyFlow', onTap: () {}),
+              _MenuItem(icon: Icons.info_outline_rounded, label: 'About SocietyFlow', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AboutScreen()))),
             ]),
           ),
           const SizedBox(height: 24),
@@ -138,12 +149,21 @@ class _MenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      onTap: onTap,
-      leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppColors.primary, size: 18)),
-      title: Text(label, style: AppTextStyles.body1.copyWith(fontWeight: FontWeight.w500)),
-      trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textHint, size: 20),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    // AppCard paints an opaque Container decoration. With no Material
+    // between that decoration and this ListTile, the tile's ink splash is
+    // painted behind the card and never becomes visible - which is what
+    // Flutter's "background color or ink splashes may be invisible" warning
+    // reports. A transparent Material gives the ink a surface to paint on
+    // and leaves the card's appearance unchanged.
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        onTap: onTap,
+        leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppColors.primary, size: 18)),
+        title: Text(label, style: AppTextStyles.body1.copyWith(fontWeight: FontWeight.w500)),
+        trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textHint, size: 20),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      ),
     );
   }
 }

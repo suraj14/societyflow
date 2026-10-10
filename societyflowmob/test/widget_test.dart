@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
+import 'package:flutter_secure_storage/test/test_flutter_secure_storage_platform.dart';
 import 'package:societyflow/features/auth/screens/login_screen.dart';
 import 'package:societyflow/core/services/server_discovery.dart';
 import 'package:societyflow/main.dart';
@@ -17,6 +19,10 @@ void main() {
   setUp(() {
     // StorageService reads SharedPreferences during the splash auth check.
     SharedPreferences.setMockInitialValues({});
+
+    // The auth token lives in flutter_secure_storage, which has no platform
+    // channel under `flutter test`; this in-memory fake stands in for it.
+    FlutterSecureStoragePlatform.instance = TestFlutterSecureStoragePlatform({});
 
     // Discovery scans the local subnet over real sockets, which cannot run
     // in a test. Pinning the URL skips the scan without changing any other

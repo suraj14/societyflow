@@ -9,8 +9,12 @@ environment:
   # or `flutter pub get` would fail its own version solving on an older
   # toolchain with a less direct error than these constraints now give up
   # front.
-  sdk: '>=3.4.0 <4.0.0'
-  flutter: '>=3.22.0'
+  # The ML Kit document scanner / text recognition plugins (see below) require
+  # Dart ^3.12.0 and Flutter >=3.44.0, which is a higher floor than
+  # mobile_scanner's. Raised to the real minimum so version solving fails here
+  # with a clear message rather than deep inside pub.
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
 
 dependencies:
   flutter:
@@ -24,6 +28,9 @@ dependencies:
 
   # Local Storage
   shared_preferences: ^2.2.2
+  # The auth/session token only - Android Keystore / iOS Keychain backed,
+  # not a plaintext file in app-private storage (see storage_service.dart).
+  flutter_secure_storage: ^11.2.0
 
   # UI
   shimmer: ^3.0.0            # skeleton_loader.dart
@@ -36,6 +43,29 @@ dependencies:
   # (MLKit on Android / AVFoundation on iOS), no second scanner library.
   mobile_scanner: ^5.2.3
 
+  # ID / document scanning - guard's Create Visitor flow. These are a
+  # DIFFERENT concern from mobile_scanner above: that one reads QR codes off
+  # an access pass, these capture a physical ID card and read its text.
+  #   google_mlkit_document_scanner - Play-services document scanner UI
+  #     (edge detection, crop, retake). ANDROID ONLY - there is no iOS
+  #     implementation, so every call site checks Platform.isAndroid first
+  #     and falls back to manual entry.
+  #   google_mlkit_text_recognition - on-device OCR over the captured page.
+  google_mlkit_document_scanner: ^0.6.1
+  google_mlkit_text_recognition: ^0.17.1
+
+  # Society Rules & Documents reader - renders the PDF in-app with Android's
+  # native PdfRenderer (pinch zoom, page swipe); no WebView, and no download
+  # needed just to read. Bytes come from the authorised /file endpoint.
+  pdfx: ^2.11.0
+
+  # Call / WhatsApp / email buttons (service providers, emergency contacts,
+  # Help & Support) - opens the phone's own dialer or app; nothing is sent
+  # from SocietyFlow itself. Needs the <queries> entries in AndroidManifest.
+  url_launcher: ^6.3.3
+  # About screen: the installed app's real version/build number.
+  package_info_plus: ^10.2.2
+
   # Removed 2026-09-09 after verifying zero references in lib/ and test/:
   #   intl            - no import, and no DateFormat/NumberFormat/Intl usage;
   #                     dates are formatted manually in the models/screens.
@@ -47,6 +77,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  # Direct dep so storage_service_test.dart can install the fake backing
+  # store flutter_secure_storage ships for tests (lib/test/...).
+  flutter_secure_storage_platform_interface: ^2.0.1
+  # Direct dep so contact_launcher_test.dart can install a fake platform and
+  # assert the exact tel:/https://wa.me/mailto: URI that gets launched,
+  # without needing a real dialer/WhatsApp/mail app under `flutter test`.
+  url_launcher_platform_interface: ^2.3.2
 
 flutter:
   uses-material-design: true

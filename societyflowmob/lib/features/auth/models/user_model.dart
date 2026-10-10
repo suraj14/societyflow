@@ -82,6 +82,10 @@ class UserModel {
   /// "Apartment" and a resident is never asked which they have.
   String get propertyLabel => 'My ${society.propertyNoun}';
 
+  /// True only when the user actually has a villa or flat (guards, staff and
+  /// admins do not - displayUnit then falls back to the society name).
+  bool get hasUnit => (villaNumber?.isNotEmpty ?? false) || (flatNumber?.isNotEmpty ?? false);
+
   /// Display unit — shows villa or flat depending on user type
   String get displayUnit {
     if (villaNumber != null && villaNumber!.isNotEmpty) {

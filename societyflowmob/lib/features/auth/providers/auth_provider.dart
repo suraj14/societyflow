@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/http_service.dart';
 import '../../../core/config/api_config.dart';
 import '../../../core/utils/storage_service.dart';
+import '../models/otp_account_choice.dart';
 import '../models/user_model.dart';
 
 class AuthState {
@@ -10,14 +11,30 @@ class AuthState {
   final String? error;
   final String? devOtp;
 
-  const AuthState({this.user, this.isLoading = false, this.error, this.devOtp});
+  /// Set when a verified OTP's number is saved on more than one account:
+  /// nobody is signed in until the user picks one ([AuthNotifier.selectOtpAccount]).
+  final OtpAccountChoice? accountChoice;
 
-  AuthState copyWith({UserModel? user, bool? isLoading, String? error, String? devOtp}) =>
+  const AuthState({this.user, this.isLoading = false, this.error, this.devOtp, this.accountChoice});
+
+  /// [clearDevOtp] drops a dev-server OTP left from an earlier send -
+  /// `devOtp: null` alone cannot, because null means "keep". Same for
+  /// [clearAccountChoice].
+  AuthState copyWith({
+    UserModel? user,
+    bool? isLoading,
+    String? error,
+    String? devOtp,
+    bool clearDevOtp = false,
+    OtpAccountChoice? accountChoice,
+    bool clearAccountChoice = false,
+  }) =>
       AuthState(
-        user:      user      ?? this.user,
-        isLoading: isLoading ?? this.isLoading,
-        error:     error,
-        devOtp:    devOtp    ?? this.devOtp,
+        user:          user      ?? this.user,
+        isLoading:     isLoading ?? this.isLoading,
+        error:         error,
+        devOtp:        clearDevOtp ? null : (devOtp ?? this.devOtp),
+        accountChoice: clearAccountChoice ? null : (accountChoice ?? this.accountChoice),
       );
 }
 
@@ -86,29 +103,65 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> sendOtp({required String phone}) async {
     final result = await HttpService.instance.post(
       ApiConfig.sendOtp,
-      body: {'phone': phone},
+      // This build can show an account chooser, so a number saved on more
+      // than one account still gets a code (see verifyOtp).
+      body: {'phone': phone, 'can_choose_account': true},
     );
     if (result.success) {
+      // Only a development server returns the code; never keep a stale one.
       final devOtp = result.data?['otp']?.toString();
-      if (devOtp != null) state = state.copyWith(devOtp: devOtp);
+      state = devOtp != null ? state.copyWith(devOtp: devOtp) : state.copyWith(clearDevOtp: true);
     } else {
+      state = state.copyWith(clearDevOtp: true);
       throw Exception(result.message.isNotEmpty ? result.message : 'Failed to send OTP');
     }
   }
 
+  /// Signs in, or - when the number is saved on more than one account -
+  /// leaves [AuthState.accountChoice] set and signs nobody in yet.
   Future<void> verifyOtp({required String phone, required String otp}) async {
-    state = state.copyWith(isLoading: true, error: null);
+    state = state.copyWith(isLoading: true, error: null, clearAccountChoice: true);
     final result = await HttpService.instance.post(
       ApiConfig.verifyOtp,
-      body: {'phone': phone, 'otp': otp},
+      body: {'phone': phone, 'otp': otp, 'can_choose_account': true},
     );
     if (result.success && result.data != null) {
+      final choice = OtpAccountChoice.fromVerifyResponse(result.data);
+      if (choice != null) {
+        if (choice.selectionToken.isEmpty || choice.accounts.isEmpty) {
+          state = state.copyWith(isLoading: false);
+          throw Exception('Could not load your accounts. Please request a new OTP.');
+        }
+        state = state.copyWith(isLoading: false, accountChoice: choice);
+        return;
+      }
       await _saveSession(result.data!);
-      state = state.copyWith(devOtp: null);
+      state = state.copyWith(clearDevOtp: true);
     } else {
       state = state.copyWith(isLoading: false, error: result.message);
       throw Exception(result.message.isNotEmpty ? result.message : 'Invalid OTP');
     }
+  }
+
+  /// After [verifyOtp] left an [AuthState.accountChoice]: sign in to [userId].
+  Future<void> selectOtpAccount({required int userId}) async {
+    final choice = state.accountChoice;
+    if (choice == null) {
+      throw Exception('This sign-in has expired. Please request a new OTP.');
+    }
+    final result = await HttpService.instance.post(
+      ApiConfig.selectAccount,
+      body: {'selection_token': choice.selectionToken, 'user_id': userId},
+    );
+    if (result.success && result.data?['token'] != null) {
+      await _saveSession(result.data!);
+      state = state.copyWith(clearDevOtp: true, clearAccountChoice: true);
+      return;
+    }
+    // A request the server answered spends the token (single use), so the
+    // choice is gone. A request that never arrived (no status) can retry.
+    if (result.statusCode != 0) state = state.copyWith(clearAccountChoice: true);
+    throw Exception(result.message.isNotEmpty ? result.message : 'This sign-in has expired. Please request a new OTP.');
   }
 
   // ── Forgot / Reset Password ───────────────────────────────────────────────
@@ -145,7 +198,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
     if (result.success && result.data != null) {
       await _saveSession(result.data!);
-      state = state.copyWith(devOtp: null);
+      state = state.copyWith(clearDevOtp: true);
     } else {
       state = state.copyWith(isLoading: false, error: result.message);
       throw Exception(result.message.isNotEmpty ? result.message : 'Password reset failed');

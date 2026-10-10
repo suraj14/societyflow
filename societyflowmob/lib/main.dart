@@ -12,6 +12,7 @@ import 'features/auth/screens/otp_phone_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/profile/screens/edit_profile_screen.dart';
 import 'features/profile/screens/change_password_screen.dart';
+import 'features/society_documents/screens/society_documents_screen.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -58,6 +59,7 @@ class SocietyFlowApp extends ConsumerWidget {
         '/home':            (_) => MainShell(key: mainShellKey),
         '/edit-profile':    (_) => const EditProfileScreen(),
         '/change-password': (_) => const ChangePasswordScreen(),
+        '/society-documents': (_) => const SocietyDocumentsScreen(),
       },
     );
   }

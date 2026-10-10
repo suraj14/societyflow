@@ -60,13 +60,34 @@ class _GuardScanScreenState extends State<GuardScanScreen> {
   }
 
   void _onDetect(BarcodeCapture capture) {
-    if (_busy) return;
+    if (_busy || _lastOutcome != null) return;
     for (final barcode in capture.barcodes) {
       final value = barcode.rawValue;
       if (value != null && value.isNotEmpty) {
         _submit(value);
         return;
       }
+    }
+  }
+
+  /// Clears the last verdict and re-arms the camera for the next person.
+  ///
+  /// [DetectionSpeed.noDuplicates] stops the same QR from firing twice while
+  /// it sits in front of the lens, which is what keeps one presentation from
+  /// spamming the API. The side effect is that it also suppresses a
+  /// *deliberate* second scan of the same pass - the normal case when a
+  /// staff member is checked out and comes back in on the same shift. The
+  /// controller only forgets a code when it is restarted, so re-arming is a
+  /// stop/start, not just clearing the result.
+  Future<void> _scanNext() async {
+    setState(() => _lastOutcome = null);
+    if (_cameraFailed) return;
+    try {
+      await _controller.stop();
+      await _controller.start();
+    } catch (_) {
+      // A restart failure leaves the manual field as the way through, which
+      // is the same fallback a blocked permission already uses.
     }
   }
 
@@ -132,8 +153,24 @@ class _GuardScanScreenState extends State<GuardScanScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (_lastOutcome != null) _ResultCard(outcome: _lastOutcome!),
-                    if (_lastOutcome != null) const SizedBox(height: 16),
+                    if (_lastOutcome != null) ...[
+                      _ResultCard(outcome: _lastOutcome!),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 48,
+                        child: OutlinedButton.icon(
+                          onPressed: _busy ? null : _scanNext,
+                          icon: const Icon(Icons.qr_code_scanner_rounded),
+                          label: const Text('Ready for next scan'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.primary,
+                            side: const BorderSide(color: AppColors.primary),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     const Text('Or enter the code manually', style: AppTextStyles.label),
                     const SizedBox(height: 8),
                     TextField(

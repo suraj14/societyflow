@@ -11,6 +11,9 @@ class ServicesState {
 
   const ServicesState({this.isLoading = false, this.services = const [], this.providers = const [], this.error});
 
+  /// Providers this society lists for one service.
+  List<ServiceProviderModel> providersFor(int serviceId) => providers.where((p) => p.serviceId == serviceId).toList();
+
   ServicesState copyWith({bool? isLoading, List<ServiceModel>? services, List<ServiceProviderModel>? providers, String? error}) =>
       ServicesState(isLoading: isLoading ?? this.isLoading, services: services ?? this.services, providers: providers ?? this.providers, error: error);
 }
@@ -26,7 +29,8 @@ class ServicesNotifier extends StateNotifier<ServicesState> {
       isLoading: false,
       services: r1.success ? (r1.data!['data'] as List? ?? []).map((s) => ServiceModel.fromJson(s as Map<String, dynamic>)).toList() : [],
       providers: r2.success ? (r2.data!['data'] as List? ?? []).map((p) => ServiceProviderModel.fromJson(p as Map<String, dynamic>)).toList() : [],
-      error: (!r1.success && !r2.success) ? r1.message : null,
+      // The catalogue is what the screen lists; without it there is nothing to show.
+      error: r1.success ? null : (r1.message.isNotEmpty ? r1.message : 'Could not load services'),
     );
   }
 
