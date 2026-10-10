@@ -49,9 +49,6 @@ class SystemSettingsSeeder extends Seeder
         SystemSetting::set('payment', 'stripe_enabled', false, 'boolean');
         SystemSetting::set('payment', 'paypal_enabled', false, 'boolean');
 
-        // Push Notification Settings
-        SystemSetting::set('push', 'push_enabled', false, 'boolean');
-
         // Security Settings
         SystemSetting::set('security', 'enable_2fa', false, 'boolean');
         SystemSetting::set('security', 'login_attempt_limit', 5, 'integer');

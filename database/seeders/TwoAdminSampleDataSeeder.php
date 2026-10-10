@@ -552,12 +552,7 @@ class TwoAdminSampleDataSeeder extends Seeder
             ['key' => 'stripe_publishable_key', 'value' => 'pk_test_urban_heights_123', 'society_id' => $society1->id],
             ['key' => 'stripe_secret_key', 'value' => encrypt('sk_test_urban_secret_123'), 'society_id' => $society1->id],
             ['key' => 'paytm_enabled', 'value' => '1', 'society_id' => $society1->id],
-            
-            // Push Notifications
-            ['key' => 'fcm_server_key', 'value' => encrypt('fcm_urban_heights_key_123'), 'society_id' => $society1->id],
-            ['key' => 'push_notifications_enabled', 'value' => '1', 'society_id' => $society1->id],
-            ['key' => 'notification_sound', 'value' => 'default', 'society_id' => $society1->id],
-            
+
             // Security Settings
             ['key' => 'two_factor_enabled', 'value' => '1', 'society_id' => $society1->id],
             ['key' => 'session_timeout', 'value' => '120', 'society_id' => $society1->id],
@@ -601,12 +596,7 @@ class TwoAdminSampleDataSeeder extends Seeder
             ['key' => 'paypal_client_id', 'value' => 'paypal_sahgun_client_456', 'society_id' => $society2->id],
             ['key' => 'paypal_client_secret', 'value' => encrypt('paypal_sahgun_secret_456'), 'society_id' => $society2->id],
             ['key' => 'phonepe_enabled', 'value' => '1', 'society_id' => $society2->id],
-            
-            // Push Notifications
-            ['key' => 'fcm_server_key', 'value' => encrypt('fcm_sahgun_villa_key_456'), 'society_id' => $society2->id],
-            ['key' => 'push_notifications_enabled', 'value' => '1', 'society_id' => $society2->id],
-            ['key' => 'notification_sound', 'value' => 'chime', 'society_id' => $society2->id],
-            
+
             // Security Settings
             ['key' => 'two_factor_enabled', 'value' => '1', 'society_id' => $society2->id],
             ['key' => 'session_timeout', 'value' => '180', 'society_id' => $society2->id],
