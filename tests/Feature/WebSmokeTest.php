@@ -141,7 +141,6 @@ class WebSmokeTest extends TestCase
             'utility bills'     => ['/utility-bills'],
             'services'          => ['/services'],
             'settings'          => ['/settings'],
-            'push templates'    => ['/admin/push-notifications/templates'],
             'villa areas'       => ['/villa-areas'],
             'villas'            => ['/villas'],
             'reports financial' => ['/reports/financial'],

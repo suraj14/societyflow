@@ -34,6 +34,7 @@ class AuthorizationIsolationTest extends TestCase
         $societyB = $this->makeSociety('Society B');
         $flatA    = $this->makeFlat($societyA, $this->makeBuilding($societyA));
         $userA    = $this->makeResidentUser($societyA, $flatA);
+        $userA->assignRole($this->makeRole('Tenant'));
         $facilityB = $this->makeFacility($societyB, 'B Clubhouse');
 
         Sanctum::actingAs($userA);
@@ -53,7 +54,9 @@ class AuthorizationIsolationTest extends TestCase
         $society  = $this->makeSociety();
         $flat     = $this->makeFlat($society, $this->makeBuilding($society));
         $user1    = $this->makeResidentUser($society, $flat);
+        $user1->assignRole($this->makeRole('Tenant'));
         $user2    = $this->makeResidentUser($society, $flat);
+        $user2->assignRole($this->makeRole('Tenant'));
         $facility = $this->makeFacility($society);
         $date     = now()->addDay()->toDateString();
 
@@ -90,6 +93,7 @@ class AuthorizationIsolationTest extends TestCase
         $society  = $this->makeSociety();
         $flat     = $this->makeFlat($society, $this->makeBuilding($society));
         $user     = $this->makeResidentUser($society, $flat);
+        $user->assignRole($this->makeRole('Tenant'));
         $facility = $this->makeFacility($society);
 
         Sanctum::actingAs($user);
@@ -116,7 +120,9 @@ class AuthorizationIsolationTest extends TestCase
         $society  = $this->makeSociety();
         $flat     = $this->makeFlat($society, $this->makeBuilding($society));
         $owner    = $this->makeResidentUser($society, $flat);
+        $owner->assignRole($this->makeRole('Tenant'));
         $other    = $this->makeResidentUser($society, $flat);
+        $other->assignRole($this->makeRole('Tenant'));
         $facility = $this->makeFacility($society);
 
         Sanctum::actingAs($owner);

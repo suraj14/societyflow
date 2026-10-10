@@ -254,4 +254,61 @@ class QueryPerformanceTest extends TestCase
 
         $this->assertLessThanOrEqual($few + 2, $many, "bill list: {$few} -> {$many} queries");
     }
+
+    /**
+     * The Communication Center page this used to measure was folded into
+     * Settings (2026-10-08). Its replacement, Settings -> WhatsApp, lists
+     * every synced template and every notification type - this pins that
+     * the page's queries do not grow with the number of templates (no
+     * per-template or per-type lookups).
+     */
+    public function test_whatsapp_settings_tab_does_not_scale_queries_with_synced_templates(): void
+    {
+        $society = $this->makeSociety();
+        $admin   = $this->makeUserWithRole($society, 'Admin');
+        $make = function (int $from, int $to) use ($society) {
+            for ($i = $from; $i < $to; $i++) {
+                \App\Models\WhatsAppTemplate::create(['society_id' => $society->id, 'external_id' => "t{$i}", 'name' => "template_{$i}", 'status' => 'APPROVED', 'var_count' => 1, 'body_text' => 'Hi {{1}}']);
+            }
+        };
+
+        $make(0, 3);
+        $this->actingAs($admin)->get('/settings?tab=whatsapp')->assertOk(); // warm caches
+        $few = $this->countQueries(fn () => $this->actingAs($admin)->get('/settings?tab=whatsapp')->assertOk());
+
+        $make(3, 30);
+        $many = $this->countQueries(fn () => $this->actingAs($admin)->get('/settings?tab=whatsapp')->assertOk());
+
+        $this->assertSame($few, $many, "Settings -> WhatsApp: {$few} queries with 3 templates, {$many} with 30");
+    }
+
+    /**
+     * `DashboardController::needsAttention()` (the admin dashboard's
+     * action-first panel) is five `count()` queries, fixed, regardless of
+     * how many visitors/complaints/bills/bookings exist - not something
+     * that could regress into a per-row loop without this catching it.
+     */
+    public function test_admin_dashboard_needs_attention_panel_is_a_fixed_number_of_queries(): void
+    {
+        $society = $this->makeSociety();
+        $admin   = $this->makeUserWithRole($society, 'Admin');
+
+        $few = $this->countQueries(fn () => $this->actingAs($admin)->get(route('dashboard'))->assertOk());
+
+        $building = $this->makeBuilding($society);
+        $flat     = $this->makeFlat($society, $building);
+        $resident = $this->makeResidentUser($society, $flat);
+        for ($i = 0; $i < 8; $i++) {
+            \App\Models\Visitor::create([
+                'society_id' => $society->id, 'flat_id' => $flat->id, 'host_user_id' => $resident->id,
+                'visitor_name' => 'V' . $i, 'visitor_phone' => '91234567' . str_pad((string) $i, 2, '0', STR_PAD_LEFT),
+                'visitor_type' => 'guest', 'expected_entry_time' => now(),
+                'approval_status' => 'pending', 'entry_status' => 'pending',
+            ]);
+        }
+
+        $many = $this->countQueries(fn () => $this->actingAs($admin)->get(route('dashboard'))->assertOk());
+
+        $this->assertLessThanOrEqual($few + 2, $many, "admin dashboard: {$few} -> {$many} queries");
+    }
 }

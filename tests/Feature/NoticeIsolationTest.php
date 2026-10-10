@@ -88,8 +88,10 @@ class NoticeIsolationTest extends TestCase
     {
         [$resident] = $this->seedTwoSocieties($role);
 
+        // A Guard is contained to the gate surface (RestrictGuardAccess), so the
+        // notice pages are refused outright. The no-leak check below still runs.
         $response = $this->actingAs($resident)->get('/notices');
-        $response->assertOk();
+        $response->assertStatus($role === 'Guard' ? 403 : 200);
         $response->assertDontSee('SECRET Notice for B', false);
     }
 
@@ -100,8 +102,10 @@ class NoticeIsolationTest extends TestCase
     {
         [$resident] = $this->seedTwoSocieties($role);
 
+        // A Guard is contained to the gate surface (RestrictGuardAccess), so the
+        // notice pages are refused outright. The no-leak check below still runs.
         $response = $this->actingAs($resident)->get('/notices-history');
-        $response->assertOk();
+        $response->assertStatus($role === 'Guard' ? 403 : 200);
         $response->assertDontSee('SECRET Notice for B', false);
     }
 
@@ -112,8 +116,10 @@ class NoticeIsolationTest extends TestCase
     {
         [$resident] = $this->seedTwoSocieties($role, 'pending');
 
+        // A Guard is contained to the gate surface (RestrictGuardAccess), so the
+        // notice pages are refused outright. The no-leak check below still runs.
         $response = $this->actingAs($resident)->get('/notices-pending');
-        $response->assertOk();
+        $response->assertStatus($role === 'Guard' ? 403 : 200);
         $response->assertDontSee('SECRET Notice for B', false);
     }
 

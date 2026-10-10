@@ -207,7 +207,14 @@ class AccessPassTest extends TestCase
         $flat    = $this->makeFlat($society, $this->makeBuilding($society));
         $guard   = $this->guardIn($society);
 
-        $notToday = collect(range(0, 6))->reject(fn ($d) => $d === now()->dayOfWeek)->values()->all();
+        // AccessPassService::verify() checks the schedule on the society's
+        // own clock (SocietyClock::local(), Asia/Kolkata by default), not
+        // the server's raw now() - this test's own "today" must be computed
+        // the same way, or it silently excludes the wrong day of week
+        // whenever UTC and IST disagree (UTC evening = IST past midnight,
+        // ~5.5h/day). Found failing at exactly such a moment.
+        $todayLocal = now()->timezone($society->clockTimezone())->dayOfWeek;
+        $notToday = collect(range(0, 6))->reject(fn ($d) => $d === $todayLocal)->values()->all();
         $pass = $this->passFor($flat, ['allowed_days' => $notToday]);
 
         $this->actingAs($guard)->postJson('/guard/scan', ['token' => $pass->token])
