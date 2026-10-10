@@ -38,9 +38,17 @@ class EmailLogController extends BaseController
             $query->where('trigger_action', $request->trigger);
         }
 
-        // Search by email
+        // Filter by channel (email/sms/whatsapp/push)
+        if ($request->filled('channel')) {
+            $query->where('channel', $request->channel);
+        }
+
+        // Search by email or phone - whichever this row's channel used.
         if ($request->filled('search')) {
-            $query->where('recipient_email', 'like', '%' . $request->search . '%');
+            $query->where(function ($q) use ($request) {
+                $q->where('recipient_email', 'like', '%' . $request->search . '%')
+                  ->orWhere('recipient_phone', 'like', '%' . $request->search . '%');
+            });
         }
 
         // Date range filter

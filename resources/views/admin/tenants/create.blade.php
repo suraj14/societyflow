@@ -393,6 +393,12 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // The property-type partial calls this by name from an inline onchange and from its own
+    // load-time trigger, both in the GLOBAL scope. Declared only inside this closure it was
+    // "not defined": the villa/apartment fields never appeared in a single-type society.
+    // (Function declarations are hoisted, so this can sit above the declaration below.)
+    window.updatePropertyTypeSelection = updatePropertyTypeSelection;
+
     // Handle profile image file input display
     const profileImageInput = document.getElementById('profile_image_input');
     if (profileImageInput) {

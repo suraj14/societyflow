@@ -74,7 +74,7 @@ class ServiceProviderController extends BaseController
             'notes' => 'nullable|string|max:1000',
         ]);
 
-        $societyId = $this->getSocietyId();
+        $societyId = $this->requireSocietyForWrite();
         
         $data = [
             'society_id' => $societyId,
@@ -116,8 +116,10 @@ class ServiceProviderController extends BaseController
 
     public function edit(ServiceProvider $serviceProvider)
     {
-        // Only admin and super admin can edit service providers
-        $this->authorize('manage_services');
+        // Admin/Super Admin only, and only their own society's provider - the
+        // policy's update() check, which 'manage_services' alone does not
+        // apply because it names no model (see update()/destroy() below).
+        $this->authorize('update', $serviceProvider);
         
         $services = Service::enabled()->ordered()->get();
         return view('service-providers.edit', compact('serviceProvider', 'services'));
@@ -125,8 +127,10 @@ class ServiceProviderController extends BaseController
 
     public function update(Request $request, ServiceProvider $serviceProvider)
     {
-        // Only admin and super admin can update service providers
-        $this->authorize('manage_services');
+        // 'manage_services' is a role permission with no model attached, so it
+        // let an Admin of any society update any society's service provider
+        // by id. The policy's update() adds the missing same-society check.
+        $this->authorize('update', $serviceProvider);
 
         $request->validate([
             'service_id' => 'required|exists:services,id',
@@ -175,8 +179,8 @@ class ServiceProviderController extends BaseController
 
     public function destroy(ServiceProvider $serviceProvider)
     {
-        // Only admin and super admin can delete service providers
-        $this->authorize('manage_services');
+        // See update() above: 'manage_services' alone is not society-scoped.
+        $this->authorize('delete', $serviceProvider);
         
         $serviceProvider->delete();
 
@@ -186,8 +190,8 @@ class ServiceProviderController extends BaseController
 
     public function quickUpdate(Request $request, ServiceProvider $serviceProvider)
     {
-        // Only admin and super admin can update service providers
-        $this->authorize('manage_services');
+        // See update() above: 'manage_services' alone is not society-scoped.
+        $this->authorize('update', $serviceProvider);
 
         $request->validate([
             'availability' => 'required|in:available,not_available',
@@ -209,8 +213,8 @@ class ServiceProviderController extends BaseController
 
     public function toggleAvailability(Request $request, ServiceProvider $serviceProvider)
     {
-        // Only admin and super admin can update service providers
-        $this->authorize('manage_services');
+        // See update() above: 'manage_services' alone is not society-scoped.
+        $this->authorize('update', $serviceProvider);
 
         $request->validate([
             'availability' => 'required|in:available,not_available',

@@ -30,7 +30,7 @@ trait ResolvesPropertyOwner
      *
      * @return Owner|\Illuminate\Http\RedirectResponse
      */
-    protected function resolveOwnerFor(User $user)
+    protected function resolveOwnerFor(User $user, ?int $societyId = null)
     {
         if (!$user->owner_id) {
             return back()->with(
@@ -49,12 +49,57 @@ trait ResolvesPropertyOwner
         }
 
         // A property may only be attributed to an owner of the same society,
-        // whatever society the *user* account claims.
-        if ((int) $owner->society_id !== (int) $this->getSocietyId()) {
+        // whatever society the *user* account claims. $societyId is the
+        // property's own society; omitted, it is the acting user's. (A Super
+        // Admin has no society of their own, so their callers must pass it -
+        // otherwise every assignment was refused.)
+        if ((int) $owner->society_id !== (int) ($societyId ?? $this->getSocietyId())) {
             return back()->with('error', 'Owner must belong to the same society.');
         }
 
         return $owner;
+    }
+
+    /**
+     * Mark each unit with the owner the rest of the app already resolves for it
+     * (relation `declaredOwner`), even when flats.owner_id was never filled in.
+     *
+     * Owner Management and Property & Occupancy decide ownership through
+     * PropertyOccupancy (owner_id first, then the address on the owner record).
+     * The assignment screens only looked at owner_id, so a villa that the owner
+     * record plainly claims was listed as "Available" - and could be handed to
+     * somebody else. Display and enforcement now read the same rule. Nothing is
+     * written: linking owner_id remains an explicit admin action.
+     *
+     * @param  \Illuminate\Support\Collection<int,\App\Models\Flat>  $units
+     */
+    protected function annotateDeclaredOwners($units)
+    {
+        $owners = \App\Support\PropertyOccupancy::ownersFor($units);
+
+        foreach ($units as $unit) {
+            $unit->setRelation('declaredOwner', $owners[$unit->id] ?? null);
+        }
+
+        return $units;
+    }
+
+    /**
+     * Refuse to give a unit to $owner when the canonical rule says it belongs
+     * to a different owner. Returns a redirect to hand back, or null to go on.
+     */
+    protected function refuseIfDeclaredToAnother(\App\Models\Flat $unit, Owner $owner, string $noun): ?\Illuminate\Http\RedirectResponse
+    {
+        $declared = \App\Support\PropertyOccupancy::ownersFor(collect([$unit]))[$unit->id] ?? null;
+
+        if ($declared && (int) $declared->id !== (int) $owner->id) {
+            return back()->with(
+                'error',
+                "This {$noun} is recorded as owned by {$declared->name}. Correct the owner records first; it was not assigned."
+            );
+        }
+
+        return null;
     }
 
     /**

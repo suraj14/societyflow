@@ -35,6 +35,37 @@
         $sfIcon = 'w-11 h-11 rounded-lg flex items-center justify-center shrink-0';
     @endphp
 
+    <!-- Needs Attention — action-first, above the KPI cards below. Pending
+         work the admin has not acted on yet, not a history/totals figure.
+         Each count links straight to the already-filtered list. -->
+    <div class="mb-6" data-panel="needs-attention">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Needs Attention</h2>
+        @if (empty($needsAttention))
+            <div class="bg-white rounded-lg border border-gray-200 p-5 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
+                    <i class="fas fa-check text-green-600"></i>
+                </div>
+                <p class="text-gray-600">Nothing needs your attention right now.</p>
+            </div>
+        @else
+            <div class="grid grid-cols-2 lg:grid-cols-{{ min(count($needsAttention), 5) }} gap-4">
+                @foreach ($needsAttention as $item)
+                    <a href="{{ $item['url'] }}" class="block bg-white rounded-lg border border-amber-200 shadow-sm hover:shadow-md hover:border-amber-300 transition-shadow p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+                                <i class="fas fa-{{ $item['icon'] }} text-amber-600"></i>
+                            </div>
+                            <div class="min-w-0">
+                                <p class="text-2xl font-bold text-gray-900 leading-none">{{ $item['count'] }}</p>
+                                <p class="text-xs text-gray-500 mt-1 truncate">{{ $item['label'] }}</p>
+                            </div>
+                        </div>
+                    </a>
+                @endforeach
+            </div>
+        @endif
+    </div>
+
     <!-- Row 1: Property & People -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <a href="{{ route('admin.property-occupancy.index') }}" class="{{ $sfCard }}" data-kpi="total_properties">

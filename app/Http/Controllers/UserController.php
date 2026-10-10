@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\BaseController;
 use App\Models\User;
 use App\Events\UserCreated;
+use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -13,6 +14,8 @@ use Spatie\Permission\Models\Role;
 
 class UserController extends BaseController
 {
+    use HandlesFormSubmissions;
+
     /**
      * Roles the acting admin is allowed to assign.
      *
@@ -101,7 +104,9 @@ class UserController extends BaseController
             // In addition to existing as a role at all, it must be one this
             // caller is allowed to grant - never trust the dropdown alone.
             'role' => ['required', Rule::in($this->assignableRoles()->pluck('name'))],
-            'avatar' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
+            'avatar' => \App\Support\ProfileImage::rules(),
+            // Shown on Society Info > Committee; empty = not a committee member.
+            'committee_designation' => 'nullable|string|max:100',
         ]);
 
         $currentUser = auth()->user();
@@ -115,46 +120,79 @@ class UserController extends BaseController
             $request->validate(['society_id' => 'required|exists:societies,id']);
             $societyId = (int) $request->society_id;
         }
-        
-        $avatarPath = null;
-        if ($request->hasFile('avatar')) {
-            $file = $request->file('avatar');
-            $uploadPath = public_path('storage/avatars');
-            @mkdir($uploadPath, 0777, true);
-            $filename = time() . '_' . $file->getClientOriginalName();
+
+        // A failed upload (storage full, a genuine filesystem permissions
+        // problem) used to crash the whole request with a raw 500 before
+        // the user row was ever created, and the admin had no idea why.
+        // handleFormSubmission() turns any exception thrown in here -
+        // including from handleFileUpload() - into an ordinary
+        // redirect-back-with-error, same as a ValidationException would.
+        //
+        // The success message and redirect are passed to
+        // handleFormSubmission() itself (the convention every other
+        // controller using this trait follows) rather than built inside
+        // the closure and returned - handleFormSubmission() only ever
+        // uses the closure's return value as JSON `data`, never as the
+        // HTML response; a closure that returned its own redirect() here
+        // would have that response silently discarded in favour of a bare
+        // back() with the generic default message, which is not what was
+        // tested or intended.
+        $successMessage = 'User created successfully! ' . \App\Helpers\TemporaryPassword::noticeFor($request->email);
+
+        return $this->handleFormSubmission(function () use ($request, $societyId) {
+            $avatarPath = $request->hasFile('avatar')
+                ? \App\Support\ProfileImage::store($request->file('avatar'))
+                : null;
+
+            // Random, emailed to the user by the UserCreated listener below.
+            // Never rendered back to the admin who created the account.
+            $temporaryPassword = \App\Helpers\TemporaryPassword::generate();
+
             try {
-                $file->move($uploadPath, $filename);
-            } catch (\Exception $e) {
-                @chmod($uploadPath, 0777);
-                $file->move($uploadPath, $filename);
+                $user = User::create([
+                    'name' => $request->name,
+                    'email' => $request->email,
+                    'phone' => $request->phone,
+                    'password' => Hash::make($temporaryPassword),
+                    'society_id' => $societyId,
+                    'avatar' => $avatarPath,
+                    'committee_designation' => $this->designation($request),
+                    'status' => 'active',
+                ]);
+
+                $user->assignRole($request->role);
+                UserCreated::dispatch($user, $temporaryPassword);
+            } catch (\Throwable $e) {
+                // The transaction rolls the row back; the file is outside it.
+                \App\Support\ProfileImage::delete($avatarPath);
+                throw $e;
             }
-            $avatarPath = 'avatars/' . $filename;
-        }
-        
-        // Random, emailed to the user by the UserCreated listener below.
-        // Never rendered back to the admin who created the account.
-        $temporaryPassword = \App\Helpers\TemporaryPassword::generate();
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'phone' => $request->phone,
-            'password' => Hash::make($temporaryPassword),
-            'society_id' => $societyId,
-            'avatar' => $avatarPath,
-            'status' => 'active',
-        ]);
-        
-        $user->assignRole($request->role);
-        UserCreated::dispatch($user, $temporaryPassword);
-        
-        if ($request->expectsJson()) {
-            return response()->json(['success' => 'User created successfully!', 'user' => $user], 201);
-        }
-        
-        return redirect()->route('users.index')
-            ->with('success', 'User created successfully! ' . \App\Helpers\TemporaryPassword::noticeFor($user->email));
+
+            return $user;
+        }, $successMessage, 'users.index');
     }
-    
+
+    /**
+     * "View" a user. The resource route (GET /users/{user}) has always
+     * existed - Route::resource registers it regardless of whether the
+     * controller implements it - but this method never did, so visiting
+     * the URL directly (no link in the app points here) threw an uncaught
+     * BadMethodCallException and 500'd. There is no dedicated read-only
+     * profile view; the edit form already shows everything about a user,
+     * so this redirects there under the same authorization edit() applies,
+     * rather than duplicating it in a template that doesn't exist.
+     */
+    public function show(User $user)
+    {
+        $this->authorizeRole('Super Admin', 'Admin');
+
+        if (!auth()->user()->hasRole('Super Admin') && $user->society_id !== $this->getSocietyId()) {
+            abort(404, 'User not found.');
+        }
+
+        return redirect()->route('users.edit', $user);
+    }
+
     public function edit(User $user)
     {
         // Only admin and super admin can access this
@@ -181,6 +219,14 @@ class UserController extends BaseController
         return view('users.edit', compact('user', 'roles'));
     }
     
+    /** The submitted committee designation, trimmed; null when blank. */
+    private function designation(Request $request): ?string
+    {
+        $value = trim((string) $request->input('committee_designation'));
+
+        return $value === '' ? null : $value;
+    }
+
     public function update(Request $request, User $user)
     {
         // Only admin and super admin can access this
@@ -214,44 +260,47 @@ class UserController extends BaseController
             // what the edit form's dropdown happened to render.
             'role' => ['required', Rule::in($this->assignableRoles()->pluck('name'))],
             'status' => 'required|in:active,inactive',
-            'avatar' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
+            'avatar' => \App\Support\ProfileImage::rules(),
+            'remove_avatar' => 'nullable|boolean',
+            'committee_designation' => 'nullable|string|max:100',
         ]);
-        
-        $updateData = [
-            'name' => $request->name,
-            'phone' => $request->phone,
-            'status' => $request->status,
-        ];
-        
-        if ($request->hasFile('avatar')) {
-            // Don't try to delete - just skip it to avoid fileinfo error
-            $file = $request->file('avatar');
-            $uploadPath = public_path('storage/avatars');
-            @mkdir($uploadPath, 0777, true);
-            $filename = time() . '_' . $file->getClientOriginalName();
-            try {
-                $file->move($uploadPath, $filename);
-            } catch (\Exception $e) {
-                @chmod($uploadPath, 0777);
-                $file->move($uploadPath, $filename);
+
+        // See store() for why the success redirect is passed to
+        // handleFormSubmission() rather than returned from the closure.
+        return $this->handleFormSubmission(function () use ($request, $user) {
+            $updateData = [
+                'name' => $request->name,
+                'phone' => $request->phone,
+                'status' => $request->status,
+                // Blank clears it: the person leaves the committee list.
+                'committee_designation' => $this->designation($request),
+            ];
+
+            // The row update and the picture change succeed or fail
+            // together. ProfileImage::change() stores the new file first and
+            // only removes the old one after the row is saved (and only if
+            // no other account/owner still points at it), so a failed upload
+            // can never leave this user with neither picture - the
+            // "leaked on disk / unchanged after edit" behaviour this
+            // replaces. No file selected keeps the current picture.
+            \Illuminate\Support\Facades\DB::transaction(function () use ($request, $user, $updateData) {
+                $user->update($updateData);
+
+                \App\Support\ProfileImage::change(
+                    $user,
+                    $request->file('avatar'),
+                    $request->boolean('remove_avatar') && !$request->hasFile('avatar'),
+                );
+            });
+
+            if ($user->id !== auth()->id()) {
+                $user->syncRoles([$request->role]);
             }
-            $updateData['avatar'] = 'avatars/' . $filename;
-        }
-        
-        $user->update($updateData);
-        
-        if ($user->id !== auth()->id()) {
-            $user->syncRoles([$request->role]);
-        }
-        
-        if ($request->expectsJson()) {
-            return response()->json(['success' => 'User updated successfully!', 'user' => $user], 200);
-        }
-        
-        return redirect()->route('users.index')
-            ->with('success', 'User updated successfully!');
+
+            return $user;
+        }, 'User updated successfully!', 'users.index');
     }
-    
+
     /**
      * Admin/Super Admin sets a new password for any normal user's account -
      * Owner, Tenant, Staff, Guard, Accountant, or any other role. The one
@@ -304,12 +353,16 @@ class UserController extends BaseController
             return back()->with('error', 'You cannot delete your own account.');
         }
         
-        // Delete avatar if exists - skip deletion to avoid fileinfo error
-        if ($user->avatar) {
-            // Don't try to delete
-        }
-        
+        // Delete the row first, then the file - if the file delete were
+        // first and the DB delete somehow failed, the user record would be
+        // left pointing at a now-missing avatar.
+        $avatar = $user->avatar;
+
         $user->delete();
+
+        // Not deleteUploadedFile(): an owner's login shares its picture with
+        // the owner record, which must keep showing it.
+        \App\Support\ProfileImage::deleteIfUnreferenced($avatar);
         
         if (request()->expectsJson()) {
             return response()->json(['success' => 'User deleted successfully!'], 200);

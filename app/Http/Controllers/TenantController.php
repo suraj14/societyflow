@@ -133,12 +133,11 @@ class TenantController extends BaseController
      */
     public function edit(Tenant $tenant)
     {
-        $societyId = $this->getSocietyId();
-        
-        // Verify tenant belongs to the same society
-        if ($tenant->society_id !== $societyId) {
+        // Verify tenant belongs to the same society (any, for a Super Admin)
+        if (!$this->societyMatches($tenant->society_id)) {
             return back()->with('error', 'Tenant not found.');
         }
+        $societyId = $tenant->society_id;
         
         $tenant->load(['flat.building', 'flat.villaArea', 'owner', 'society']);
         $owners = Owner::bySociety($societyId)->get();

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AccessPass;
 use App\Models\Flat;
+use App\Services\AccessPassEditService;
 use App\Support\UserFlatResolver;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -37,7 +38,17 @@ class AccessPassController extends BaseController
     public function index()
     {
         $user = auth()->user();
-        $query = AccessPass::bySociety($this->getSocietyId())->with(['flat.building', 'flat.villaArea']);
+
+        $query = AccessPass::with(['flat.building', 'flat.villaArea']);
+
+        // Scope by default, exempt Super Admin explicitly. getSocietyId()
+        // returns null for a Super Admin, and bySociety(null) matches
+        // `society_id IS NULL` - which no pass ever is - so scoping them
+        // the same way as everyone else showed them an empty list rather
+        // than every society's.
+        if (!$user->hasRole('Super Admin')) {
+            $query->bySociety($this->getSocietyId());
+        }
 
         if (!$user->hasAnyRole(['Super Admin', 'Admin'])) {
             $query->whereIn('flat_id', UserFlatResolver::flatIdsFor($user));
@@ -134,6 +145,8 @@ class AccessPassController extends BaseController
             'created_by'    => $user->id,
         ]);
 
+        \App\Events\AccessPassCreated::dispatch($pass);
+
         return redirect()->route('access-passes.show', $pass)
             ->with('success', 'Pass created for ' . $pass->person_name . '.');
     }
@@ -144,6 +157,67 @@ class AccessPassController extends BaseController
         $this->authorizeOwnPass($accessPass);
 
         return view('access-passes.show', ['pass' => $accessPass->load('flat.building', 'flat.villaArea')]);
+    }
+
+    public function edit(AccessPass $accessPass, AccessPassEditService $editor)
+    {
+        $editor->assertMayManage($accessPass, auth()->user());
+        $editor->assertEditable($accessPass);
+
+        return view('access-passes.edit', [
+            'pass'                 => $accessPass->load('flat.building', 'flat.villaArea'),
+            'flats'                => $this->eligibleFlats(),
+            'canCreateSocietyWide' => auth()->user()->hasAnyRole(['Super Admin', 'Admin']),
+        ]);
+    }
+
+    /**
+     * Change a pass in place. The token is deliberately never reissued:
+     * a printed or saved QR keeps working, and the gate re-reads every
+     * field from this row on each scan (see AccessPassService), so an
+     * extended date or a narrowed time window takes effect on the very
+     * next scan with no new QR to distribute.
+     */
+    public function update(Request $request, AccessPass $accessPass, AccessPassEditService $editor)
+    {
+        $validated = $request->validate(AccessPassEditService::updateRules());
+
+        $editor->update($accessPass, $validated, auth()->user());
+
+        return redirect()->route('access-passes.show', $accessPass)
+            ->with('success', $accessPass->person_name . "'s pass has been updated.");
+    }
+
+    /**
+     * The short form of update() for the common case: the pass lapsed and
+     * only its validity needs pushing out. An expired pass is accepted by
+     * design - repairing it is the point - but a revoked one is still
+     * refused, so "extend" can never quietly restore withdrawn access.
+     *
+     * Only the schedule keys the form actually submitted are passed on, so
+     * pushing a date out never silently erases an existing time window.
+     */
+    public function extend(Request $request, AccessPass $accessPass, AccessPassEditService $editor)
+    {
+        $validated = $request->validate(AccessPassEditService::extendRules());
+
+        $pass = $editor->extend(
+            $accessPass,
+            $validated,
+            auth()->user(),
+            array_keys($request->only(['allowed_days', 'start_time', 'end_time']))
+        );
+
+        return redirect()->route('access-passes.show', $accessPass)
+            ->with('success', $pass->person_name . ' is now valid until ' . $pass->valid_until->format('d M Y') . '.');
+    }
+
+    /** Lift a same-day block. Revoked passes are not reachable here. */
+    public function unblockToday(AccessPass $accessPass, AccessPassEditService $editor)
+    {
+        $editor->unblockToday($accessPass, auth()->user());
+
+        return back()->with('success', $accessPass->person_name . ' is no longer blocked for today.');
     }
 
     public function blockToday(AccessPass $accessPass)
@@ -162,6 +236,8 @@ class AccessPassController extends BaseController
         $this->authorizeOwnPass($accessPass);
 
         $accessPass->revoke();
+
+        \App\Events\AccessPassRevoked::dispatch($accessPass);
 
         return redirect()->route('access-passes.index')
             ->with('success', $accessPass->person_name . "'s pass has been revoked.");

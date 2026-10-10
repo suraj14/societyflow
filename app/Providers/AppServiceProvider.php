@@ -35,6 +35,31 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Kill switch for seeding / QA / demo runs against a database that holds
+        // real provider credentials (see config/messaging.php).
+        if (!\App\Support\ExternalMessaging::enabled()) {
+            config(['mail.default' => 'log']);
+        }
+
+        // Defense in depth: whatever sets a mailer later (a society's SMTP
+        // settings, a future code path), a message is cancelled at the last
+        // moment while the switch is off unless the active transport is a
+        // local one. Returning false from MessageSending stops the send.
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Mail\Events\MessageSending::class, function () {
+            if (\App\Support\ExternalMessaging::enabled()) {
+                return null;
+            }
+
+            $transport = config('mail.mailers.' . config('mail.default') . '.transport');
+            if (in_array($transport, ['log', 'array'], true)) {
+                return null;
+            }
+
+            \Illuminate\Support\Facades\Log::warning('Outgoing mail cancelled: external messaging is disabled', ['transport' => $transport]);
+
+            return false;
+        });
+
         // Register theme composer for all views
         View::composer('*', ThemeComposer::class);
         

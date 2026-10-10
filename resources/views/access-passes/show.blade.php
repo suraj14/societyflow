@@ -25,8 +25,18 @@
         </div>
 
         @if($pass->status === 'revoked')
+            {{--
+                Revoking is a withdrawal, not a toggle: a revoked pass is
+                never editable back into service (the server refuses it on
+                every write path), so the only way forward is a new pass
+                with its own token and its own audit trail.
+            --}}
             <div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-4">
-                <i class="fas fa-ban mr-2"></i>This pass has been revoked and can no longer be scanned.
+                <p><i class="fas fa-ban mr-2"></i>This pass has been revoked and can no longer be scanned.</p>
+                <a href="{{ route('access-passes.create') }}"
+                   class="inline-block mt-3 px-4 py-2 bg-white border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-100 print:hidden">
+                    <i class="fas fa-plus mr-1"></i> Create a new pass for {{ $pass->person_name }}
+                </a>
             </div>
         @else
             {{--
@@ -105,13 +115,61 @@
         </div>
 
         @if($pass->status === 'active')
-            <div class="flex gap-3 mt-6 pt-4 border-t print:hidden">
-                <form action="{{ route('access-passes.block-today', $pass) }}" method="POST" class="flex-1">
-                    @csrf
-                    <button type="submit" class="w-full px-4 py-2 bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200">
-                        <i class="fas fa-ban mr-1"></i> Block Today
-                    </button>
-                </form>
+            {{--
+                An expired pass is the common case this screen exists to
+                repair, so it leads with "Extend" and a date already filled
+                in - one field, one tap. The QR is untouched: the gate
+                re-reads this row on every scan, so the same printed code
+                starts working again the moment the date is saved.
+            --}}
+            @if($pass->isExpired())
+                <div class="mt-6 pt-4 border-t print:hidden">
+                    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                        <p class="text-sm text-amber-800 font-semibold mb-3">
+                            <i class="fas fa-clock mr-1"></i>
+                            Expired on {{ $pass->valid_until->format('d M Y') }}
+                        </p>
+                        <form action="{{ route('access-passes.extend', $pass) }}" method="POST" class="flex items-end gap-3">
+                            @csrf
+                            <div class="flex-1">
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Valid Until</label>
+                                <input type="date" name="valid_until" required
+                                       min="{{ now()->toDateString() }}"
+                                       value="{{ now()->addMonth()->toDateString() }}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                            </div>
+                            <button type="submit" class="px-5 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 whitespace-nowrap">
+                                <i class="fas fa-calendar-plus mr-1"></i> Extend Pass
+                            </button>
+                        </form>
+                        <p class="text-xs text-amber-700 mt-2">
+                            The existing QR code keeps working - nothing to reprint.
+                        </p>
+                    </div>
+                </div>
+            @endif
+
+            <div class="flex flex-wrap gap-3 mt-6 pt-4 border-t print:hidden">
+                <a href="{{ route('access-passes.edit', $pass) }}"
+                   class="flex-1 text-center px-4 py-2 bg-purple-100 text-purple-800 rounded-lg font-medium hover:bg-purple-200">
+                    <i class="fas fa-pen mr-1"></i> Edit Pass
+                </a>
+
+                @if($pass->isBlockedToday())
+                    <form action="{{ route('access-passes.unblock-today', $pass) }}" method="POST" class="flex-1">
+                        @csrf
+                        <button type="submit" class="w-full px-4 py-2 bg-green-100 text-green-800 rounded-lg font-medium hover:bg-green-200">
+                            <i class="fas fa-unlock mr-1"></i> Unblock Today
+                        </button>
+                    </form>
+                @else
+                    <form action="{{ route('access-passes.block-today', $pass) }}" method="POST" class="flex-1">
+                        @csrf
+                        <button type="submit" class="w-full px-4 py-2 bg-amber-100 text-amber-800 rounded-lg font-medium hover:bg-amber-200">
+                            <i class="fas fa-ban mr-1"></i> Block Today
+                        </button>
+                    </form>
+                @endif
                 <form action="{{ route('access-passes.revoke', $pass) }}" method="POST" class="flex-1"
                       onsubmit="return confirm('Permanently revoke this pass? This cannot be undone.');">
                     @csrf

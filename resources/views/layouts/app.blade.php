@@ -31,11 +31,12 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     
+    <!-- Alpine.js Collapse Plugin - must load BEFORE Alpine core, or every
+         x-collapse menu logs "can't use [x-collapse]" and loses its animation. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+
     <!-- Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    
-    <!-- Alpine.js Collapse Plugin -->
-    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
     
     <style>
         [x-cloak] { display: none !important; }
@@ -218,8 +219,12 @@
                                      separate assignment screens (brief §15/§16). Each of those
                                      screens stays directly reachable too - see the groups below. -->
                                 <a href="{{ route('admin.property-occupancy.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.property-occupancy.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-people-roof w-5 text-center"></i>
-                                    <span class="ml-3">Property &amp; Occupancy</span>
+                                    {{-- Was fa-people-roof, which does not exist in the Font Awesome
+                                         6.0.0 build this app loads (added in a later FA6 point release) -
+                                         it rendered as nothing, not a broken-icon glyph, so the missing
+                                         icon was easy to miss. fa-building is in FA5/6 from the start. --}}
+                                    <i class="fas fa-building w-5 text-center"></i>
+                                    <span class="ml-3">Property</span>
                                 </a>
                                 @endif
 
@@ -370,6 +375,19 @@
                                     <span class="ml-3">Notices</span>
                                 </a>
 
+                                <!-- Society Info (details, committee, documents): the former Rules & Documents entry -->
+                                @if(auth()->user()?->hasAnyRole(['Super Admin', 'Admin']))
+                                <a href="{{ route('society-rules.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('society-rules.*', 'admin.society-documents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-circle-info w-5 text-center"></i>
+                                    <span class="ml-3">Society Info</span>
+                                </a>
+                                @elseif(auth()->user()?->hasAnyRole(\App\Models\SocietyDocument::RESIDENT_ROLES))
+                                <a href="{{ route('society-rules.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('society-rules.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-circle-info w-5 text-center"></i>
+                                    <span class="ml-3">Society Info</span>
+                                </a>
+                                @endif
+
                                 <!-- Bills - HIDDEN FOR STAFF -->
                                 @if(!$isStaff)
                                 <a href="{{ route('payments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('payments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
@@ -418,7 +436,15 @@
 
                             @if($isAdmin)
                                 <div class="my-4 border-t border-gray-200"></div>
-                                
+
+                                <!-- Guard Shifts (roster) - gates/shifts themselves are managed from
+                                     here too via their own tabs; kept to one sidebar entry rather
+                                     than three, per the "do not fragment the menu" convention. -->
+                                <a href="{{ route('admin.shift-assignments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.shift-assignments.*') || request()->routeIs('admin.gates.*') || request()->routeIs('admin.shifts.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                                    <i class="fas fa-user-shield w-5 text-center"></i>
+                                    <span class="ml-3">Guard Shifts</span>
+                                </a>
+
                                 <!-- Settings -->
                                 <a href="{{ route('settings.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('settings.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
                                     <i class="fas fa-cog w-5 text-center"></i>
@@ -431,7 +457,7 @@
                     <!-- User Profile -->
                     <div class="border-t border-gray-200 p-4">
                         <div class="flex items-center">
-                            <img class="h-10 w-10 rounded-full object-cover" src="https://ui-avatars.com/api/?name={{ urlencode(auth()->user()->name ?? 'User') }}&background=667eea&color=fff" alt="User">
+                            <img class="h-10 w-10 rounded-full object-cover" src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'User') . '&background=667eea&color=fff' }}" alt="User">
                             <div class="ml-3 flex-1 min-w-0">
                                 <p class="text-sm font-medium text-gray-900 truncate">{{ auth()->user()->name ?? 'User' }}</p>
                                 <p class="text-xs text-gray-500 truncate">{{ auth()->user()->roles->first()->name ?? 'User' }}</p>
@@ -513,18 +539,15 @@
                             {{ now()->format('l, d M Y') }}
                         </div>
 
-                        <!-- Notifications -->
-                        <button class="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
-                            <i class="fas fa-bell text-lg"></i>
-                            <span class="absolute top-1 right-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>
-                        </button>
+                        <!-- Notifications (the user's own in-app notifications) -->
+                        @include('partials.notification-bell')
 
                         <!-- User Dropdown -->
                         <div class="relative" x-data="{ open: false }">
                             <button @click="open = !open" 
                                     class="flex items-center space-x-2 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
                                 <img class="h-8 w-8 rounded-full object-cover ring-2 ring-gray-200" 
-                                     src="https://ui-avatars.com/api/?name={{ urlencode(auth()->user()->name ?? 'User') }}&background=667eea&color=fff" 
+                                     src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'User') . '&background=667eea&color=fff' }}"
                                      alt="User">
                                 <span class="hidden sm:block text-sm font-medium text-gray-700">{{ auth()->user()->name ?? 'User' }}</span>
                                 <i class="fas fa-chevron-down text-xs text-gray-400"></i>
@@ -607,9 +630,6 @@
     
     <!-- Compiled App JavaScript (Pure Laravel - No Build System) -->
     <script src="{{ asset('js/app.js') }}"></script>
-    
-    <!-- Push Notifications -->
-    <!-- Push Notifications DISABLED -->
     
     @stack('scripts')
     <script>

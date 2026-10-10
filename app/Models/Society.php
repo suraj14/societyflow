@@ -38,6 +38,8 @@ class Society extends Model
         'website',
         'description',
         'property_type',
+        'registration_number',
+        'registered_on',
         'logo',
         'settings',
         'status',
@@ -46,6 +48,7 @@ class Society extends Model
     ];
 
     protected $casts = [
+        'registered_on' => 'date',
         'property_type' => SocietyPropertyType::class,
         'settings' => 'array',
         'trial_ends_at' => 'datetime',

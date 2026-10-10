@@ -96,8 +96,8 @@
                 <!-- User Profile in Sidebar -->
                 <div class="border-t border-gray-200 p-4">
                     <div class="flex items-center">
-                        <img class="h-10 w-10 rounded-full object-cover" 
-                             src="https://ui-avatars.com/api/?name={{ urlencode(auth()->user()->name ?? 'Super Admin') }}&background=667eea&color=fff" 
+                        <img class="h-10 w-10 rounded-full object-cover"
+                             src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'Super Admin') . '&background=667eea&color=fff' }}"
                              alt="User">
                         <div class="ml-3 flex-1 min-w-0">
                             <p class="text-sm font-medium text-gray-900 truncate">{{ auth()->user()->name ?? 'Super Admin' }}</p>
@@ -190,7 +190,7 @@
                             <button @click="open = !open" 
                                     class="flex items-center space-x-2 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
                                 <img class="h-8 w-8 rounded-full object-cover ring-2 ring-gray-200" 
-                                     src="https://ui-avatars.com/api/?name={{ urlencode(auth()->user()->name ?? 'Super Admin') }}&background=667eea&color=fff" 
+                                     src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'Super Admin') . '&background=667eea&color=fff' }}"
                                      alt="User">
                                 <span class="hidden sm:block text-sm font-medium text-gray-700">{{ auth()->user()->name ?? 'Super Admin' }}</span>
                                 <i class="fas fa-chevron-down text-xs text-gray-400"></i>

@@ -49,8 +49,11 @@ class RestrictStaffAccess
         $restrictedPaths = [
             // Financial & Sensitive Modules
             'payments',
-            'bills', 
-            // 'utility-bills', // Temporarily allow utility-bills for testing
+            'bills',
+            // Was commented out "temporarily for testing" and left that
+            // way: utility bills are a financial module like the two
+            // above, and Staff have no business in them.
+            'utility-bills',
             'reports',
             'maintenance',
             'expenses',

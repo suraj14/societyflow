@@ -17,14 +17,14 @@ class PreventBackHistory
         $response = $next($request);
 
         // Prevent all caching
-        $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private');
-        $response->header('Pragma', 'no-cache');
-        $response->header('Expires', '0');
-        $response->header('Vary', 'Accept-Encoding, Accept, Authorization');
+        $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', '0');
+        $response->headers->set('Vary', 'Accept-Encoding, Accept, Authorization');
         
         // Prevent back button caching
-        $response->header('Last-Modified', gmdate('D, d M Y H:i:s') . ' GMT');
-        $response->header('ETag', '"' . md5(microtime()) . '"');
+        $response->headers->set('Last-Modified', gmdate('D, d M Y H:i:s') . ' GMT');
+        $response->headers->set('ETag', '"' . md5(microtime()) . '"');
 
         return $response;
     }

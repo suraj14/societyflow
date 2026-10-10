@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\UserCreated;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use Illuminate\Support\Facades\Log;
 
 class SendUserWelcomeEmail
@@ -42,13 +43,15 @@ class SendUserWelcomeEmail
                 'login_url' => route('login'),
             ];
 
-            // Send email using DynamicEmailService with configured template
-            DynamicEmailService::sendByEvent(
+            // Queued, retried and deduped - see DispatchEventNotification.
+            $recipient = $recipients[0];
+            DispatchEventNotification::dispatch(
                 'user_registered',
-                $recipients,
+                $recipient,
                 $variables,
-                $societyId
-            );
+                $societyId,
+                "user_registered:{$user->id}:{$recipient['email']}",
+            )->afterCommit();
 
             Log::info('Welcome email sent', [
                 'user_id' => $user->id,

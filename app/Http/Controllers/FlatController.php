@@ -179,16 +179,28 @@ class FlatController extends BaseController
                 $validated['society_id'] = $user->society_id;
             }
 
-            // Check for duplicate flat number in the same building
+            // Check for duplicate flat number in the same building.
+            //
+            // handleFormSubmission() only inspects whether the closure
+            // throws - a `return back()->withErrors(...)` here completes
+            // normally from its point of view, so the whole request was
+            // treated as a SUCCESS: the transaction committed (nothing to
+            // commit, since create() below was correctly skipped by the
+            // early return, but the user still landed on flats.index with
+            // "Flat created successfully!" and never saw why nothing was
+            // actually created). A thrown ValidationException is what
+            // handleFormSubmission() already has a real catch block for.
             $exists = Flat::where('building_id', $validated['building_id'])
                          ->where('flat_number', $validated['flat_number'])
                          ->exists();
 
             if ($exists) {
-                return back()->withErrors(['flat_number' => 'Flat number already exists in this building.']);
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'flat_number' => 'Flat number already exists in this building.',
+                ]);
             }
 
-            Flat::create($validated);
+            return Flat::create($validated);
         }, 'Flat created successfully!', 'flats.index');
     }
 

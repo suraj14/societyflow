@@ -43,7 +43,7 @@ class LandingSiteController extends Controller
             'hero_subtitle' => 'nullable|string|max:500',
             'hero_button_text' => 'nullable|string|max:100',
             'hero_button_url' => 'nullable|string|max:255',
-            'hero_image' => 'nullable|file|max:2048',
+            'hero_image' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:2048',
         ]);
 
         foreach (['site_title', 'site_tagline', 'hero_title', 'hero_subtitle', 'hero_button_text', 'hero_button_url'] as $key) {
@@ -67,7 +67,7 @@ class LandingSiteController extends Controller
         $request->validate([
             'type' => 'required|in:icon,image',
             'icon' => 'required_if:type,icon|nullable|string|max:100',
-            'image' => 'required_if:type,image|nullable|file|max:2048',
+            'image' => 'required_if:type,image|nullable|file|mimes:jpg,jpeg,png,gif,webp|max:2048',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
         ]);
@@ -88,7 +88,7 @@ class LandingSiteController extends Controller
         $request->validate([
             'type' => 'required|in:icon,image',
             'icon' => 'required_if:type,icon|nullable|string|max:100',
-            'image' => 'nullable|file|max:2048',
+            'image' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:2048',
             'title' => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
         ]);
@@ -128,7 +128,7 @@ class LandingSiteController extends Controller
             'name' => 'required|string|max:255',
             'designation' => 'nullable|string|max:255',
             'company' => 'nullable|string|max:255',
-            'avatar' => 'nullable|file|max:1024',
+            'avatar' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:1024',
             'review' => 'required|string|max:1000',
             'rating' => 'required|integer|min:1|max:5',
         ]);
@@ -150,7 +150,7 @@ class LandingSiteController extends Controller
             'name' => 'required|string|max:255',
             'designation' => 'nullable|string|max:255',
             'company' => 'nullable|string|max:255',
-            'avatar' => 'nullable|file|max:1024',
+            'avatar' => 'nullable|file|mimes:jpg,jpeg,png,gif,webp|max:1024',
             'review' => 'required|string|max:1000',
             'rating' => 'required|integer|min:1|max:5',
         ]);
@@ -311,7 +311,7 @@ class LandingSiteController extends Controller
     // Reorder items
     public function reorder(Request $request, string $type)
     {
-        $request->validate(['items' => 'required|array']);
+        $request->validate(['items' => 'required|array', 'items.*' => 'integer']);
 
         $model = match($type) {
             'features' => LandingFeature::class,

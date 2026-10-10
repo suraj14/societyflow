@@ -186,17 +186,7 @@ class VisitorController extends BaseController
             // Handle photo upload
             $photoPath = null;
             if ($request->hasFile('photo')) {
-                $file = $request->file('photo');
-                $uploadPath = public_path('storage/visitor-photos');
-                @mkdir($uploadPath, 0777, true);
-                $filename = time() . '_' . $file->getClientOriginalName();
-                try {
-                    $file->move($uploadPath, $filename);
-                } catch (\Exception $e) {
-                    @chmod($uploadPath, 0777);
-                    $file->move($uploadPath, $filename);
-                }
-                $photoPath = 'visitor-photos/' . $filename;
+                $photoPath = $this->handleFileUpload($request, 'photo', 'visitor-photos', ['jpeg', 'png', 'jpg', 'gif']);
             }
 
             $visitor = Visitor::create([
@@ -342,18 +332,11 @@ class VisitorController extends BaseController
 
             // Handle photo upload
             if ($request->hasFile('photo')) {
-                // Delete old photo if exists - skip deletion to avoid fileinfo error
-                $file = $request->file('photo');
-                $uploadPath = public_path('storage/visitor-photos');
-                @mkdir($uploadPath, 0777, true);
-                $filename = time() . '_' . $file->getClientOriginalName();
-                try {
-                    $file->move($uploadPath, $filename);
-                } catch (\Exception $e) {
-                    @chmod($uploadPath, 0777);
-                    $file->move($uploadPath, $filename);
+                $oldPhoto = $visitor->photo;
+                $validated['photo'] = $this->handleFileUpload($request, 'photo', 'visitor-photos', ['jpeg', 'png', 'jpg', 'gif']);
+                if ($oldPhoto) {
+                    $this->deleteUploadedFile($oldPhoto);
                 }
-                $validated['photo'] = 'visitor-photos/' . $filename;
             }
 
             // Remove the separate time fields from validated data

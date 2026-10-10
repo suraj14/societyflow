@@ -109,6 +109,29 @@
                     </div>
                 </div>
 
+                <!-- Registration (shown on Society Info; both optional) -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="registration_number" class="block text-sm font-medium text-gray-700 mb-1.5">Registration Number</label>
+                        <input type="text" name="registration_number" id="registration_number" maxlength="100"
+                               value="{{ old('registration_number', $society->registration_number) }}"
+                               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors @error('registration_number') border-red-500 @enderror"
+                               placeholder="e.g. MH/MUM/HSG/1234/2015">
+                        @error('registration_number')
+                            <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    <div>
+                        <label for="registered_on" class="block text-sm font-medium text-gray-700 mb-1.5">Registered / Established On</label>
+                        <input type="date" name="registered_on" id="registered_on" max="{{ now()->toDateString() }}"
+                               value="{{ old('registered_on', optional($society->registered_on)->toDateString()) }}"
+                               class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors @error('registered_on') border-red-500 @enderror">
+                        @error('registered_on')
+                            <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p>
+                        @enderror
+                    </div>
+                </div>
+
                 <!-- Country -->
                 <div>
                     <label for="country" class="block text-sm font-medium text-gray-700 mb-1.5">

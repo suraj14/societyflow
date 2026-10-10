@@ -29,13 +29,19 @@
 
     <!-- Edit Form -->
     <div class="bg-white rounded-lg shadow-md overflow-hidden">
-        <form action="{{ route('profile.update') }}" method="POST" class="p-6">
+        <form action="{{ route('profile.update') }}" method="POST" class="p-6" enctype="multipart/form-data">
             @csrf
             @method('PUT')
 
             <!-- Basic Information Section -->
             <div class="mb-8">
                 <h2 class="text-xl font-semibold text-gray-900 mb-6 pb-4 border-b border-gray-200">Basic Information</h2>
+
+                @include('partials.image-upload-field', [
+                    'field' => 'avatar',
+                    'currentUrl' => auth()->user()->avatar_web_url,
+                    'personName' => auth()->user()->name,
+                ])
 
                 <!-- Full Name -->
                 <div class="mb-6">

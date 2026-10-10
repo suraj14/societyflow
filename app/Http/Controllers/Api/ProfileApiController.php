@@ -2,9 +2,13 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\ProfileImageException;
 use App\Http\Controllers\Controller;
+use App\Support\MobileUserPayload;
+use App\Support\ProfileImage;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Password;
 
@@ -12,52 +16,7 @@ class ProfileApiController extends Controller
 {
     public function show(Request $request): JsonResponse
     {
-        $user     = $request->user();
-        $resident = $user->resident()->with('flat.building')->first();
-        $flat     = $resident?->flat;
-        $building = $flat?->building;
-        $society  = $user->society;
-
-        // Villa owner details — use Owner's own villa_no + villa_area_id (same as web)
-        $villaNumber = null;
-        $villaArea   = null;
-        if ($user->owner_id) {
-            $owner = \App\Models\Owner::with('villaArea')->find($user->owner_id);
-            if ($owner && $owner->property_type === 'villa' && $owner->villa_no) {
-                $villaNumber = $owner->villa_no;
-                $villaArea   = $owner->villaArea?->name;
-                // Also get the Flat record for additional details
-                if (!$flat && $owner->villa_area_id) {
-                    $flat = \App\Models\Flat::where('villa_area_id', $owner->villa_area_id)
-                        ->where('flat_number', $owner->villa_no)
-                        ->first();
-                }
-            } elseif ($owner && $owner->property_type === 'apartment' && $owner->flat_no) {
-                // Apartment owner — use owner's flat_no + building_id
-                if (!$flat && $owner->building_id) {
-                    $flat = \App\Models\Flat::where('building_id', $owner->building_id)
-                        ->where('flat_number', $owner->flat_no)
-                        ->first();
-                    $building = $flat?->building ?? $building;
-                }
-            }
-        }
-
-        // Tenant created from Admin -> Tenants: tenants row only (see
-        // AuthApiController::formatUser for the same fallback).
-        if (!$flat) {
-            $tenantFlatId = \App\Support\UserFlatResolver::tenantFlatIds($user)[0] ?? null;
-            if ($tenantFlatId) {
-                $flat = \App\Models\Flat::with(['building', 'villaArea'])->find($tenantFlatId);
-                if ($flat?->property_type === 'villa') {
-                    $villaNumber = $flat->flat_number;
-                    $villaArea   = $flat->villaArea?->name;
-                    $building    = null;
-                } else {
-                    $building = $flat?->building;
-                }
-            }
-        }
+        $user = $request->user();
 
         // Get family members from Owner record
         $familyMembers = [];
@@ -76,38 +35,14 @@ class ProfileApiController extends Controller
             }
         }
 
+        // Same user object login / OTP login / me return (one builder, so a
+        // session restored from /profile branches identically), plus the
+        // owner's family members.
         return response()->json([
             'success' => true,
-            'data'    => [
-                'id'             => $user->id,
-                'name'           => $user->name,
-                'email'          => $user->email,
-                'phone'          => $user->phone,
-                'avatar'         => $user->avatar_url,
-                'role'           => $user->getRoleNames()->first() ?? 'Resident',
-                'status'         => $user->status,
-                'flat_number'    => $flat?->flat_number ?? $villaNumber,
-                'building_name'  => $building?->name,
-                'villa_number'   => $villaNumber,
-                'villa_area'     => $villaArea,
-                'society_name'   => $society?->name,
-                'society_id'     => $user->society_id,
-                'is_owner'       => $user->isOwner() || $user->isVillaOwner(),
-                'is_tenant'      => $user->isTenant(),
+            'data'    => array_merge(MobileUserPayload::make($user), [
                 'family_members' => $familyMembers,
-
-                // Same society capability object the login response carries,
-                // so a session restored from /profile branches identically.
-                'society'        => $society ? array_merge(
-                    [
-                        'id'        => $society->id,
-                        'public_id' => $society->public_id,
-                        'name'      => $society->name,
-                    ],
-                    $society->propertyConfig()
-                ) : null,
-                'property_type'  => $society?->propertyType()->value,
-            ],
+            ]),
         ]);
     }
 
@@ -134,20 +69,51 @@ class ProfileApiController extends Controller
         return response()->json(['success' => true, 'data' => $members]);
     }
 
+    /**
+     * Update the signed-in user's own profile. Reached as PUT (JSON body,
+     * unchanged) and as POST (needed for multipart - PHP only parses a
+     * multipart body on POST, so a picture cannot arrive on PUT).
+     *
+     * `avatar` (file) replaces the picture, `remove_avatar` clears it, and
+     * sending neither keeps the current one - so the existing name/phone-only
+     * callers behave exactly as before. The account changed is always the
+     * token's own user; no user id is accepted from the client.
+     */
     public function update(Request $request): JsonResponse
     {
         $request->validate([
             'name'  => 'required|string|max:255',
             'phone' => 'nullable|string|max:20',
+            'avatar' => ProfileImage::rules(),
+            'remove_avatar' => 'nullable|boolean',
         ]);
 
         $user = $request->user();
-        $user->update([
-            'name'  => $request->name,
-            'phone' => $request->phone ?? $user->phone,
-        ]);
 
-        return response()->json(['success' => true, 'message' => 'Profile updated successfully']);
+        try {
+            DB::transaction(function () use ($request, $user) {
+                $user->update([
+                    'name'  => $request->name,
+                    'phone' => $request->phone ?? $user->phone,
+                ]);
+
+                ProfileImage::change(
+                    $user,
+                    $request->file('avatar'),
+                    $request->boolean('remove_avatar') && !$request->hasFile('avatar'),
+                );
+            });
+        } catch (ProfileImageException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        // `data` is additive: the same user object /auth/me returns, so the
+        // app can show the new picture without a second round trip.
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile updated successfully',
+            'data'    => MobileUserPayload::make($user->fresh()),
+        ]);
     }
 
     public function changePassword(Request $request): JsonResponse

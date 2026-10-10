@@ -40,7 +40,7 @@
                             </td>
                             <td class="px-6 py-4">
                                 <p class="text-sm text-gray-800">{{ \Carbon\Carbon::parse($booking->booking_date)->format('d M Y') }}</p>
-                                <p class="text-xs text-gray-500">{{ $booking->start_time }} - {{ $booking->end_time }}</p>
+                                <p class="text-xs text-gray-500">{{ \Carbon\Carbon::parse($booking->start_time)->format('h:i A') }} - {{ \Carbon\Carbon::parse($booking->end_time)->format('h:i A') }}</p>
                             </td>
                             <td class="px-6 py-4 text-sm text-gray-600">{{ $booking->purpose ?? '-' }}</td>
                             <td class="px-6 py-4">

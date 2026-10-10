@@ -30,7 +30,7 @@ class RefreshCsrfToken
         $response = $next($request);
 
         // Add CSRF token to response headers for JavaScript access
-        $response->header('X-CSRF-TOKEN', $request->session()->token());
+        $response->headers->set('X-CSRF-TOKEN', $request->session()->token());
 
         return $response;
     }

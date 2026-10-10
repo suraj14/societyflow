@@ -102,18 +102,28 @@
                     </div>
 
                     <div class="md:col-span-2">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Profile Image</label>
-                        @if($user->avatar)
-                            <div class="flex items-center space-x-3 mb-2">
-                                <img src="{{ asset('storage/' . $user->avatar) }}" alt="" class="w-12 h-12 rounded-full object-cover border">
-                                <span class="text-xs text-gray-500">Current image — upload a new one to replace it.</span>
-                            </div>
-                        @endif
-                        <input type="file" name="avatar" accept="image/*"
+                        <label for="committee_designation" class="block text-sm font-medium text-gray-700 mb-1">Committee Designation <span class="text-gray-400 font-normal">(optional)</span></label>
+                        <input type="text" id="committee_designation" name="committee_designation" list="committee-designations" maxlength="100"
+                               value="{{ old('committee_designation', $user->committee_designation) }}" placeholder="e.g. President, Secretary, Treasurer"
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        @error('avatar')
+                        <datalist id="committee-designations">
+                            @foreach(\App\Support\SocietyInfo::SUGGESTED_DESIGNATIONS as $designation)
+                                <option value="{{ $designation }}">
+                            @endforeach
+                        </datalist>
+                        <p class="text-xs text-gray-500 mt-1">Shown on Society Info &rarr; Committee with this person's photo and phone number. Leave empty if they are not on the committee.</p>
+                        @error('committee_designation')
                             <p class="text-red-500 text-sm mt-1">{{ $message }}</p>
                         @enderror
+                    </div>
+
+                    <div class="md:col-span-2">
+                        @include('partials.image-upload-field', [
+                            'field' => 'avatar',
+                            'currentUrl' => $user->avatar_web_url,
+                            'personName' => $user->name,
+                            'label' => 'Profile Image',
+                        ])
                     </div>
                 </div>
 

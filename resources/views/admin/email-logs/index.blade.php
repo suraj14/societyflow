@@ -41,6 +41,16 @@
                 </select>
             </div>
             <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Channel</label>
+                <select name="channel" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">All Channels</option>
+                    <option value="email" {{ request('channel') === 'email' ? 'selected' : '' }}>Email</option>
+                    <option value="sms" {{ request('channel') === 'sms' ? 'selected' : '' }}>SMS</option>
+                    <option value="whatsapp" {{ request('channel') === 'whatsapp' ? 'selected' : '' }}>WhatsApp</option>
+                    <option value="push" {{ request('channel') === 'push' ? 'selected' : '' }}>Push</option>
+                </select>
+            </div>
+            <div>
                 <label class="block text-sm font-medium text-gray-700 mb-2">Trigger Action</label>
                 <input type="text" name="trigger" placeholder="e.g., user_created" value="{{ request('trigger') }}" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
@@ -79,11 +89,14 @@
                 @forelse($logs as $log)
                     <tr class="hover:bg-gray-50">
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm font-medium text-gray-900">{{ $log->recipient_email }}</div>
+                            {{-- Now a multi-channel log: an SMS/WhatsApp row has no
+                                 recipient_email, so recipient_phone is shown instead. --}}
+                            <div class="text-sm font-medium text-gray-900">{{ $log->recipient_email ?? $log->recipient_phone }}</div>
                             <div class="text-xs text-gray-500">{{ $log->recipient_name }}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             <span class="text-sm text-gray-700">{{ str_replace('_', ' ', ucfirst($log->trigger_action)) }}</span>
+                            <span class="block text-xs text-gray-400 uppercase">{{ $log->channel ?? 'email' }}</span>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             @if($log->status === 'sent')

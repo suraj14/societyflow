@@ -86,18 +86,7 @@ class FacilityController extends BaseController
         $validated['society_id'] = auth()->user()->society_id;
 
         if ($request->hasFile('image')) {
-            // Store image filename only, don't use Storage::disk
-            $file = $request->file('image');
-            $uploadPath = public_path('storage/facilities');
-            @mkdir($uploadPath, 0777, true);
-            $filename = time() . '_' . $file->getClientOriginalName();
-            try {
-                $file->move($uploadPath, $filename);
-            } catch (\Exception $e) {
-                @chmod($uploadPath, 0777);
-                $file->move($uploadPath, $filename);
-            }
-            $validated['image'] = 'facilities/' . $filename;
+            $validated['image'] = $this->handleFileUpload($request, 'image', 'facilities', ['jpeg', 'png', 'jpg', 'gif']);
         }
 
         $validated['requires_approval'] = $request->has('requires_approval');
@@ -155,21 +144,11 @@ class FacilityController extends BaseController
         ]);
 
         if ($request->hasFile('image')) {
-            if ($facility->image) {
-                // Don't try to delete - just skip it
+            $oldImage = $facility->image;
+            $validated['image'] = $this->handleFileUpload($request, 'image', 'facilities', ['jpeg', 'png', 'jpg', 'gif']);
+            if ($oldImage) {
+                $this->deleteUploadedFile($oldImage);
             }
-            // Store image filename only, don't use Storage::disk
-            $file = $request->file('image');
-            $uploadPath = public_path('storage/facilities');
-            @mkdir($uploadPath, 0777, true);
-            $filename = time() . '_' . $file->getClientOriginalName();
-            try {
-                $file->move($uploadPath, $filename);
-            } catch (\Exception $e) {
-                @chmod($uploadPath, 0777);
-                $file->move($uploadPath, $filename);
-            }
-            $validated['image'] = 'facilities/' . $filename;
         }
 
         $validated['requires_approval'] = $request->has('requires_approval');

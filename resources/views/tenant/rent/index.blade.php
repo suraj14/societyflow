@@ -17,7 +17,7 @@
     <!-- Property Info -->
     <div class="bg-white rounded-lg shadow-md p-6 mb-6">
         <h2 class="text-lg font-semibold text-gray-800 mb-4">
-            @if($resident->flat->property_type === 'villa')
+            @if($flat->property_type === 'villa')
                 Villa Information
             @else
                 Apartment Information
@@ -26,37 +26,37 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
                 <p class="text-sm text-gray-500">
-                    @if($resident->flat->property_type === 'villa')
+                    @if($flat->property_type === 'villa')
                         Villa No.
                     @else
                         Apartment Number
                     @endif
                 </p>
                 <p class="font-medium text-gray-900">
-                    @if($resident->flat->property_type === 'villa')
-                        @if($resident->flat->villa_name && $resident->flat->flat_number)
-                            {{ $resident->flat->villa_name }} ({{ $resident->flat->flat_number }})
+                    @if($flat->property_type === 'villa')
+                        @if($flat->villa_name && $flat->flat_number)
+                            {{ $flat->villa_name }} ({{ $flat->flat_number }})
                         @else
-                            {{ $resident->flat->villa_name ?: $resident->flat->flat_number ?: 'N/A' }}
+                            {{ $flat->villa_name ?: $flat->flat_number ?: 'N/A' }}
                         @endif
                     @else
-                        {{ $resident->flat->flat_number ?? 'N/A' }}
+                        {{ $flat->flat_number ?? 'N/A' }}
                     @endif
                 </p>
             </div>
             <div>
                 <p class="text-sm text-gray-500">
-                    @if($resident->flat->property_type === 'villa')
+                    @if($flat->property_type === 'villa')
                         Villa Area
                     @else
                         Building
                     @endif
                 </p>
                 <p class="font-medium text-gray-900">
-                    @if($resident->flat->property_type === 'villa')
-                        {{ $resident->flat->villaArea->name ?? 'N/A' }}
+                    @if($flat->property_type === 'villa')
+                        {{ $flat->villaArea->name ?? 'N/A' }}
                     @else
-                        {{ $resident->flat->building->name ?? 'N/A' }}
+                        {{ $flat->building->name ?? 'N/A' }}
                     @endif
                 </p>
             </div>
@@ -155,7 +155,7 @@
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rent Period</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                @if($resident->flat->property_type === 'villa')
+                                @if($flat->property_type === 'villa')
                                     Villa
                                 @else
                                     Apartment
@@ -270,7 +270,7 @@
 
 <!-- Payment Modal -->
 <div id="paymentModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
-    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+    <div class="relative top-20 mx-auto p-5 border w-96 max-w-[calc(100%-1.5rem)] shadow-lg rounded-md bg-white">
         <div class="mt-3">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-medium text-gray-900" id="modalTitle">Add Payment Detail</h3>

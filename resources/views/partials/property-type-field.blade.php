@@ -64,7 +64,10 @@
     // ever changes it - so whatever loads the matching unit list has to be
     // triggered once on load instead, exactly as if the user had just
     // picked the only option there is.
-    document.addEventListener('DOMContentLoaded', function () {
+    // 'load', not DOMContentLoaded: this inline script sits before the page's own scripts, so a
+    // DOMContentLoaded handler registered here ran FIRST - before the page had defined (or
+    // exposed) the callback it names.
+    window.addEventListener('load', function () {
         var sfField = document.getElementById('{{ $sfPtFieldName }}');
         if (sfField && sfField.value) {
             {{ $sfOnChange }};

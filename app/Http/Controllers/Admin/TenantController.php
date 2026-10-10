@@ -23,7 +23,7 @@ class TenantController extends BaseController
         $societyId = $this->getSocietyId();
         
         // Get all tenants with their apartment information
-        $tenants = Tenant::bySociety($societyId)
+        $tenants = Tenant::when($societyId !== null, fn ($q) => $q->bySociety($societyId))
             ->with(['flat.building', 'flat.villaArea', 'user'])
             ->get();
         
@@ -34,7 +34,12 @@ class TenantController extends BaseController
     {
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
-        
+
+        if ($this->getSocietyId() === null) {
+            // A tenant belongs to a society and a Super Admin has none of their own.
+            return redirect()->route('admin.tenants.index')->with('error', 'Sign in as the Admin of that society (or use Impersonate) to add a tenant.');
+        }
+
         $societyId = $this->getSocietyId();
         
         // Units a tenant can move into: every unit in the society with no
@@ -60,7 +65,7 @@ class TenantController extends BaseController
         $this->authorizeRole('Super Admin', 'Admin');
         
         // Verify tenant belongs to the same society
-        if ($tenant->society_id !== $this->getSocietyId()) {
+        if (!$this->societyMatches($tenant->society_id)) {
             return back()->with('error', 'Tenant not found.');
         }
         
@@ -75,6 +80,11 @@ class TenantController extends BaseController
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
 
+        if ($this->getSocietyId() === null) {
+            // A tenant belongs to a society and a Super Admin has none of their own.
+            return redirect()->route('admin.tenants.index')->with('error', 'Sign in as the Admin of that society (or use Impersonate) to add a tenant.');
+        }
+
         return $this->handleFormSubmission(function() use ($request) {
             $request->validate([
                 'name' => 'required|string|max:255',
@@ -83,7 +93,7 @@ class TenantController extends BaseController
                 'password' => 'required|string|min:8',
                 'password_confirmation' => 'required|string|min:8|same:password',
                 'status' => 'required|in:active,inactive',
-                'profile_image' => 'nullable|file|mimes:jpg,jpeg,png|max:2048',
+                'profile_image' => \App\Support\ProfileImage::rules(),
                 'contract_start_date' => 'required|date',
                 'contract_end_date' => 'required|date|after:contract_start_date',
                 'rent_amount' => 'required|numeric|min:0',
@@ -117,9 +127,9 @@ class TenantController extends BaseController
             
             // Handle profile image upload
             if ($request->hasFile('profile_image')) {
-                $userData['avatar'] = $this->handleFileUpload($request, 'profile_image', 'tenants', ['jpg', 'jpeg', 'png']);
+                $userData['avatar'] = \App\Support\ProfileImage::store($request->file('profile_image'));
             }
-            
+
             $user = User::create($userData);
             
             // Assign Tenant role
@@ -213,11 +223,11 @@ class TenantController extends BaseController
         $this->authorizeRole('Super Admin', 'Admin');
         
         // Verify tenant belongs to the same society
-        if ($tenant->society_id !== $this->getSocietyId()) {
+        if (!$this->societyMatches($tenant->society_id)) {
             return back()->with('error', 'Tenant not found.');
         }
         
-        $societyId = $this->getSocietyId();
+        $societyId = $tenant->society_id;   // the record's society (a Super Admin has none of their own)
         
         // Get ONLY vacant properties that meet ALL conditions:
         // 1. status = 'vacant'
@@ -264,7 +274,8 @@ class TenantController extends BaseController
                 'password' => 'nullable|string|min:8|confirmed',
                 'status' => 'required|in:active,inactive',
                 'flat_id' => 'nullable|exists:flats,id',
-                'profile_image' => 'nullable|file|mimes:jpg,jpeg,png|max:2048',
+                'profile_image' => \App\Support\ProfileImage::rules(),
+                'remove_profile_image' => 'nullable|boolean',
                 'contract_start_date' => 'required|date',
                 'contract_end_date' => 'required|date|after:contract_start_date',
                 'rent_amount' => 'required|numeric|min:0',
@@ -277,9 +288,9 @@ class TenantController extends BaseController
                 'family_members.*.relationship' => 'nullable|string|max:100',
                 'family_members.*.phone' => 'nullable|string|max:20',
             ]);
-            
+
             $societyId = $this->getSocietyId();
-            
+
             // Update user information
             $user = $tenant->user;
             $updateData = [
@@ -293,12 +304,16 @@ class TenantController extends BaseController
                 $updateData['password'] = Hash::make($request->password);
             }
             
-            // Handle profile image upload
-            if ($request->hasFile('profile_image')) {
-                $updateData['avatar'] = $this->handleFileUpload($request, 'profile_image', 'tenants', ['jpg', 'jpeg', 'png']);
-            }
-            
             $user->update($updateData);
+
+            // Replace / remove / keep the picture. Stores the new file
+            // first, saves, and only then removes the old one (previously
+            // every replaced tenant picture was left behind on disk).
+            \App\Support\ProfileImage::change(
+                $user,
+                $request->file('profile_image'),
+                $request->boolean('remove_profile_image') && !$request->hasFile('profile_image'),
+            );
             
             // Update tenant record
             $tenantUpdateData = [
@@ -399,7 +414,7 @@ class TenantController extends BaseController
     {
         $this->authorizeRole('Super Admin', 'Admin');
 
-        if ($tenant->society_id !== $this->getSocietyId()) {
+        if (!$this->societyMatches($tenant->society_id)) {
             return back()->with('error', 'Tenant not found.');
         }
 
@@ -427,7 +442,7 @@ class TenantController extends BaseController
         $this->authorizeRole('Super Admin', 'Admin');
         
         // Verify tenant belongs to the same society
-        if ($tenant->society_id !== $this->getSocietyId()) {
+        if (!$this->societyMatches($tenant->society_id)) {
             return back()->with('error', 'Tenant not found.');
         }
         

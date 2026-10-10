@@ -274,6 +274,22 @@ class Flat extends Model
         return $query->where('society_id', $societyId);
     }
 
+    /**
+     * Units owned by this owner record (flats.owner_id -> owners.id).
+     *
+     * An account with NO owner link owns nothing. A bare
+     * ->where('owner_id', $user->owner_id) with a null id compiles to
+     * `owner_id IS NULL`, i.e. every unassigned unit in every society - which
+     * is most of the table - and made an unlinked "Owner" the owner of all of
+     * it. Always use this scope for a user's own id.
+     */
+    public function scopeOwnedBy($query, $ownerId)
+    {
+        return $ownerId
+            ? $query->where('owner_id', $ownerId)
+            : $query->whereRaw('1 = 0');
+    }
+
     public function scopeByBuilding($query, $buildingId)
     {
         return $query->where('building_id', $buildingId);

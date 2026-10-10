@@ -124,7 +124,7 @@ class UtilityBillController extends BaseController
             
             // Also check for villas with direct owner_id match
             $directVillas = Flat::with('villaArea')
-                            ->where('owner_id', $user->owner_id)
+                            ->ownedBy($user->owner_id)
                             ->where('property_type', 'villa')
                             ->where('society_id', $societyId)
                             ->get();
@@ -135,7 +135,7 @@ class UtilityBillController extends BaseController
             $apartments = Flat::with('building')
                             ->where('property_type', 'apartment')
                             ->where('society_id', $societyId)
-                            ->where('owner_id', $user->owner_id)
+                            ->ownedBy($user->owner_id)
                             ->get();
             
             // If no apartments found via owner_id, check through Resident model

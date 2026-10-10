@@ -341,8 +341,9 @@ class EmailTriggerService
         $recipients = [];
 
         // Get property owners
+        // flats.id, not id - see App\Models\User::ownedProperties()'s docblock.
         $owners = User::whereHas('ownedProperties', function($q) use ($flatId) {
-            $q->where('id', $flatId);
+            $q->where('flats.id', $flatId);
         })->where('society_id', $societyId)->get();
 
         foreach ($owners as $owner) {

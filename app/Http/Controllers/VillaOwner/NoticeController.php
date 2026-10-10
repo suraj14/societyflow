@@ -18,7 +18,7 @@ class NoticeController extends Controller
         }
 
         $notices = Notice::where('society_id', $villa->society_id)
-            ->where('status', 'approved')
+            ->where('status', 'published')   // 'approved' is not a notice status, so this list was always empty
             ->latest()
             ->paginate(10);
 
@@ -33,6 +33,9 @@ class NoticeController extends Controller
         if (!$villa || $notice->society_id !== $villa->society_id) {
             abort(403);
         }
+
+        // A draft/pending/rejected notice is office-only, even inside the owner's own society.
+        abort_unless($notice->status === 'published', 404);
 
         return view('villa-owner.notices.show', compact('notice', 'villa'));
     }

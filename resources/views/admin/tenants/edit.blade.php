@@ -116,6 +116,10 @@
                                 <div class="mb-4">
                                     <p class="text-sm text-gray-600 mb-2">Current Profile Image:</p>
                                     <img src="{{ asset('storage/' . $tenant->user->avatar) }}" alt="{{ $tenant->name }}" class="w-24 h-24 rounded-lg object-cover">
+                                    <label class="inline-flex items-center mt-2 text-sm text-gray-700">
+                                        <input type="checkbox" name="remove_profile_image" value="1" class="mr-2 rounded border-gray-300">
+                                        Remove current photo (uploading a new one replaces it; leaving this empty keeps it)
+                                    </label>
                                 </div>
                             @endif
                             

@@ -56,6 +56,10 @@
        class="tap-target w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center justify-center gap-3 text-base font-medium py-3">
         <i class="fas fa-user-plus"></i> Register Unknown Visitor
     </a>
+    <a href="{{ route('guard.shift.current') }}"
+       class="tap-target w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center justify-center gap-3 text-base font-medium py-3">
+        <i class="fas fa-clock"></i> My Shift
+    </a>
 
     {{-- Waiting on resident approval --}}
     <section>

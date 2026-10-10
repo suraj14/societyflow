@@ -60,6 +60,12 @@
                 </div>
 
 
+                @if(session('success'))
+                    <div class="mb-5 p-3 rounded-xl bg-green-50 border border-green-200 text-sm text-green-800 flex items-start" role="status">
+                        <i class="fas fa-check-circle mr-2 mt-0.5"></i> <span>{{ session('success') }}</span>
+                    </div>
+                @endif
+
                 <form method="POST" action="{{ route('password.email') }}" class="space-y-5">
                     @csrf
                     

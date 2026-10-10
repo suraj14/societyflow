@@ -134,6 +134,8 @@ class EmailNotificationService
                 'new-bill-generated',
                 'payment-received',
                 'bill-overdue',
+                'bill-due-reminder',
+                'service-request-*',
                 'ticket-created',
                 'ticket-status-updated',
                 'ticket-closed',
@@ -141,6 +143,8 @@ class EmailNotificationService
                 'new-event',
                 'visitor-entry-created',
                 'visitor-status-updated',
+                'visitor-approved',
+                'visitor-denied',
             ],
             'Villa Owner' => [
                 'welcome-user',
@@ -148,6 +152,8 @@ class EmailNotificationService
                 'new-bill-generated',
                 'payment-received',
                 'bill-overdue',
+                'bill-due-reminder',
+                'service-request-*',
                 'ticket-created',
                 'ticket-status-updated',
                 'ticket-closed',
@@ -155,6 +161,8 @@ class EmailNotificationService
                 'new-event',
                 'visitor-entry-created',
                 'visitor-status-updated',
+                'visitor-approved',
+                'visitor-denied',
             ],
             'Owner' => [
                 'welcome-user',
@@ -162,6 +170,8 @@ class EmailNotificationService
                 'new-bill-generated',
                 'payment-received',
                 'bill-overdue',
+                'bill-due-reminder',
+                'service-request-*',
                 'ticket-created',
                 'ticket-status-updated',
                 'ticket-closed',
@@ -169,6 +179,8 @@ class EmailNotificationService
                 'new-event',
                 'visitor-entry-created',
                 'visitor-status-updated',
+                'visitor-approved',
+                'visitor-denied',
             ],
             
             // Tenant
@@ -179,6 +191,8 @@ class EmailNotificationService
                 'new-bill-generated',
                 'payment-received',
                 'bill-overdue',
+                'bill-due-reminder',
+                'service-request-*',
                 'ticket-created',
                 'ticket-status-updated',
                 'ticket-closed',
@@ -186,6 +200,8 @@ class EmailNotificationService
                 'new-event',
                 'visitor-entry-created',
                 'visitor-status-updated',
+                'visitor-approved',
+                'visitor-denied',
             ],
             
             // Staff
@@ -265,8 +281,11 @@ class EmailNotificationService
             case 'payment_failed':
             case 'bill_due_reminder':
                 if (isset($context['flat_id'])) {
+                    // flats.id, not id - ownedProperties joins through
+                    // owners, so an unqualified 'id' is ambiguous between
+                    // flats.id and owners.id (see App\Models\User::ownedProperties()).
                     $flatUsers = User::whereHas('ownedProperties', function($q) use ($context) {
-                        $q->where('id', $context['flat_id']);
+                        $q->where('flats.id', $context['flat_id']);
                     })->orWhereHas('tenant', function($q) use ($context) {
                         $q->whereHas('flat', function($subQ) use ($context) {
                             $subQ->where('id', $context['flat_id']);
@@ -328,6 +347,22 @@ class EmailNotificationService
                 }
                 break;
 
+            case 'service_request_assigned':
+            case 'service_request_in_progress':
+            case 'service_request_completed':
+            case 'service_request_cancelled':
+                if (isset($context['service_request'])) {
+                    $serviceRequest = $context['service_request'];
+
+                    if ($serviceRequest->user) {
+                        $recipients[] = [
+                            'email' => $serviceRequest->user->email,
+                            'name'  => $serviceRequest->user->name,
+                            'role'  => $serviceRequest->user->getRoleNames()->first() ?? 'user',
+                        ];
+                    }
+                }
+                break;
             case 'notice_published':
             case 'notice_updated':
             case 'event_created':
@@ -520,6 +555,28 @@ class EmailNotificationService
     }
 
     /**
+     * Service request lifecycle notification. Uses the same safe-no-op
+     * trigger lookup as sendComplaintNotification: if no
+     * `service-request-{action}` template exists, this logs a warning and
+     * returns false rather than claiming a delivery that did not happen.
+     */
+    public static function sendServiceRequestNotification(object $serviceRequest, string $action): bool
+    {
+        $recipients = self::getRecipients("service_request_{$action}", [
+            'society_id'      => $serviceRequest->society_id,
+            'service_request' => $serviceRequest,
+        ]);
+
+        $variables = [
+            'service_name' => $serviceRequest->service?->name ?? 'Service',
+            'action'       => $action,
+            'view_url'     => route('service-requests.index'),
+        ];
+
+        return self::sendByTrigger("service-request-{$action}", $recipients, $variables, $serviceRequest->society_id);
+    }
+
+    /**
      * Send notice notification
      */
     public static function sendNoticeNotification(object $notice, string $action = 'published'): bool
@@ -551,8 +608,8 @@ class EmailNotificationService
 
         $variables = [
             'event_name' => $event->event_name ?? 'N/A',
-            'event_date' => $event->event_date ?? 'N/A',
-            'event_time' => $event->event_time ?? 'N/A',
+            'event_date' => $event->start_date?->format('Y-m-d') ?? 'N/A',
+            'event_time' => $event->start_date?->format('H:i') ?? 'N/A',
             'action' => $action,
             'view_url' => route('events.show', $event->id),
         ];

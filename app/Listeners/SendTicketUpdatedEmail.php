@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\TicketUpdated;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -78,12 +79,16 @@ class SendTicketUpdatedEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                // Keyed on status, not just the complaint id: open -> in_progress
+                // -> resolved -> closed must each notify once, not collapse into a
+                // single lifetime notification for the complaint.
+                DispatchEventNotification::dispatch(
                     'ticket_updated',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "ticket_updated:{$complaint->id}:{$complaint->status}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Ticket updated email sent', [

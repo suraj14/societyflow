@@ -27,6 +27,7 @@ class User extends Authenticatable
         'gender',
         'address',
         'avatar',
+        'committee_designation',
         'status',
         'last_login_at',
     ];
@@ -178,63 +179,73 @@ class User extends Authenticatable
     }
 
     /**
-     * Get the villa owned by this user (if villa owner)
+     * Get the villa owned by this user (if villa owner).
+     *
+     * Previously branched on `if ($this->owner_id)`, returning the real
+     * hasOneThrough only when true and an always-empty relation otherwise.
+     * That branch reads instance state that does not exist yet whenever
+     * Eloquent builds this relation without a loaded row first -
+     * whereHas('ownedVilla'), whereDoesntHave('ownedVilla'), and
+     * with('ownedVilla') on a query builder all call this method against a
+     * throwaway, unhydrated User, where $this->owner_id is always null.
+     * Every such call silently took the dead branch
+     * (`...->whereRaw('1 = 0')`), on top of a join condition
+     * (`flats.owner_id = users.id`) that was never correct either -
+     * flats.owner_id references owners.id, not users.id (CLAUDE.md §5).
+     * `$user->ownedVilla` on an already-loaded instance was never affected,
+     * since $this->owner_id is the real value there - only query-time use
+     * was silently broken. A single unconditional hasOneThrough is correct
+     * for both cases: the through join naturally returns nothing when
+     * users.owner_id is null, with no branch needed.
      */
     public function ownedVilla()
     {
-        // Since flats.owner_id references owners.id, we need to go through the owner relationship
-        if ($this->owner_id) {
-            return $this->hasOneThrough(
-                Flat::class,
-                Owner::class,
-                'id',        // Foreign key on owners table
-                'owner_id',  // Foreign key on flats table
-                'owner_id',  // Local key on users table
-                'id'         // Local key on owners table
-            )->where('flats.property_type', 'villa');
-        }
-        
-        return $this->hasOne(Flat::class, 'owner_id')->where('flats.property_type', 'villa')->whereRaw('1 = 0'); // Return empty relation
+        return $this->hasOneThrough(
+            Flat::class,
+            Owner::class,
+            'id',        // Foreign key on owners table
+            'owner_id',  // Foreign key on flats table
+            'owner_id',  // Local key on users table
+            'id'         // Local key on owners table
+        )->where('flats.property_type', 'villa');
     }
 
     /**
-     * Get the apartment owned by this user (if apartment owner)
+     * Get the apartment owned by this user (if apartment owner). See
+     * ownedVilla()'s docblock - identical fix, identical reason.
      */
     public function ownedFlat()
     {
-        // Since flats.owner_id references owners.id, we need to go through the owner relationship
-        if ($this->owner_id) {
-            return $this->hasOneThrough(
-                Flat::class,
-                Owner::class,
-                'id',        // Foreign key on owners table
-                'owner_id',  // Foreign key on flats table
-                'owner_id',  // Local key on users table
-                'id'         // Local key on owners table
-            )->where('flats.property_type', 'apartment');
-        }
-        
-        return $this->hasOne(Flat::class, 'owner_id')->where('flats.property_type', 'apartment')->whereRaw('1 = 0'); // Return empty relation
+        return $this->hasOneThrough(
+            Flat::class,
+            Owner::class,
+            'id',        // Foreign key on owners table
+            'owner_id',  // Foreign key on flats table
+            'owner_id',  // Local key on users table
+            'id'         // Local key on owners table
+        )->where('flats.property_type', 'apartment');
     }
 
     /**
-     * Get all properties owned by this user
+     * Get all properties owned by this user. See ownedVilla()'s docblock -
+     * identical fix. This is the one with the widest blast radius: it is
+     * queried via whereHas('ownedProperties', ...) from
+     * EmailNotificationService::getRecipients(), EmailTriggerService, and
+     * three event listeners (SendBillGeneratedEmail,
+     * SendPaymentOverdueEmail, SendTenantOwnerAddedEmail) to resolve "which
+     * users own this flat" for a notification - every one of those lookups
+     * returned zero owners, unconditionally, until this fix.
      */
     public function ownedProperties()
     {
-        // Since flats.owner_id references owners.id, we need to go through the owner relationship
-        if ($this->owner_id) {
-            return $this->hasManyThrough(
-                Flat::class,
-                Owner::class,
-                'id',        // Foreign key on owners table
-                'owner_id',  // Foreign key on flats table
-                'owner_id',  // Local key on users table
-                'id'         // Local key on owners table
-            );
-        }
-        
-        return $this->hasMany(Flat::class, 'owner_id')->whereRaw('1 = 0'); // Return empty relation
+        return $this->hasManyThrough(
+            Flat::class,
+            Owner::class,
+            'id',        // Foreign key on owners table
+            'owner_id',  // Foreign key on flats table
+            'owner_id',  // Local key on users table
+            'id'         // Local key on owners table
+        );
     }
 
     /**
@@ -256,6 +267,16 @@ class User extends Authenticatable
     public function getFullNameAttribute(): string
     {
         return $this->name;
+    }
+
+    /**
+     * Browser-loadable URL of the stored picture, or null when the user has
+     * none (the layouts then fall back to a generated initials badge). The
+     * API's avatar_url below stays a root-relative path for the mobile app.
+     */
+    public function getAvatarWebUrlAttribute(): ?string
+    {
+        return \App\Support\ProfileImage::webUrl($this->avatar);
     }
 
     public function getAvatarUrlAttribute(): string

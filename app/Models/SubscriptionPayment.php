@@ -49,6 +49,39 @@ class SubscriptionPayment extends Model
         return $this->belongsTo(Subscription::class);
     }
 
+    /**
+     * The paying society and the plan live on the subscription, not on the
+     * payment row. The Super Admin billing screens asked for
+     * `$payment->society` / `$payment->subscriptionPlan` directly, which did
+     * not exist: they only looked fine because the table was empty (eager
+     * loading nothing cannot fail), and would have crashed on the first payment.
+     */
+    public function society(): \Illuminate\Database\Eloquent\Relations\HasOneThrough
+    {
+        return $this->hasOneThrough(Society::class, Subscription::class, 'id', 'id', 'subscription_id', 'society_id');
+    }
+
+    public function subscriptionPlan(): \Illuminate\Database\Eloquent\Relations\HasOneThrough
+    {
+        return $this->hasOneThrough(SubscriptionPlan::class, Subscription::class, 'id', 'id', 'subscription_id', 'subscription_plan_id');
+    }
+
+    // The billing screens' vocabulary, derived from the subscription / the stored method.
+    public function getBillingCycleAttribute(): ?string
+    {
+        return $this->subscription?->billing_cycle;
+    }
+
+    public function getNextPaymentDateAttribute()
+    {
+        return $this->subscription?->next_billing_date;
+    }
+
+    public function getPaymentGatewayAttribute(): ?string
+    {
+        return $this->payment_method;
+    }
+
     // Scopes
     public function scopeSuccess($query)
     {

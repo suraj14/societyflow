@@ -193,18 +193,23 @@ class SocietyController extends Controller
             'subscription_plan_id' => 'required|exists:subscription_plans,id',
             'property_type' => ['required', Rule::in(SocietyPropertyType::values())],
             'status' => 'required|in:active,inactive,suspended',
+            // Society Info (optional; blank clears them).
+            'registration_number' => 'nullable|string|max:100',
+            'registered_on' => 'nullable|date|before_or_equal:today',
         ]);
 
         DB::beginTransaction();
-        
+
         try {
             // Store old subscription plan ID for comparison
             $oldSubscriptionPlanId = $society->subscription_plan_id;
-            
+
             // Update society
             $updateData = $request->only([
                 'name', 'email', 'phone', 'address', 'city', 'state', 'country', 'pincode', 'subscription_plan_id', 'property_type', 'status'
             ]);
+            $updateData['registration_number'] = filled($request->registration_number) ? trim($request->registration_number) : null;
+            $updateData['registered_on'] = $request->filled('registered_on') ? $request->registered_on : null;
             
             \Log::info('Updating society with data', $updateData);
             

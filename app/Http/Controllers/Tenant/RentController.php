@@ -13,57 +13,25 @@ class RentController extends Controller
     {
         $user = auth()->user();
         
-        // Get tenant's resident record with multiple fallback methods
-        $resident = null;
-        $tenant = null;
-        
-        // Method 1: Direct resident relationship
-        $resident = $user->resident;
-        
-        // Method 2: Get tenant record and find resident through flat
-        if (!$resident) {
-            $tenant = $user->tenant;
-            if ($tenant && $tenant->flat_id) {
-                $resident = \App\Models\Resident::where('user_id', $user->id)
-                    ->where('flat_id', $tenant->flat_id)
-                    ->first();
-            }
-        }
-        
-        // Method 3: Find tenant by user_id if tenant_id is not set
-        if (!$tenant) {
-            $tenant = \App\Models\Tenant::where('user_id', $user->id)->first();
-            if ($tenant) {
-                // Auto-fix the relationship
-                $user->update(['tenant_id' => $tenant->id]);
-                
-                // Find resident record
-                if (!$resident && $tenant->flat_id) {
-                    $resident = \App\Models\Resident::where('user_id', $user->id)
-                        ->where('flat_id', $tenant->flat_id)
-                        ->first();
-                }
-            }
-        }
-        
-        // Method 4: Create tenant and resident records if user has tenant role but no records
-        if (!$tenant && $user->hasRole('Tenant')) {
-            $tenant = $this->createTenantForUser($user);
-            if ($tenant) {
-                $resident = \App\Models\Resident::where('user_id', $user->id)
-                    ->where('flat_id', $tenant->flat_id)
-                    ->first();
-            }
-        }
-        
-        // If still no resident record, show error
-        if (!$resident || !$resident->flat_id) {
+        // The tenant's unit comes from their ACTIVE TENANCY (tenants.flat_id),
+        // the canonical record, resolved through the same UserFlatResolver the
+        // rest of the app uses. It used to come from the legacy `residents`
+        // row, which is never closed when a tenancy moves: a tenant moved from
+        // villa 160 to 159 was shown (and could pay rent for) villa 160, a unit
+        // they no longer rent - and after that row was correctly closed, was
+        // told "No apartment assigned" while renting 159.
+        //
+        // Viewing a page must never write ownership or tenancy data (an earlier
+        // "Method 4" invented a tenancy on the first vacant flat). An account
+        // with no active tenancy is told so, below.
+        $flat = $this->currentFlat($user);
+
+        if (!$flat) {
             return redirect()->route('tenant.dashboard')
                 ->with('error', 'No apartment assigned to your account. Please contact the administrator.');
         }
-        
         // Get all maintenance bills for this tenant's flat
-        $rentRecords = MaintenanceBill::where('flat_id', $resident->flat_id)
+        $rentRecords = MaintenanceBill::where('society_id', $user->society_id)->where('flat_id', $flat->id)
             ->where('bill_type', 'rent')
             ->with(['payments', 'flat.building', 'flat.villaArea'])
             ->orderBy('bill_date', 'desc')
@@ -83,145 +51,12 @@ class RentController extends Controller
         
         return view('tenant.rent.index', compact(
             'rentRecords', 
-            'resident', 
+            'flat', 
             'totalRent', 
             'totalPaid', 
             'pendingAmount', 
             'unpaidBills'
         ));
-    }
-    
-    /**
-     * Create a tenant record for a user who doesn't have one assigned
-     */
-    private function createTenantForUser($user)
-    {
-        try {
-            // Find an available flat or create one
-            $flat = $this->findOrCreateAvailableFlat($user);
-            
-            $tenant = \App\Models\Tenant::create([
-                'society_id' => $user->society_id,
-                'user_id' => $user->id,
-                'flat_id' => $flat->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone ?? '9876543210',
-                'move_in_date' => now()->subMonths(3),
-                'lease_start_date' => now()->subMonths(3),
-                'lease_end_date' => now()->addMonths(9),
-                'monthly_rent' => rand(15000, 25000),
-                'security_deposit' => rand(30000, 50000),
-                'status' => 'active',
-            ]);
-
-            // Link user to tenant
-            $user->update(['tenant_id' => $tenant->id]);
-
-            // Create resident record
-            \App\Models\Resident::create([
-                'society_id' => $user->society_id,
-                'user_id' => $user->id,
-                'flat_id' => $flat->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone ?? '9876543210',
-                'type' => 'tenant',
-                'move_in_date' => $tenant->move_in_date,
-                'status' => 'active',
-            ]);
-
-            \Log::info("Auto-created tenant record for user: {$user->name} - Flat: {$flat->flat_number}");
-            
-            return $tenant;
-        } catch (\Exception $e) {
-            \Log::error("Failed to create tenant for user {$user->name}: " . $e->getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Find or create an available flat for tenant
-     */
-    private function findOrCreateAvailableFlat($user)
-    {
-        // Try to find an unoccupied flat
-        $flat = \App\Models\Flat::where('society_id', $user->society_id)
-            ->where('status', 'vacant')
-            ->first();
-
-        if (!$flat) {
-            // Create a new flat
-            $building = $this->findOrCreateBuilding($user->society_id);
-            $flatNumber = $this->generateUniqueFlatNumber($user->society_id);
-            
-            $flat = \App\Models\Flat::create([
-                'society_id' => $user->society_id,
-                'building_id' => $building->id,
-                'flat_number' => $flatNumber,
-                'floor' => rand(1, 5),
-                'property_type' => 'apartment',
-                'bedrooms' => rand(1, 3),
-                'bathrooms' => rand(1, 2),
-                'area_sqft' => rand(800, 1500),
-                'status' => 'on_rent'
-            ]);
-        } else {
-            // Mark as on rent
-            $flat->update(['status' => 'on_rent']);
-        }
-
-        return $flat;
-    }
-
-    /**
-     * Find or create a building for the society
-     */
-    private function findOrCreateBuilding($societyId)
-    {
-        $building = \App\Models\Building::where('society_id', $societyId)->first();
-        
-        if (!$building) {
-            $building = \App\Models\Building::create([
-                'society_id' => $societyId,
-                'name' => 'Tower A',
-                'floors' => 10,
-                'flats_per_floor' => 4,
-                'status' => 'active'
-            ]);
-        }
-
-        return $building;
-    }
-
-    /**
-     * Generate a unique flat number for the society
-     */
-    private function generateUniqueFlatNumber($societyId)
-    {
-        $existingNumbers = \App\Models\Flat::where('society_id', $societyId)
-            ->pluck('flat_number')
-            ->toArray();
-
-        // Try common flat numbers first
-        $commonNumbers = ['1A', '1B', '2A', '2B', '3A', '3B', '101', '102', '103', '104', '201', '202'];
-        
-        foreach ($commonNumbers as $number) {
-            if (!in_array($number, $existingNumbers)) {
-                return $number;
-            }
-        }
-
-        // Generate numbered flats
-        for ($i = 1; $i <= 100; $i++) {
-            $flatNumber = str_pad($i, 2, '0', STR_PAD_LEFT);
-            if (!in_array($flatNumber, $existingNumbers)) {
-                return $flatNumber;
-            }
-        }
-
-        // Last resort - random number
-        return rand(101, 999);
     }
     
     /**
@@ -245,9 +80,8 @@ class RentController extends Controller
             // Get the rent record
             $rent = MaintenanceBill::findOrFail($request->rent_id);
             
-            // Verify rent belongs to the tenant's flat
-            $resident = $user->resident;
-            if (!$resident || $rent->flat_id !== $resident->flat_id) {
+            // Verify rent belongs to a unit this tenant actively rents
+            if (!$this->rentsFlat($user, $rent->flat_id)) {
                 return response()->json(['success' => false, 'message' => 'Unauthorized access to rent record.'], 403);
             }
 
@@ -336,9 +170,8 @@ class RentController extends Controller
             // Get the rent record
             $rent = MaintenanceBill::findOrFail($rentId);
             
-            // Verify rent belongs to the tenant's flat
-            $resident = $user->resident;
-            if (!$resident || $rent->flat_id !== $resident->flat_id) {
+            // Verify rent belongs to a unit this tenant actively rents
+            if (!$this->rentsFlat($user, $rent->flat_id)) {
                 abort(403, 'Unauthorized access to rent record.');
             }
             
@@ -352,4 +185,18 @@ class RentController extends Controller
             abort(404, 'Rent record not found.');
         }
     }
-}
+
+    /** The unit the user actively rents (their most recent active tenancy), or null. */
+    private function currentFlat(\App\Models\User $user): ?\App\Models\Flat
+    {
+        $ids = \App\Support\UserFlatResolver::tenantFlatIds($user);
+
+        return $ids === [] ? null : \App\Models\Flat::with(['building', 'villaArea'])
+            ->where('society_id', $user->society_id)->whereIn('id', $ids)->orderByDesc('id')->first();
+    }
+
+    /** Whether $flatId is a unit the user actively rents. */
+    private function rentsFlat(\App\Models\User $user, $flatId): bool
+    {
+        return $flatId !== null && in_array((int) $flatId, \App\Support\UserFlatResolver::tenantFlatIds($user), true);
+    }}

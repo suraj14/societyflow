@@ -3,16 +3,27 @@
 namespace App\Listeners;
 
 use App\Events\BillGenerated;
-use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Was registered in EventServiceProvider with a template already seeded
+ * (2026_10_07_000002) but **nothing in the codebase ever dispatched
+ * `BillGenerated`** - confirmed by grep, documented in
+ * `NotificationEvents::knownDeadEventClasses()`'s own history. Now real:
+ * `Admin\RentController::store()` dispatches it the moment a rent bill is
+ * created. Recipient resolution and variables below are unchanged from
+ * when this was written; only the *send* moved from the old direct
+ * `DynamicEmailService::sendByEvent()` call to the queued/afterCommit/
+ * idempotent job every other trigger_event listener already uses.
+ */
 class SendBillGeneratedEmail
 {
 
     /**
      * Handle the event
-     * 
+     *
      * Role-based recipient resolution for Bill Generated:
      * - Owner: ✅
      * - Tenant: ✅
@@ -34,8 +45,9 @@ class SendBillGeneratedEmail
 
             // Get property owners
             if ($flatId) {
+                // flats.id, not id - see App\Models\User::ownedProperties()'s docblock.
                 $owners = User::whereHas('ownedProperties', function($q) use ($flatId) {
-                    $q->where('id', $flatId);
+                    $q->where('flats.id', $flatId);
                 })->where('society_id', $societyId)
                   ->whereHas('roles', function($q) use ($allowedRoles) {
                       $q->whereIn('name', $allowedRoles);
@@ -106,12 +118,13 @@ class SendBillGeneratedEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                DispatchEventNotification::dispatch(
                     'bill_generated',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "bill_generated:{$bill->id}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Bill generated email sent', [

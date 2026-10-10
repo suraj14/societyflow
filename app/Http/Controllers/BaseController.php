@@ -237,6 +237,34 @@ class BaseController extends Controller
     /**
      * Validate society access for operations
      */
+    /**
+     * The society a NEW record belongs to. A Super Admin has none of their own (getSocietyId() is null), and
+     * a create that took it from there either crashed on the NOT NULL column or stored a society-less record.
+     * They add records for a society through Impersonate / "Login as Admin" on that society.
+     */
+    protected function requireSocietyForWrite(): int
+    {
+        $societyId = $this->getSocietyId();
+
+        if (!$societyId) {
+            abort(403, 'Select a society first (Super Admin: use "Login as Admin" on the society) to add records to it.');
+        }
+
+        return (int) $societyId;
+    }
+
+    /**
+     * Whether the signed-in user may act on a record of this society: their own, or any society for a
+     * Super Admin (who has none of their own - getSocietyId() is null for them, so a bare
+     * `!== getSocietyId()` comparison silently refuses them every record). Existing-record actions only:
+     * creating a record still needs a society, which a Super Admin does not have.
+     */
+    protected function societyMatches($recordSocietyId): bool
+    {
+        return (auth()->user()?->hasRole('Super Admin') ?? false)
+            || (int) $recordSocietyId === (int) $this->getSocietyId();
+    }
+
     protected function validateSocietyAccess($modelSocietyId)
     {
         $userSocietyId = $this->getSocietyId();

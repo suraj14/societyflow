@@ -16,6 +16,16 @@ enum EmailEvent: string
     case PASSWORD_RESET = 'password_reset';
     case REPORT_GENERATED = 'report_generated';
 
+    // DynamicEmailService::sendByEvent() rejects anything not listed here,
+    // so every trigger_event in NotificationEvents must have a case
+    // (asserted by EmailEventWhitelistTest). These four were registered
+    // and dispatched but missing, so their emails were silently dropped.
+    case ACCESS_PASS_CREATED = 'access_pass_created';
+    case ACCESS_PASS_REVOKED = 'access_pass_revoked';
+    case FACILITY_BOOKING_STATUS_UPDATED = 'facility_booking_status_updated';
+    case SOCIETY_DOCUMENT_PUBLISHED = 'society_document_published';
+    case EVENT_CHANGED = 'event_changed';
+
     /**
      * Get all event values as array
      */
@@ -41,6 +51,11 @@ enum EmailEvent: string
             self::EVENT_CREATED->value => 'Event Created',
             self::PASSWORD_RESET->value => 'Password Reset',
             self::REPORT_GENERATED->value => 'Report Generated',
+            self::ACCESS_PASS_CREATED->value => 'Access Pass Created',
+            self::ACCESS_PASS_REVOKED->value => 'Access Pass Revoked',
+            self::FACILITY_BOOKING_STATUS_UPDATED->value => 'Facility Booking Status Updated',
+            self::SOCIETY_DOCUMENT_PUBLISHED->value => 'Society Document Published',
+            self::EVENT_CHANGED->value => 'Event Cancelled / Rescheduled / Updated',
         ];
     }
 

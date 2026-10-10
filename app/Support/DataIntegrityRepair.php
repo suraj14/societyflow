@@ -178,6 +178,68 @@ class DataIntegrityRepair
         return ['bills_reconciled' => $count, 'amount_reconciled' => round($amount, 2)];
     }
 
+    /**
+     * Active tenancies whose legacy `residents` row points at a DIFFERENT unit.
+     *
+     * REPORT ONLY - never repaired automatically, because the data cannot say
+     * which side is right. App\Support\UserFlatResolver unions residency with
+     * tenancy, so a tenant in this state is shown BOTH units (bills, visitors
+     * and bookings of a unit they do not rent). Typical cause: the old
+     * dashboard "auto-fix" invented a tenancy plus a residents row on the
+     * first vacant flat; the real tenancy was assigned elsewhere afterwards
+     * and the invented row was never removed (fixed at the source - see
+     * DashboardDoesNotFabricateDataTest). The operator decides which unit is
+     * correct and corrects the other row.
+     *
+     * @return \Illuminate\Support\Collection<int,object{society_id:int,tenant_id:int,user_id:int,tenancy_flat_id:int,resident_id:int,resident_flat_id:int}>
+     */
+    public static function residentsContradictingTenancy()
+    {
+        return DB::table('tenants')
+            ->join('residents', 'residents.user_id', '=', 'tenants.user_id')
+            ->where('tenants.status', 'active')
+            ->whereNotNull('tenants.flat_id')
+            ->where('residents.status', 'active')
+            ->where('residents.type', 'tenant')
+            ->whereColumn('residents.flat_id', '!=', 'tenants.flat_id')
+            ->select(
+                'tenants.society_id',
+                'tenants.id as tenant_id',
+                'tenants.user_id',
+                'tenants.flat_id as tenancy_flat_id',
+                'residents.id as resident_id',
+                'residents.flat_id as resident_flat_id'
+            )
+            ->orderBy('residents.id')
+            ->get();
+    }
+
+    /**
+     * A linked user/owner pair whose profile pictures disagree - the display
+     * bug this invariant exists to catch again: one side was written directly
+     * (bypassing ProfileImage::change(), which always keeps both in lockstep)
+     * and the other kept its old picture. Report only: the data cannot say
+     * which of the two images is the current one.
+     */
+    public static function mismatchedProfileImages()
+    {
+        return DB::table('users')
+            ->join('owners', 'owners.id', '=', 'users.owner_id')
+            ->whereNotNull('users.owner_id')
+            ->where(function ($q) {
+                $q->whereColumn('users.avatar', '!=', 'owners.profile_image')
+                    ->orWhere(function ($q2) {
+                        $q2->whereNotNull('users.avatar')->whereNull('owners.profile_image');
+                    })
+                    ->orWhere(function ($q3) {
+                        $q3->whereNull('users.avatar')->whereNotNull('owners.profile_image');
+                    });
+            })
+            ->select('users.id as user_id', 'users.avatar as user_avatar', 'owners.id as owner_id', 'owners.profile_image as owner_profile_image')
+            ->orderBy('users.id')
+            ->get();
+    }
+
     /** @return \Illuminate\Support\Collection<int,MaintenanceBill> */
     public static function unbackedBills()
     {

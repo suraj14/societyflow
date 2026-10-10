@@ -11,12 +11,14 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
     <style>
         /* A guard works one-handed on a cheap phone. Nothing tappable is
            smaller than a fingertip, and the page never scrolls sideways. */
         .tap-target { min-height: 48px; }
         body { -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+        [x-cloak] { display: none !important; }
     </style>
 </head>
 <body class="bg-gray-100 antialiased">
@@ -28,6 +30,13 @@
                 <p class="text-xs text-purple-200 leading-tight">{{ auth()->user()?->society?->name ?? 'SocietyFlow' }}</p>
                 <h1 class="text-lg font-bold leading-tight truncate">@yield('page-title', 'Gate')</h1>
             </div>
+            <div class="flex items-center gap-2">
+            @include('partials.notification-bell', ['bellButtonClass' => 'tap-target text-white bg-purple-800/60 hover:bg-purple-800'])
+            <a href="{{ route('guard.rules.index') }}" aria-label="Society Info"
+               class="tap-target px-3 rounded-lg {{ request()->routeIs('guard.rules.*') ? 'bg-white text-purple-700' : 'bg-purple-800/60 hover:bg-purple-800' }} text-sm font-medium flex items-center gap-2">
+                <i class="fas fa-circle-info"></i>
+                <span class="hidden sm:inline">Society Info</span>
+            </a>
             <form method="POST" action="{{ route('logout') }}">
                 @csrf
                 <button type="submit" class="tap-target px-3 rounded-lg bg-purple-800/60 hover:bg-purple-800 text-sm font-medium flex items-center gap-2">
@@ -35,6 +44,7 @@
                     <span class="hidden sm:inline">Logout</span>
                 </button>
             </form>
+            </div>
         </div>
     </header>
 

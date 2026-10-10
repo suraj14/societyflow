@@ -6,6 +6,7 @@ use App\Models\AccessPass;
 use App\Models\User;
 use App\Models\Visitor;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Server-side gate verification for AccessPass QR scans.
@@ -27,6 +28,11 @@ class AccessPassService
     public const REASON_WRONG_DAY = 'wrong_day';
     public const REASON_WRONG_TIME = 'wrong_time';
     public const REASON_ALREADY_INSIDE = 'already_inside';
+
+    // Pre-approved-guest refusals (see checkInGuest()).
+    public const REASON_GUEST_WRONG_SOCIETY = 'guest_wrong_society';
+    public const REASON_GUEST_NOT_APPROVED = 'guest_not_approved';
+    public const REASON_GUEST_ALREADY_IN = 'guest_already_in';
 
     /**
      * Resolve a scanned token to a verdict, scoped to the scanning guard's
@@ -101,6 +107,103 @@ class AccessPassService
         }
 
         return ['ok' => true, 'reason' => null, 'pass' => $pass];
+    }
+
+    /**
+     * Verify a token and, if it passes, record the entry - as one atomic
+     * step. This is what a gate should call; verify() on its own is only a
+     * predicate.
+     *
+     * verify() and checkIn() used to be two separate, unsynchronised
+     * statements in both gates (GuardController::scan and
+     * AccessPassApiController::scan). Between the "is anyone already
+     * inside?" read and the insert, a second scan of the same QR - a guard
+     * double-tapping, the app retrying a request, or two guards on two
+     * phones - could run the same read, also see nothing open, and insert a
+     * second 'entered' row. The duplicate needed no unusual timing: the
+     * check and the write were simply not the same operation.
+     *
+     * Taking the pass row with lockForUpdate() inside a transaction makes
+     * the second scan wait for the first to commit, so it re-reads the
+     * now-open visit and is refused with ALREADY_INSIDE. The read is
+     * repeated *inside* the lock - re-reading is the entire point, so the
+     * verdict reflects committed state rather than what was true before
+     * the wait.
+     *
+     * @return array{ok:bool, reason:?string, pass:?AccessPass, visitor:?Visitor, action:?string}
+     */
+    public function verifyAndCheckIn(string $token, int $guardSocietyId, User $guard): array
+    {
+        return DB::transaction(function () use ($token, $guardSocietyId, $guard) {
+            // Serialise every concurrent scan of this pass behind one row.
+            // On MySQL this is a real row lock; on SQLite the surrounding
+            // transaction serialises writers, which gives the same
+            // guarantee for the dev database.
+            $locked = AccessPass::where('token', $token)->lockForUpdate()->first();
+
+            if (!$locked) {
+                return ['ok' => false, 'reason' => self::REASON_NOT_FOUND, 'pass' => null, 'visitor' => null, 'action' => null];
+            }
+
+            $result = $this->verify($token, $guardSocietyId);
+
+            if (!$result['ok']) {
+                return $result + ['visitor' => null, 'action' => null];
+            }
+
+            $pass = $result['pass'];
+
+            // A society-wide pass toggles out on the scan that finds it in -
+            // see checkIn(). Read under the same lock so two scans cannot
+            // both decide it is currently inside.
+            if ($pass->isSocietyWide() && $locked->currently_inside) {
+                $this->checkOutSocietyWide($pass);
+
+                return ['ok' => true, 'reason' => null, 'pass' => $pass, 'visitor' => null, 'action' => 'checked_out'];
+            }
+
+            $visitor = $this->checkIn($pass, $guard);
+
+            return ['ok' => true, 'reason' => null, 'pass' => $pass, 'visitor' => $visitor, 'action' => 'entered'];
+        });
+    }
+
+    /**
+     * The pre-approved-guest half of a gate scan, with the same atomicity
+     * as verifyAndCheckIn(): the "is this guest still pending?" read and
+     * the update that marks them entered happen under one lock, so a
+     * double scan cannot mark the same guest in twice.
+     *
+     * @return array{found:bool, ok:bool, reason:?string, visitor:?Visitor}
+     */
+    public function checkInGuest(string $token, int $guardSocietyId, User $guard): array
+    {
+        return DB::transaction(function () use ($token, $guardSocietyId, $guard) {
+            $guest = Visitor::where('qr_token', $token)->lockForUpdate()->first();
+
+            if (!$guest) {
+                return ['found' => false, 'ok' => false, 'reason' => null, 'visitor' => null];
+            }
+
+            $deny = fn (string $reason) => [
+                'found' => true, 'ok' => false, 'reason' => $reason, 'visitor' => $guest,
+            ];
+
+            if ((int) $guest->society_id !== $guardSocietyId) {
+                return $deny(self::REASON_GUEST_WRONG_SOCIETY);
+            }
+            if ($guest->approval_status !== 'allowed') {
+                return $deny(self::REASON_GUEST_NOT_APPROVED);
+            }
+            if ($guest->entry_status !== 'pending') {
+                return $deny(self::REASON_GUEST_ALREADY_IN);
+            }
+
+            $guest->update(['entry_status' => 'entered', 'actual_entry_time' => now()]);
+            $guest->addLog($guard, 'entry', 'Guest QR scanned in');
+
+            return ['found' => true, 'ok' => true, 'reason' => null, 'visitor' => $guest];
+        });
     }
 
     /**

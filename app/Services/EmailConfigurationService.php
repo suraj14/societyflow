@@ -39,6 +39,16 @@ class EmailConfigurationService
      */
     public static function applyMailConfiguration(array $settings): void
     {
+        // A society's stored SMTP credentials must never override the kill
+        // switch: this is how MAIL_MAILER=log used to be bypassed.
+        if (!\App\Support\ExternalMessaging::enabled()) {
+            config(['mail.default' => 'log']);
+            app()->forgetInstance('mail.manager');
+            app()->forgetInstance('mailer');
+
+            return;
+        }
+
         try {
             // Only apply if we have the required settings
             if (empty($settings['mail_driver']) || empty($settings['mail_from_address'])) {

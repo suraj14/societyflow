@@ -112,9 +112,14 @@ class SocietyController extends BaseController
                 'pincode' => 'required|string|max:10',
                 'phone' => 'nullable|string|max:15',
                 'email' => 'nullable|email|max:255|unique:societies,email,' . $society->id,
+                // Society Info: optional; blank clears them ("Not available").
+                'registration_number' => 'nullable|string|max:100',
+                'registered_on' => 'nullable|date|before_or_equal:today',
             ]);
 
             $validated['slug'] = Str::slug($validated['name']);
+            $validated['registration_number'] = filled($validated['registration_number'] ?? null) ? trim($validated['registration_number']) : null;
+            $validated['registered_on'] = $validated['registered_on'] ?? null;
             $society->update($validated);
             return $society;
         }, 'Society updated successfully!', 'societies.index');

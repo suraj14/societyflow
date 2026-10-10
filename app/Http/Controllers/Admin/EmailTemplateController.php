@@ -45,6 +45,14 @@ class EmailTemplateController extends BaseController
      */
     public function store(Request $request)
     {
+        // handleFormSubmission() only ever uses the closure's return value
+        // as JSON `data` - a bare redirect() built and returned inside the
+        // closure was silently discarded in favour of a generic back()
+        // with the default "Operation completed successfully" message
+        // (confirmed, same bug as UserController's avatar upload fix;
+        // present identically in all four methods of this controller).
+        // The intended message/route are passed here instead, the
+        // convention every other controller using this trait follows.
         return $this->handleFormSubmission(function() use ($request) {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
@@ -59,11 +67,8 @@ class EmailTemplateController extends BaseController
 
             $validated['society_id'] = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
 
-            EmailTemplate::create($validated);
-
-            return redirect()->route('admin.email-templates.index')
-                           ->with('success', 'Email template created successfully.');
-        });
+            return EmailTemplate::create($validated);
+        }, 'Email template created successfully.', 'admin.email-templates.index');
     }
 
     /**
@@ -103,9 +108,8 @@ class EmailTemplateController extends BaseController
 
             $emailTemplate->update($validated);
 
-            return redirect()->route('admin.email-templates.index')
-                           ->with('success', 'Email template updated successfully.');
-        });
+            return $emailTemplate;
+        }, 'Email template updated successfully.', 'admin.email-templates.index');
     }
 
     /**
@@ -115,17 +119,20 @@ class EmailTemplateController extends BaseController
     {
         $this->authorizeTemplate($emailTemplate);
 
-        return $this->handleFormSubmission(function() use ($emailTemplate) {
-            if ($emailTemplate->type === 'system') {
-                return redirect()->route('admin.email-templates.index')
-                               ->with('error', 'System templates cannot be deleted.');
-            }
+        // Checked before entering handleFormSubmission(), not inside the
+        // closure: the closure's returned redirect() was discarded (see
+        // store() above), so attempting to delete a system template
+        // actually showed "Operation completed successfully" - the exact
+        // opposite of what happened - with the template left untouched.
+        if ($emailTemplate->type === 'system') {
+            return back()->with('error', 'System templates cannot be deleted.');
+        }
 
+        return $this->handleFormSubmission(function() use ($emailTemplate) {
             $emailTemplate->delete();
 
-            return redirect()->route('admin.email-templates.index')
-                           ->with('success', 'Email template deleted successfully.');
-        });
+            return true;
+        }, 'Email template deleted successfully.', 'admin.email-templates.index');
     }
 
     /**
@@ -133,24 +140,36 @@ class EmailTemplateController extends BaseController
      */
     public function initializeDefaults()
     {
-        return $this->handleFormSubmission(function() {
-            $societyId = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
-            
-            $defaultTemplates = EmailTemplate::getDefaultTemplates();
-            
-            foreach ($defaultTemplates as $template) {
-                $template['society_id'] = $societyId;
-                
-                // Only create if doesn't exist
-                EmailTemplate::firstOrCreate(
-                    ['slug' => $template['slug'], 'society_id' => $societyId],
-                    $template
-                );
+        $societyId = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
+
+        // A slug is unique across the whole table (the store form validates it that way and the
+        // database enforces it), and the defaults are normally already present as global
+        // templates every society uses. Copying them per society therefore collided with the
+        // unique index and failed the whole action with a generic error, every time. Create only
+        // the defaults that really do not exist yet, and say what happened.
+        //
+        // "Exists" also means "a template already serves this trigger event". The default set
+        // uses legacy hyphenated slugs while the seeded templates are keyed by trigger event, so
+        // matching on slug alone would add a SECOND active template for an event that already
+        // has one and make the choice between them ambiguous.
+        $missing = collect(EmailTemplate::getDefaultTemplates())
+            ->reject(fn ($template) => EmailTemplate::where('slug', $template['slug'])
+                ->when(!empty($template['trigger_event']), fn ($q) => $q->orWhere('trigger_event', $template['trigger_event']))
+                ->exists())
+            ->values();
+
+        if ($missing->isEmpty()) {
+            return redirect()->route('admin.email-templates.index')
+                ->with('success', 'Nothing to add: all default email templates already exist.');
+        }
+
+        return $this->handleFormSubmission(function () use ($missing, $societyId) {
+            foreach ($missing as $template) {
+                EmailTemplate::create(['society_id' => $societyId] + $template);
             }
 
-            return redirect()->route('admin.email-templates.index')
-                           ->with('success', 'Default email templates initialized successfully.');
-        });
+            return true;
+        }, "{$missing->count()} default email template(s) created.", 'admin.email-templates.index');
     }
 
     /**

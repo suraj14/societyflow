@@ -99,7 +99,7 @@ class ComplaintController extends BaseController
         $properties = collect();
         if ($user->hasAnyRole(['Owner', 'Villa Owner', 'Apartment Owner'])) {
             // Get owned flats
-            $ownedFlats = \App\Models\Flat::where('owner_id', $user->owner_id)
+            $ownedFlats = \App\Models\Flat::ownedBy($user->owner_id)
                                           ->where('society_id', $societyId)
                                           ->with(['building', 'villaArea'])
                                           ->get();
@@ -217,6 +217,7 @@ class ComplaintController extends BaseController
 
             // Send email notification
             \App\Services\EmailNotificationService::sendComplaintNotification($complaint, 'created');
+            \App\Support\BusinessNotifications::complaintCreated($complaint);
 
             return $complaint;
         }, 'Complaint registered successfully!', 'complaints.index');

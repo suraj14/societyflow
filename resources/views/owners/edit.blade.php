@@ -101,8 +101,12 @@
                             <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                                 <p class="text-sm text-blue-700">
                                     <i class="fas fa-check-circle mr-2"></i>
-                                    Current image: <img src="{{ asset('storage/' . $owner->profile_image) }}" alt="Profile" class="inline-block w-12 h-12 rounded-full">
+                                    Current image: <img src="{{ asset('storage/' . $owner->profile_image) }}" alt="Profile" class="inline-block w-12 h-12 rounded-full object-cover">
                                 </p>
+                                <label class="inline-flex items-center mt-2 text-sm text-gray-700">
+                                    <input type="checkbox" name="remove_profile_image" value="1" class="mr-2 rounded border-gray-300">
+                                    Remove current photo (uploading a new one replaces it; leaving this empty keeps it)
+                                </label>
                             </div>
                         @endif
                         

@@ -68,9 +68,11 @@ class EmailTemplateMappingController extends Controller
         // Get the template
         $template = EmailTemplate::findOrFail($validated['template_id']);
 
-        // Verify template belongs to this society or is system template
-        if ($template->society_id !== null && $template->society_id !== $societyId) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+        // A society's Admin may remap that society's OWN templates. A system template (society_id null) is
+        // shared by every society: changing which event it serves changes it for all of them (and can
+        // silently switch an event off platform-wide), so only a Super Admin may do that.
+        if (!$this->mayChange($template, $societyId)) {
+            return response()->json(['error' => 'System templates are shared by every society; only a Super Admin can change which event they serve.'], 403);
         }
 
         // Update trigger_event for this template
@@ -106,6 +108,10 @@ class EmailTemplateMappingController extends Controller
         // Find and clear the template for this event
         $template = EmailTemplate::getTemplateForEvent($eventValue, $societyId);
 
+        if ($template && !$this->mayChange($template, $societyId)) {
+            return response()->json(['error' => 'This event is served by a system template shared by every society; only a Super Admin can remove that mapping.'], 403);
+        }
+
         if ($template) {
             $template->update(['trigger_event' => null]);
 
@@ -120,6 +126,16 @@ class EmailTemplateMappingController extends Controller
             'success' => true,
             'message' => 'Email template mapping removed successfully',
         ]);
+    }
+
+    /** Society-owned template: that society's Admin may change it. System template (no society): Super Admin only. */
+    private function mayChange(EmailTemplate $template, $societyId): bool
+    {
+        if (auth()->user()->hasRole('Super Admin')) {
+            return true;
+        }
+
+        return $template->society_id !== null && (int) $template->society_id === (int) $societyId;
     }
 
     /**
@@ -165,6 +181,11 @@ class EmailTemplateMappingController extends Controller
         // Verify event is valid
         if (!in_array($eventValue, EmailEvent::values())) {
             return response()->json(['error' => 'Invalid event'], 400);
+        }
+
+        // Never report a send that was only logged.
+        if (!\App\Support\ExternalMessaging::enabled()) {
+            return response()->json(['success' => false, 'message' => 'Not sent: external messaging is disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).']);
         }
 
         // Get template for this event

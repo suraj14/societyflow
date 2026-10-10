@@ -36,7 +36,6 @@
                         'currency' => ['icon' => 'fa-dollar-sign', 'label' => 'Currency'],
                         'email' => ['icon' => 'fa-envelope', 'label' => 'Email Settings'],
                         'payment' => ['icon' => 'fa-credit-card', 'label' => 'Payment Gateway'],
-                        'push' => ['icon' => 'fa-bell', 'label' => 'Push Notifications'],
                         'security' => ['icon' => 'fa-shield-alt', 'label' => 'Security'],
                     ];
                 @endphp
@@ -331,11 +330,6 @@
             <!-- Payment Settings Tab -->
             <div x-show="activeTab === 'payment'" x-cloak>
                 @include('super-admin.settings.partials.payment')
-            </div>
-
-            <!-- Push Notifications Tab -->
-            <div x-show="activeTab === 'push'" x-cloak>
-                @include('super-admin.settings.partials.push')
             </div>
 
             <!-- Security Settings Tab -->

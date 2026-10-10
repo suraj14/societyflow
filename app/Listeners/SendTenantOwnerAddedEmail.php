@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\TenantOwnerAdded;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -44,8 +45,9 @@ class SendTenantOwnerAddedEmail
 
             // Add property owner
             if ($tenant->flat_id) {
+                // flats.id, not id - see App\Models\User::ownedProperties()'s docblock.
                 $owners = User::whereHas('ownedProperties', function($q) use ($tenant) {
-                    $q->where('id', $tenant->flat_id);
+                    $q->where('flats.id', $tenant->flat_id);
                 })->where('society_id', $societyId)
                   ->whereHas('roles', function($q) use ($allowedRoles) {
                       $q->whereIn('name', $allowedRoles);
@@ -97,12 +99,13 @@ class SendTenantOwnerAddedEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                DispatchEventNotification::dispatch(
                     'tenant_owner_added',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "tenant_owner_added:{$tenant->id}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Tenant/Owner added email sent', [

@@ -13,8 +13,12 @@
         <div class="p-6">
             <!-- Profile Header -->
             <div class="flex items-center mb-6 pb-6 border-b border-gray-200">
-                <div class="w-20 h-20 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center">
-                    <i class="fas fa-user text-white text-3xl"></i>
+                <div class="w-20 h-20 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center overflow-hidden">
+                    @if(auth()->user()->avatar_web_url)
+                        <img src="{{ auth()->user()->avatar_web_url }}" alt="{{ auth()->user()->name }}" class="w-full h-full object-cover">
+                    @else
+                        <i class="fas fa-user text-white text-3xl"></i>
+                    @endif
                 </div>
                 <div class="ml-6">
                     <h2 class="text-2xl font-bold text-gray-900">{{ auth()->user()->name }}</h2>

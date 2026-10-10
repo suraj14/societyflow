@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\PaymentReceived;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -78,12 +79,13 @@ class SendPaymentConfirmationEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                DispatchEventNotification::dispatch(
                     'payment_success',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "payment_success:{$payment->id}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Payment confirmation email sent', [

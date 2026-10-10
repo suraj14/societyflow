@@ -28,6 +28,12 @@ class NoticeController extends BaseController
             $query->where('society_id', $user->society_id);
         }
 
+        // Only the office works with drafts, pending and rejected notices; everyone else reads published ones.
+        $manages = $user->can('manage_notices');
+        if (!$manages) {
+            $query->where('status', 'published');
+        }
+
         // Search filter
         if ($request->filled('search')) {
             $query->where(function ($q) use ($request) {
@@ -54,21 +60,24 @@ class NoticeController extends BaseController
         $notices = $query->latest()->paginate(10);
 
         // Stats should also be filtered by society for Admin users
-        if ($user->hasRole('Admin')) {
-            $stats = [
-                'total' => Notice::where('society_id', $user->society_id)->count(),
-                'published' => Notice::where('society_id', $user->society_id)->where('status', 'published')->count(),
-                'pending' => Notice::where('society_id', $user->society_id)->where('status', 'pending')->count(),
-                'draft' => Notice::where('society_id', $user->society_id)->where('status', 'draft')->count(),
-            ];
-        } else {
-            $stats = [
-                'total' => Notice::count(),
-                'published' => Notice::where('status', 'published')->count(),
-                'pending' => Notice::where('status', 'pending')->count(),
-                'draft' => Notice::where('status', 'draft')->count(),
-            ];
-        }
+        // Scoped like the list (the old non-Admin branch counted every society's notices, drafts included).
+        $count = function (?string $status = null) use ($user, $manages) {
+            $q = Notice::query();
+            if (!$user->hasRole('Super Admin')) {
+                $q->where('society_id', $user->society_id);
+            }
+            if (!$manages) {
+                $q->where('status', 'published');
+            }
+
+            return $status ? $q->where('status', $status)->count() : $q->count();
+        };
+        $stats = [
+            'total' => $count(),
+            'published' => $count('published'),
+            'pending' => $count('pending'),
+            'draft' => $count('draft'),
+        ];
 
         return view('notices.index', compact('notices', 'stats'));
     }
@@ -125,18 +134,7 @@ class NoticeController extends BaseController
         }
 
         if ($request->hasFile('image')) {
-            // Store image filename only, don't use Storage::disk
-            $file = $request->file('image');
-            $uploadPath = public_path('storage/notices');
-            @mkdir($uploadPath, 0777, true);
-            $filename = time() . '_' . $file->getClientOriginalName();
-            try {
-                $file->move($uploadPath, $filename);
-            } catch (\Exception $e) {
-                @chmod($uploadPath, 0777);
-                $file->move($uploadPath, $filename);
-            }
-            $validated['image'] = 'notices/' . $filename;
+            $validated['image'] = $this->handleFileUpload($request, 'image', 'notices', ['jpeg', 'png', 'jpg', 'gif']);
         }
 
         $validated['created_by'] = auth()->id() ?? 1;
@@ -170,6 +168,9 @@ class NoticeController extends BaseController
         // a Tenant, Owner, Guard or Accountant could read any notice in any
         // society by id, including other societies' drafts.
         $this->authorizeSocietyAccess($notice);
+
+        // Unpublished notices are office-only (a resident guessing the id must not read a draft).
+        abort_unless($notice->status === 'published' || auth()->user()->can('manage_notices'), 404);
 
         $notice->load(['society', 'createdBy', 'approvedBy', 'reads.user']);
         return view('notices.show', compact('notice'));
@@ -249,21 +250,11 @@ class NoticeController extends BaseController
         }
 
         if ($request->hasFile('image')) {
-            if ($notice->image) {
-                // Don't try to delete - just skip it
+            $oldImage = $notice->image;
+            $validated['image'] = $this->handleFileUpload($request, 'image', 'notices', ['jpeg', 'png', 'jpg', 'gif']);
+            if ($oldImage) {
+                $this->deleteUploadedFile($oldImage);
             }
-            // Store image filename only, don't use Storage::disk
-            $file = $request->file('image');
-            $uploadPath = public_path('storage/notices');
-            @mkdir($uploadPath, 0777, true);
-            $filename = time() . '_' . $file->getClientOriginalName();
-            try {
-                $file->move($uploadPath, $filename);
-            } catch (\Exception $e) {
-                @chmod($uploadPath, 0777);
-                $file->move($uploadPath, $filename);
-            }
-            $validated['image'] = 'notices/' . $filename;
         }
 
         $validated['send_email'] = $request->has('send_email');
@@ -377,6 +368,12 @@ class NoticeController extends BaseController
         $query = Notice::with(['society', 'createdBy'])
             ->where('status', 'pending');
 
+        // The approval queue is the office's; everyone else sees only their own submissions in it
+        // (it used to list every pending notice of the society to any signed-in resident).
+        if (!$user->can('manage_notices')) {
+            $query->where('created_by', $user->id);
+        }
+
         // Everyone except Super Admin is scoped to their own society.
         if (!$user->hasRole('Super Admin')) {
             $query->where('society_id', $user->society_id);
@@ -395,6 +392,10 @@ class NoticeController extends BaseController
         // Everyone except Super Admin is scoped to their own society.
         if (!$user->hasRole('Super Admin')) {
             $query->where('society_id', $user->society_id);
+        }
+
+        if (!$user->can('manage_notices')) {
+            $query->where('status', 'published');
         }
 
         if ($request->filled('date_from')) {

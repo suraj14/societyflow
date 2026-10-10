@@ -11,7 +11,7 @@ class BillingController extends Controller
 {
     public function index(Request $request)
     {
-        $query = SubscriptionPayment::with(['society', 'subscriptionPlan']);
+        $query = SubscriptionPayment::with(['society', 'subscriptionPlan', 'subscription']);
 
         // Search functionality.
         //
@@ -28,7 +28,7 @@ class BillingController extends Controller
             });
         }
 
-        // Status filter
+        // Status filter (the table allows pending | success | failed | refunded)
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -42,13 +42,14 @@ class BillingController extends Controller
             $query->whereDate('created_at', '<=', $request->date_to);
         }
 
-        $payments = $query->latest()->paginate(15);
+        $payments = $query->latest()->paginate(15)->withQueryString();
 
-        // Statistics
+        // Statistics. These counted status 'completed', which the table's CHECK
+        // constraint does not allow, so revenue could only ever read zero.
         $stats = [
-            'total_revenue' => SubscriptionPayment::where('status', 'completed')->sum('amount'),
-            'monthly_revenue' => SubscriptionPayment::where('status', 'completed')
-                ->whereMonth('created_at', now()->month)->sum('amount'),
+            'total_revenue' => SubscriptionPayment::where('status', 'success')->sum('amount'),
+            'monthly_revenue' => SubscriptionPayment::where('status', 'success')
+                ->whereYear('payment_date', now()->year)->whereMonth('payment_date', now()->month)->sum('amount'),
             'pending_payments' => SubscriptionPayment::where('status', 'pending')->count(),
             'failed_payments' => SubscriptionPayment::where('status', 'failed')->count(),
         ];
@@ -58,33 +59,53 @@ class BillingController extends Controller
 
     public function show(SubscriptionPayment $payment)
     {
-        $payment->load(['society', 'subscriptionPlan']);
+        $payment->load(['subscription', 'society', 'subscriptionPlan']);
+
         return view('super-admin.billing.show', compact('payment'));
     }
 
+    /**
+     * Record that a pending/failed subscription payment was received (offline,
+     * bank transfer...) and extend the subscription by one cycle. Idempotent: a
+     * payment already marked paid is not extended a second time.
+     *
+     * The extension starts from the later of "now" and the current end date, so
+     * paying late does not leave the plan already expired.
+     */
     public function markAsPaid(SubscriptionPayment $payment)
     {
-        $payment->update([
-            'status' => 'completed',
-            'paid_at' => now(),
-        ]);
-
-        // Update society subscription
-        $society = $payment->society;
-        if ($payment->billing_cycle === 'monthly') {
-            $society->subscription_ends_at = now()->addMonth();
-        } elseif ($payment->billing_cycle === 'annual') {
-            $society->subscription_ends_at = now()->addYear();
-        } elseif ($payment->billing_cycle === 'lifetime') {
-            $society->subscription_ends_at = null; // Lifetime
+        if ($payment->status === 'success') {
+            return back()->with('success', 'This payment was already marked as paid.');
         }
-        
-        $society->status = 'active';
-        $society->save();
+        if ($payment->status === 'refunded') {
+            return back()->with('error', 'A refunded payment cannot be marked as paid.');
+        }
 
-        return back()->with('success', 'Payment marked as paid successfully!');
+        \Illuminate\Support\Facades\DB::transaction(function () use ($payment) {
+            $payment->update(['status' => 'success', 'payment_date' => now()->toDateString()]);
+
+            $subscription = $payment->subscription;
+            $society = $subscription?->society;
+            if (!$subscription || !$society) {
+                return;
+            }
+
+            $from = $subscription->end_date && $subscription->end_date->isFuture() ? $subscription->end_date->copy() : now();
+            $end = $subscription->billing_cycle === 'yearly' ? $from->copy()->addYear() : $from->copy()->addMonth();
+
+            $subscription->update([
+                'status' => 'active',
+                'end_date' => $end->toDateString(),
+                'next_billing_date' => $end->toDateString(),
+            ]);
+
+            $society->subscription_ends_at = $end;
+            $society->status = 'active';
+            $society->save();
+        });
+
+        return back()->with('success', 'Payment marked as paid and the subscription extended.');
     }
-
     public function downloadInvoice(SubscriptionPayment $payment)
     {
         // Generate PDF invoice

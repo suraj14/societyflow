@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\VisitorApproved;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -70,12 +71,13 @@ class SendVisitorApprovedEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                DispatchEventNotification::dispatch(
                     'visitor_approved',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "visitor_approved:{$visitor->id}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Visitor approved email sent', [

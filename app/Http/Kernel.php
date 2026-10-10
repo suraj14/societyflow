@@ -7,6 +7,30 @@ use Illuminate\Foundation\Http\Kernel as HttpKernel;
 class Kernel extends HttpKernel
 {
     /**
+     * Laravel's default order, with the Guard containment placed before
+     * route-model binding. Left unlisted it ran after SubstituteBindings, so
+     * a Guard asking for /access-passes/{id} learned from 404-versus-403
+     * whether the id existed. Authentication still runs first (the middleware
+     * needs the user).
+     *
+     * @var array<int, class-string>
+     */
+    protected $middlewarePriority = [
+        \Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests::class,
+        \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        \Illuminate\Session\Middleware\StartSession::class,
+        \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+        \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class,
+        \Illuminate\Routing\Middleware\ThrottleRequests::class,
+        \Illuminate\Routing\Middleware\ThrottleRequestsWithRedis::class,
+        \Illuminate\Contracts\Session\Middleware\AuthenticatesSessions::class,
+        \App\Http\Middleware\RestrictGuardApiAccess::class,
+        \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        \Illuminate\Auth\Middleware\Authorize::class,
+    ];
+
+    /**
      * The application's global HTTP middleware stack.
      *
      * These middleware are run during every request to your application.
@@ -47,6 +71,11 @@ class Kernel extends HttpKernel
             // After the session + CSRF: a replayed form token is refused
             // before the controller can create a second record.
             \App\Http\Middleware\PreventDuplicateFormSubmission::class,
+            // Gate accounts are confined to the gate. Registered on the
+            // whole web group, not per route group, so a route added
+            // later cannot quietly become guard-accessible - which is how
+            // /payments and /utility-bills became reachable.
+            \App\Http\Middleware\RestrictGuardAccess::class,
         ],
 
         'api' => [
@@ -80,5 +109,6 @@ class Kernel extends HttpKernel
         'role_or_permission' => \Spatie\Permission\Middlewares\RoleOrPermissionMiddleware::class,
         'tenant.access' => \App\Http\Middleware\TenantAccess::class,
         'restrict.staff' => \App\Http\Middleware\RestrictStaffAccess::class,
+        'restrict.guard.api' => \App\Http\Middleware\RestrictGuardApiAccess::class,
     ];
 }

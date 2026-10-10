@@ -13,6 +13,8 @@ use Illuminate\Console\Command;
  *  - flats.status matches the canonical occupancy rule
  *  - 'RENT-…' bills are typed rent
  *  - every bill's paid_amount is backed by success payments
+ *  - (report only) an active tenant's residency row names the same unit as
+ *    their tenancy
  *
  * Report by default; --fix writes, following the same convention as
  * users:rotate-weak-passwords and tenants:repair-flat-assignments.
@@ -49,14 +51,39 @@ class DataIntegrityAudit extends Command
 
         $total = $result['tenants'] + $result['flats'] + $result['bills_relabelled'] + $result['bills_reconciled'];
 
-        if ($total === 0) {
+        // Report-only: the data cannot say which row is right, so --fix never
+        // touches these and the command keeps failing until a person has.
+        $contradictions = DataIntegrityRepair::residentsContradictingTenancy();
+        $this->line("  tenants whose residency row names another unit (needs a human decision, never auto-fixed) : {$contradictions->count()}");
+        if ($contradictions->isNotEmpty()) {
+            $this->table(
+                ['Society', 'Tenant', 'User', 'Tenancy unit (flat id)', 'Residency row', 'Residency unit (flat id)'],
+                $contradictions->map(fn ($r) => [$r->society_id, $r->tenant_id, $r->user_id, $r->tenancy_flat_id, $r->resident_id, $r->resident_flat_id])->all()
+            );
+            $this->warn('Decide which unit is correct, then fix or remove the other row. The app shows this tenant BOTH units until you do.');
+        }
+
+        $imageMismatches = DataIntegrityRepair::mismatchedProfileImages();
+        $this->line("  linked user/owner accounts whose photos disagree (needs a human decision, never auto-fixed) : {$imageMismatches->count()}");
+        if ($imageMismatches->isNotEmpty()) {
+            $this->table(
+                ['User', 'User avatar', 'Owner', 'Owner profile_image'],
+                $imageMismatches->map(fn ($r) => [$r->user_id, $r->user_avatar ?? '(none)', $r->owner_id, $r->owner_profile_image ?? '(none)'])->all()
+            );
+        }
+
+        $manualFindings = $contradictions->isEmpty() && $imageMismatches->isEmpty();
+
+        if ($total === 0 && $manualFindings) {
             $this->info('All invariants hold.');
+        } elseif ($total === 0) {
+            // only a manual finding remains
         } elseif (!$fix) {
             $this->warn('Run with --fix to repair. Each change is written to activity_logs.');
         } else {
             $this->info('Done. Each change was written to activity_logs.');
         }
 
-        return $total === 0 || $fix ? self::SUCCESS : self::FAILURE;
+        return ($total === 0 || $fix) && $manualFindings ? self::SUCCESS : self::FAILURE;
     }
 }

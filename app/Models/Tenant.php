@@ -143,6 +143,18 @@ class Tenant extends Model
             if ($flatIdChanged) {
                 $previousFlatId = $tenant->getOriginal('flat_id');
                 if ($previousFlatId && (int) $previousFlatId !== (int) $tenant->flat_id) {
+                    // The legacy residency row for the unit they just left is
+                    // history now. Left "active" it kept the tenant resolving to
+                    // BOTH units (UserFlatResolver reads residents) - giving them
+                    // the old unit's bills and bookings. Close it, never delete it.
+                    if ($tenant->user_id) {
+                        \App\Models\Resident::where('user_id', $tenant->user_id)
+                            ->where('type', 'tenant')
+                            ->where('status', 'active')
+                            ->where('flat_id', $previousFlatId)
+                            ->update(['status' => 'inactive', 'move_out_date' => $tenant->move_out_date ?? now()]);
+                    }
+
                     \App\Models\Flat::find($previousFlatId)?->updateStatus();
                 }
             }

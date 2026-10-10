@@ -37,13 +37,10 @@
         // content, route or controller was touched to make this grouping
         // work.
         //
-        // 'push' is deliberately not listed in any section: SettingsController
-        // ::updatePush() writes to SystemSetting's 'push' group, which has no
-        // reader anywhere in the app (confirmed by search) - the real push
-        // infrastructure (PushNotificationService, the PushNotificationSetting
-        // model, PushSubscriptionController) is configured on its own admin
-        // page and is untouched. The route/content still exist (nothing was
-        // deleted), just with no menu entry pointing at them.
+        // Push notifications were removed from SocietyFlow entirely (not
+        // part of the approved communication scope) - its tab, route,
+        // controller methods, services, models and admin screens are gone,
+        // not just unlinked.
         $sections = [
             'general' => [
                 'icon' => 'fa-cog',
@@ -52,6 +49,7 @@
                     'society' => ['icon' => 'fa-building', 'label' => 'Society Info'],
                     'app' => ['icon' => 'fa-cog', 'label' => 'App Settings'],
                     'currency-features' => ['icon' => 'fa-coins', 'label' => 'Currency & Features'],
+                    'society-documents' => ['icon' => 'fa-circle-info', 'label' => 'Society Info'],
                 ],
             ],
             'appearance' => [
@@ -74,8 +72,8 @@
                 'label' => 'Communication',
                 'tabs' => [
                     'email' => ['icon' => 'fa-envelope', 'label' => 'Email Settings'],
-                    'email-templates' => ['icon' => 'fa-envelope-open-text', 'label' => 'Email Templates'],
                     'sms' => ['icon' => 'fa-sms', 'label' => 'SMS / OTP'],
+                    'whatsapp' => ['icon' => 'fa-brands fa-whatsapp', 'label' => 'WhatsApp'],
                 ],
             ],
             'payments' => [
@@ -199,6 +197,24 @@
                         </div>
                     </div>
                 </form>
+            </div>
+
+            <!-- Society Info Tab (formerly Rules & Documents): the module has its own screens; this is the Settings entry point to it -->
+            <div x-show="activeTab === 'society-documents'" x-cloak>
+                <div class="rounded-2xl border border-purple-100 bg-gradient-to-r from-purple-50 to-blue-50 p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">Society Info</h3>
+                        <p class="text-sm text-gray-600 mt-1">Your society's details and committee, plus the rules, bye-laws and policies you publish as PDFs - with new versions and who has read them.</p>
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <a href="{{ route('society-rules.index') }}" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-purple-200 bg-white text-purple-700 text-sm font-semibold hover:bg-purple-50 whitespace-nowrap">
+                            <i class="fas fa-circle-info"></i> View Society Info
+                        </a>
+                        <a href="{{ route('admin.society-documents.index') }}" class="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 whitespace-nowrap">
+                            <i class="fas fa-book-open"></i> Manage documents
+                        </a>
+                    </div>
+                </div>
             </div>
 
             <!-- App Settings Tab -->
@@ -804,216 +820,7 @@
             </div>
             <!-- Email Settings Tab -->
             <div x-show="activeTab === 'email'" x-cloak>
-                <form action="{{ route('settings.email.update') }}" method="POST">
-                    @csrf
-                    <div class="space-y-6">
-                        <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
-                            <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-envelope text-blue-600"></i>
-                            </div>
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-900">Email Configuration</h3>
-                                <p class="text-sm text-gray-500">Configure SMTP settings for your society</p>
-                            </div>
-                        </div>
-
-                        <!-- Mail Configuration -->
-                        <div>
-                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Mail Configuration</h4>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Mail Driver</label>
-                                    <select name="mail_driver" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                        <option value="smtp" {{ ($settings['email']['mail_driver'] ?? 'smtp') == 'smtp' ? 'selected' : '' }}>SMTP</option>
-                                        <option value="sendmail" {{ ($settings['email']['mail_driver'] ?? '') == 'sendmail' ? 'selected' : '' }}>Sendmail</option>
-                                        <option value="mailgun" {{ ($settings['email']['mail_driver'] ?? '') == 'mailgun' ? 'selected' : '' }}>Mailgun</option>
-                                        <option value="ses" {{ ($settings['email']['mail_driver'] ?? '') == 'ses' ? 'selected' : '' }}>Amazon SES</option>
-                                        <option value="postmark" {{ ($settings['email']['mail_driver'] ?? '') == 'postmark' ? 'selected' : '' }}>Postmark</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Host</label>
-                                    <input type="text" name="mail_host" value="{{ $settings['email']['mail_host'] ?? '' }}"
-                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                        placeholder="smtp.gmail.com">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">SMTP Port</label>
-                                    <input type="number" name="mail_port" value="{{ $settings['email']['mail_port'] ?? '587' }}"
-                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                        placeholder="587">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Encryption</label>
-                                    <select name="mail_encryption" class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                        <option value="tls" {{ ($settings['email']['mail_encryption'] ?? 'tls') == 'tls' ? 'selected' : '' }}>TLS</option>
-                                        <option value="ssl" {{ ($settings['email']['mail_encryption'] ?? '') == 'ssl' ? 'selected' : '' }}>SSL</option>
-                                        <option value="null" {{ ($settings['email']['mail_encryption'] ?? '') == 'null' ? 'selected' : '' }}>None</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Username</label>
-                                    <input type="text" name="mail_username" value="{{ $settings['email']['mail_username'] ?? '' }}"
-                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                                    <input type="password" name="mail_password" value="{{ $settings['email']['mail_password'] ?? '' }}"
-                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Sender Information -->
-                        <div class="border-t border-gray-200 pt-6">
-                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Sender Information</h4>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">From Email</label>
-                                    <input type="email" name="mail_from_address" value="{{ $settings['email']['mail_from_address'] ?? '' }}"
-                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                        required>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">From Name</label>
-                                    <input type="text" name="mail_from_name" value="{{ $settings['email']['mail_from_name'] ?? auth()->user()->society->name ?? 'Society' }}"
-                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                        required>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Testing -->
-                        <div class="border-t border-gray-200 pt-6">
-                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Testing</h4>
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center space-x-4">
-                                    <input type="email" id="test_email" placeholder="test@example.com"
-                                        aria-label="Test email address"
-                                        class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500">
-                                    <button type="button" onclick="testEmail()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
-                                        <i class="fas fa-paper-plane mr-2"></i>Send Test Email
-                                    </button>
-                                </div>
-                                <button type="submit" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors">
-                                    <i class="fas fa-save mr-2"></i>Save Changes
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Email Templates Tab -->
-            <div x-show="activeTab === 'email-templates'" x-cloak>
-                <div class="space-y-6">
-                    <div class="flex items-center justify-between pb-4 border-b border-gray-200">
-                        <div class="flex items-center space-x-3">
-                            <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-envelope-open-text text-purple-600"></i>
-                            </div>
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-900">Email Templates</h3>
-                                <p class="text-sm text-gray-500">Manage and customize email templates for your society</p>
-                            </div>
-                        </div>
-                        <div class="flex space-x-3">
-                            <a href="{{ route('admin.email-templates.create') }}" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm">
-                                <i class="fas fa-plus mr-2"></i>Create Template
-                            </a>
-                            <form method="POST" action="{{ route('admin.email-templates.initialize') }}" class="inline">
-                                @csrf
-                                <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm">
-                                    <i class="fas fa-magic mr-2"></i>Initialize Defaults
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-
-                    <!-- Email Templates: compact searchable table (was a card grid -
-                         same data, same routes, just less scrolling to find one template) -->
-                    @php
-                        $templates = \App\Models\EmailTemplate::when(!auth()->user()->hasRole('Super Admin'), function($query) {
-                            return $query->forSociety(auth()->user()->society_id);
-                        })->orderBy('name')->get();
-                    @endphp
-
-                    <div class="flex items-center gap-4 text-xs text-gray-500">
-                        <span><i class="fas fa-envelope text-blue-500 mr-1"></i>{{ $templates->count() }} total</span>
-                        <span><i class="fas fa-check-circle text-green-500 mr-1"></i>{{ $templates->where('status', 'active')->count() }} active</span>
-                        <span><i class="fas fa-cogs text-purple-500 mr-1"></i>{{ $templates->where('type', 'system')->count() }} system</span>
-                        <span><i class="fas fa-user-edit text-orange-500 mr-1"></i>{{ $templates->where('type', 'custom')->count() }} custom</span>
-                    </div>
-
-                    @if($templates->count() > 0)
-                        <div x-data="{ search: '' }">
-                            <div class="relative">
-                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                <input type="text" x-model="search" placeholder="Search templates…"
-                                    aria-label="Search email templates"
-                                    class="w-full pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-300 focus:border-purple-500 mb-3">
-                            </div>
-
-                            <div class="border border-gray-200 rounded-lg overflow-hidden">
-                                <table class="w-full text-sm">
-                                    <thead class="bg-gray-50">
-                                        <tr class="text-left text-xs font-medium text-gray-500">
-                                            <th class="px-4 py-2">Template</th>
-                                            <th class="px-4 py-2 hidden md:table-cell">Subject</th>
-                                            <th class="px-4 py-2">Status</th>
-                                            <th class="px-4 py-2 hidden sm:table-cell">Type</th>
-                                            <th class="px-4 py-2 text-right">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-gray-100">
-                                        @foreach($templates as $template)
-                                            <tr x-show="search === '' || {{ \Illuminate\Support\Js::from(strtolower($template->name.' '.$template->subject)) }}.includes(search.toLowerCase())"
-                                                class="hover:bg-gray-50">
-                                                <td class="px-4 py-2.5 font-medium text-gray-800">{{ $template->name }}</td>
-                                                <td class="px-4 py-2.5 text-gray-500 hidden md:table-cell">{{ Str::limit($template->subject, 50) }}</td>
-                                                <td class="px-4 py-2.5">
-                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ $template->status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
-                                                        {{ ucfirst($template->status) }}
-                                                    </span>
-                                                </td>
-                                                <td class="px-4 py-2.5 hidden sm:table-cell">
-                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {{ $template->type === 'system' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800' }}">
-                                                        {{ ucfirst($template->type) }}
-                                                    </span>
-                                                </td>
-                                                <td class="px-4 py-2.5 text-right whitespace-nowrap">
-                                                    <a href="{{ route('admin.email-templates.show', $template) }}" class="text-blue-600 hover:text-blue-800 mr-3" aria-label="View {{ $template->name }}">
-                                                        <i class="fas fa-eye"></i>
-                                                    </a>
-                                                    <a href="{{ route('admin.email-templates.edit', $template) }}" class="text-purple-600 hover:text-purple-800" aria-label="Edit {{ $template->name }}">
-                                                        <i class="fas fa-edit"></i> Edit
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        @endforeach
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    @else
-                        <div class="text-center py-8 bg-gray-50 rounded-lg">
-                            <i class="fas fa-envelope fa-3x text-gray-400 mb-4"></i>
-                            <h3 class="text-lg font-medium text-gray-900 mb-2">No Email Templates Found</h3>
-                            <p class="text-gray-500 mb-6">Get started by creating your first email template or initializing default templates.</p>
-                            <div class="flex justify-center space-x-3">
-                                <a href="{{ route('admin.email-templates.create') }}" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
-                                    <i class="fas fa-plus mr-2"></i>Create Template
-                                </a>
-                                <form method="POST" action="{{ route('admin.email-templates.initialize') }}" class="inline">
-                                    @csrf
-                                    <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg">
-                                        <i class="fas fa-magic mr-2"></i>Initialize Defaults
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                    @endif
-                </div>
+                @include('settings.partials.email')
             </div>
 
             <!-- Payment Settings Tab -->
@@ -1312,66 +1119,14 @@
                 </form>
             </div>
 
-            <!-- Push Notifications Tab -->
-            <div x-show="activeTab === 'push'" x-cloak>
-                <form action="{{ route('settings.push.update') }}" method="POST">
-                    @csrf
-                    <div class="space-y-6">
-                        <div class="flex items-center space-x-3 pb-4 border-b border-gray-200">
-                            <div class="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-bell text-yellow-600"></i>
-                            </div>
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-900">Push Notification Settings</h3>
-                                <p class="text-sm text-gray-500">Configure push notifications for your society</p>
-                            </div>
-                        </div>
-
-                        <!-- Enable Push -->
-                        <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                            <div>
-                                <h4 class="text-sm font-medium text-gray-900">Enable Push Notifications</h4>
-                                <p class="text-sm text-gray-500">Allow sending push notifications to users</p>
-                            </div>
-                            <label class="relative inline-flex items-center cursor-pointer">
-                                <input type="checkbox" name="push_enabled" value="1" {{ ($settings['push']['push_enabled'] ?? false) ? 'checked' : '' }} class="sr-only peer">
-                                <div class="w-11 h-6 bg-gray-200 peer-focus:ring-4 peer-focus:ring-purple-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
-                            </label>
-                        </div>
-
-                        <div class="grid grid-cols-1 gap-6">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">FCM Server Key</label>
-                                <textarea name="fcm_server_key" rows="3"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    placeholder="Firebase Cloud Messaging Server Key">{{ $settings['push']['fcm_server_key'] ?? '' }}</textarea>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">VAPID Public Key</label>
-                                <textarea name="vapid_public_key" rows="3"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    placeholder="VAPID Public Key">{{ $settings['push']['vapid_public_key'] ?? '' }}</textarea>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">VAPID Private Key</label>
-                                <textarea name="vapid_private_key" rows="3"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                                    placeholder="VAPID Private Key">{{ $settings['push']['vapid_private_key'] ?? '' }}</textarea>
-                            </div>
-                        </div>
-
-                        <div class="flex justify-end pt-4 border-t border-gray-200">
-                            <button type="submit" class="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors">
-                                <i class="fas fa-save mr-2"></i>Save Settings
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
             <!-- SMS / OTP Settings Tab -->
             <div x-show="activeTab === 'sms'" x-cloak>
                 @include('settings.partials.sms')
+            </div>
+
+            <!-- WhatsApp Settings Tab -->
+            <div x-show="activeTab === 'whatsapp'" x-cloak>
+                @include('settings.partials.whatsapp')
             </div>
 
             <!-- Security Settings Tab -->
@@ -1466,64 +1221,6 @@
 </div>
 
 <script>
-function testEmail() {
-    const testEmailInput = document.getElementById('test_email');
-    const testEmail = testEmailInput.value.trim();
-    
-    if (!testEmail) {
-        alert('Please enter a test email address');
-        testEmailInput.focus();
-        return;
-    }
-    
-    if (!isValidEmail(testEmail)) {
-        alert('Please enter a valid email address');
-        testEmailInput.focus();
-        return;
-    }
-    
-    const button = event.target;
-    const originalText = button.innerHTML;
-    
-    // Show loading state
-    button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...';
-    button.disabled = true;
-    
-    // Send test email
-    fetch('{{ route("settings.email.test") }}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-        },
-        body: JSON.stringify({
-            test_email: testEmail
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('✅ Test email sent successfully! Check your inbox.');
-        } else {
-            alert('❌ Failed to send test email: ' + data.message + (data.details ? '\n\n' + data.details : ''));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('❌ Error sending test email. Please check your settings and try again.');
-    })
-    .finally(() => {
-        // Restore button state
-        button.innerHTML = originalText;
-        button.disabled = false;
-    });
-}
-
-function isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-}
-
 function toggleAllPermissions(enable) {
     const checkboxes = document.querySelectorAll('input[name^="permissions["]');
     checkboxes.forEach(checkbox => {

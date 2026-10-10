@@ -263,6 +263,21 @@
                         </a>
                         @endif
 
+                        {{-- SOCIETY INFO (details, committee, documents) --}}
+                        @if($isAdmin)
+                        <a href="{{ route('society-rules.index') }}" @click="mobileMenuOpen = false"
+                           class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('society-rules.*', 'admin.society-documents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                            <i class="fas fa-circle-info w-5 text-center"></i>
+                            <span class="ml-3">Society Info</span>
+                        </a>
+                        @elseif($isOwner || $isTenant)
+                        <a href="{{ route('society-rules.index') }}" @click="mobileMenuOpen = false"
+                           class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('society-rules.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                            <i class="fas fa-circle-info w-5 text-center"></i>
+                            <span class="ml-3">Society Info</span>
+                        </a>
+                        @endif
+
                         {{-- BILLS - Admin, Owner, Tenant, Accountant (HIDDEN FOR STAFF) --}}
                         @if(($isAccountant || $isAdmin || $isOwner || $isTenant) && !$isStaff)
                         <a href="{{ route('payments.index') }}" @click="mobileMenuOpen = false"
@@ -332,7 +347,7 @@
             <div class="border-t border-gray-200 p-4">
                 <a href="{{ route('profile.show') }}" @click="mobileMenuOpen = false" class="flex items-center hover:bg-gray-50 rounded-lg p-2 transition-colors mb-2">
                     <img class="h-10 w-10 rounded-full object-cover" 
-                         src="https://ui-avatars.com/api/?name={{ urlencode(auth()->user()->name ?? 'User') }}&background=667eea&color=fff" 
+                         src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'User') . '&background=667eea&color=fff' }}"
                          alt="User">
                     <div class="ml-3 flex-1 min-w-0">
                         <p class="text-sm font-medium text-gray-900 truncate">{{ auth()->user()->name ?? 'User' }}</p>

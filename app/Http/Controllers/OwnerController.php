@@ -107,7 +107,7 @@ class OwnerController extends BaseController
             'villa_area_id' => 'nullable|exists:villa_areas,id',
             'villa_no' => 'nullable|string|max:50',
             'document_path' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:5120',
-            'profile_image' => 'nullable|file|mimes:jpg,jpeg,png|max:2048',
+            'profile_image' => \App\Support\ProfileImage::rules(),
         ];
 
         // Only Super Admin can select society, others use their own society
@@ -135,11 +135,12 @@ class OwnerController extends BaseController
             $validated['document_path'] = $path;
         }
 
-        // Handle profile image upload
+        // Profile picture: stored once and shared by the owner record and the
+        // owner's login account (previously owners.profile_image only, so the
+        // owner's own app and header never showed it).
+        unset($validated['profile_image']);
         if ($request->hasFile('profile_image')) {
-            $file = $request->file('profile_image');
-            $path = $file->store('owners', 'public');
-            $validated['profile_image'] = $path;
+            $validated['profile_image'] = \App\Support\ProfileImage::store($request->file('profile_image'));
         }
 
         // Handle family members
@@ -165,6 +166,7 @@ class OwnerController extends BaseController
         // work. Without the transaction a failure at the role step (a missing
         // role raises RoleDoesNotExist) left an orphaned Owner plus a User
         // that could log in with no role and no permissions.
+        try {
         $ownerUser = \Illuminate\Support\Facades\DB::transaction(function () use ($validated, $userPassword) {
             $owner = Owner::create($validated);
 
@@ -176,6 +178,7 @@ class OwnerController extends BaseController
                 'phone' => $validated['phone'] ?? null,
                 'password' => bcrypt($userPassword),
                 'status' => $validated['status'],
+                'avatar' => $validated['profile_image'] ?? null,
             ]);
 
             // Owner is the canonical business role now - property type
@@ -190,6 +193,12 @@ class OwnerController extends BaseController
 
             return $ownerUser;
         });
+        } catch (\Throwable $e) {
+            // The rows rolled back, so the picture stored above is an orphan.
+            \App\Support\ProfileImage::delete($validated['profile_image'] ?? null);
+
+            throw $e;
+        }
 
         // Dispatched after commit: a rolled-back create must not send a
         // welcome email carrying credentials for an account that no longer
@@ -285,7 +294,7 @@ class OwnerController extends BaseController
             'villa_area_id' => 'nullable|exists:villa_areas,id',
             'villa_no' => 'nullable|string|max:50',
             'document_path' => 'nullable|file|mimes:pdf,doc,docx,jpg,jpeg,png|max:5120',
-            'profile_image' => 'nullable|file|mimes:jpg,jpeg,png|max:2048',
+            'profile_image' => \App\Support\ProfileImage::rules(),
         ];
 
         // Only Super Admin can select society, others use their own society
@@ -309,12 +318,10 @@ class OwnerController extends BaseController
             $validated['document_path'] = $path;
         }
 
-        // Handle profile image upload
-        if ($request->hasFile('profile_image')) {
-            $file = $request->file('profile_image');
-            $path = $file->store('owners', 'public');
-            $validated['profile_image'] = $path;
-        }
+        // Profile picture is applied below, after the record is saved, by
+        // ProfileImage::change() - the uploaded file must not reach the
+        // model's attribute array.
+        unset($validated['profile_image']);
 
         // Handle family members
         if ($request->has('family_members')) {
@@ -342,7 +349,7 @@ class OwnerController extends BaseController
         }
 
         // Execute update with transaction and verification
-        $this->executeWithVerification(function () use ($owner, $validated) {
+        $this->executeWithVerification(function () use ($owner, $validated, $request) {
             // Update owner with data consistency verification
             $this->ensureModelPersisted($owner, $validated);
             
@@ -371,7 +378,15 @@ class OwnerController extends BaseController
                 // Clear user cache
                 $this->clearModelCache($ownerUser);
             }
-            
+
+            // New file replaces the picture on the owner AND the login
+            // account; "remove" clears both; neither keeps the current one.
+            \App\Support\ProfileImage::change(
+                $owner,
+                $request->file('profile_image'),
+                $request->boolean('remove_profile_image') && !$request->hasFile('profile_image'),
+            );
+
             Log::info('Owner updated successfully', [
                 'owner_id' => $owner->id,
                 'updated_by' => auth()->id(),
@@ -525,32 +540,50 @@ class OwnerController extends BaseController
 
         $resident = \App\Models\Resident::findOrFail($validated['resident_id']);
 
+        // Another society's resident is not ours to convert (this had no society check at all).
+        $this->authorizeSocietyAccess($resident);
+
         // Only convert if type is 'owner'
         if ($resident->type !== 'owner') {
             return back()->with('error', 'Only residents with type "owner" can be converted.');
         }
 
-        // Create Owner from Resident
-        $owner = Owner::create([
-            'society_id' => $resident->society_id,
-            'name' => $resident->name,
-            'email' => $resident->email,
-            'phone' => $resident->phone,
-            'status' => $resident->status,
-        ]);
-
-        // Update flat owner_id
-        if ($resident->flat_id) {
-            $resident->flat->update(['owner_id' => $owner->id]);
+        // Conversion must never create a second identity or silently take over an existing link.
+        if ($resident->user_id && $resident->user && $resident->user->owner_id) {
+            return back()->with('error', 'This person already has an Owner record. Open it from Owner Management instead of creating another.');
+        }
+        if ($resident->flat && $resident->flat->owner_id) {
+            return back()->with('error', 'This unit already has a recorded owner. Resolve that in Owner Management first; nothing was changed.');
+        }
+        // owners.email is unique across the whole system (not per society): checking only this society let
+        // the insert throw a raw database error whenever the address was used anywhere else.
+        if ($resident->email && Owner::where('email', $resident->email)->exists()) {
+            return back()->with('error', 'An Owner record already uses this email address, so a second one cannot be created. Link the existing record instead.');
         }
 
-        // Link user to owner if exists
-        if ($resident->user_id) {
-            $resident->user->update(['owner_id' => $owner->id]);
-        }
+        // All or nothing: a half-converted resident (owner created, flat not linked, resident gone) is
+        // worse than no conversion.
+        $owner = \Illuminate\Support\Facades\DB::transaction(function () use ($resident) {
+            $owner = Owner::create([
+                'society_id' => $resident->society_id,
+                'name' => $resident->name,
+                'email' => $resident->email,
+                'phone' => $resident->phone,
+                'status' => $resident->status,
+            ]);
 
-        // Delete resident record
-        $resident->delete();
+            if ($resident->flat) {
+                $resident->flat->update(['owner_id' => $owner->id]);
+            }
+
+            if ($resident->user_id && $resident->user) {
+                $resident->user->update(['owner_id' => $owner->id]);
+            }
+
+            $resident->delete();
+
+            return $owner;
+        });
 
         return redirect()->route('owners.show', $owner)
             ->with('success', 'Resident successfully converted to Owner!');

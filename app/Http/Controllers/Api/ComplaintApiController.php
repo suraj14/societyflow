@@ -72,7 +72,7 @@ class ComplaintApiController extends Controller
 
         $complaint = Complaint::create([
             'society_id'             => $user->society_id,
-            'flat_id'                => $resident?->flat_id,
+            'flat_id'                => $this->unitFor($user, $resident),
             'created_by'             => $user->id,
             'complaint_category_id'  => $categoryId,
             'title'                  => $request->title,
@@ -89,6 +89,22 @@ class ComplaintApiController extends Controller
             'message' => 'Complaint submitted successfully',
             'data'    => $this->formatComplaint($complaint),
         ], 201);
+    }
+
+    /**
+     * The unit a new complaint is filed against: the active tenancy first, then
+     * what the user owns, and only then the legacy residency row. That row is
+     * never closed when a tenancy moves, so on its own it filed complaints
+     * against the unit the tenant had LEFT - and gave a tenant who has no
+     * residency row (every tenant created from Admin -> Tenants) no unit at all.
+     */
+    private function unitFor(\App\Models\User $user, $resident): ?int
+    {
+        $id = \App\Support\UserFlatResolver::tenantFlatIds($user)[0]
+            ?? \App\Support\UserFlatResolver::ownedFlatIds($user)->first()
+            ?? $resident?->flat_id;
+
+        return $id ? (int) $id : null;
     }
 
     public function show(Request $request, int $id): JsonResponse

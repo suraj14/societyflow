@@ -33,8 +33,9 @@ class SendPaymentOverdueEmail
 
             // Get property owners
             if ($flatId) {
+                // flats.id, not id - see App\Models\User::ownedProperties()'s docblock.
                 $owners = User::whereHas('ownedProperties', function($q) use ($flatId) {
-                    $q->where('id', $flatId);
+                    $q->where('flats.id', $flatId);
                 })->where('society_id', $societyId)
                   ->whereHas('roles', function($q) use ($allowedRoles) {
                       $q->whereIn('name', $allowedRoles);

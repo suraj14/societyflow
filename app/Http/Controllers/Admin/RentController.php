@@ -35,16 +35,15 @@ class RentController extends BaseController
                 $query->where('status', 'active');
             }, 'payments']);
             
-        // Filter by bill_type = 'rent' only if the column exists
-        try {
-            if (\Illuminate\Support\Facades\Schema::hasColumn('maintenance_bills', 'bill_type')) {
-                $query->where('bill_type', 'rent');
-            }
-        } catch (\Exception $e) {
-            // If we can't check the column, just get all maintenance bills
-            Log::warning('Could not filter by bill_type: ' . $e->getMessage());
-        }
-        
+        // `bill_type` has existed since migration 2026_02_02 (well before
+        // any environment this runs in could have migrated this far at
+        // all - `store()` below already writes to it unconditionally).
+        // This used to re-check with Schema::hasColumn() on every page
+        // load - a schema-introspection query per request, exactly what
+        // CLAUDE.md §9 rules out; found and fixed during the 2026-10-07
+        // production certification performance pass.
+        $query->where('bill_type', 'rent');
+
         $rentRecords = $query->orderBy('bill_date', 'desc')->paginate(15);
         
         return view('admin.rents.index', compact('rentRecords'));
@@ -146,6 +145,8 @@ class RentController extends BaseController
                 'notes' => $request->description ?? 'Monthly Rent',
             ]);
 
+            \App\Events\BillGenerated::dispatch($rent, 'rent');
+
             if ($request->status === 'paid') {
                 // Handle file upload for payment proof
                 $receiptFilePath = null;
@@ -191,8 +192,14 @@ class RentController extends BaseController
             $query->where('status', 'active')->with('user');
         }, 'payments']);
         
-        // Verify rent record belongs to the same society
-        if ($rent->flat->society_id !== $this->getSocietyId()) {
+        // Verify rent record belongs to the same society. getSocietyId()
+        // returns null for Super Admin (they have no society_id of their
+        // own), so this used to fail-closed and block Super Admin from
+        // managing any rent record at all - the exact "exempt Super Admin
+        // explicitly" gap CLAUDE.md §3 already documents being fixed
+        // elsewhere (Access Pass listing). Found by sweeping every
+        // route-bound method in this controller for the same pattern.
+        if (!auth()->user()->hasRole('Super Admin') && $rent->flat->society_id !== $this->getSocietyId()) {
             return back()->with('error', 'Rent record not found.');
         }
         
@@ -216,8 +223,14 @@ class RentController extends BaseController
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
         
-        // Verify rent record belongs to the same society
-        if ($rent->flat->society_id !== $this->getSocietyId()) {
+        // Verify rent record belongs to the same society. getSocietyId()
+        // returns null for Super Admin (they have no society_id of their
+        // own), so this used to fail-closed and block Super Admin from
+        // managing any rent record at all - the exact "exempt Super Admin
+        // explicitly" gap CLAUDE.md §3 already documents being fixed
+        // elsewhere (Access Pass listing). Found by sweeping every
+        // route-bound method in this controller for the same pattern.
+        if (!auth()->user()->hasRole('Super Admin') && $rent->flat->society_id !== $this->getSocietyId()) {
             return back()->with('error', 'Rent record not found.');
         }
         
@@ -274,8 +287,14 @@ class RentController extends BaseController
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
         
-        // Verify rent record belongs to the same society
-        if ($rent->flat->society_id !== $this->getSocietyId()) {
+        // Verify rent record belongs to the same society. getSocietyId()
+        // returns null for Super Admin (they have no society_id of their
+        // own), so this used to fail-closed and block Super Admin from
+        // managing any rent record at all - the exact "exempt Super Admin
+        // explicitly" gap CLAUDE.md §3 already documents being fixed
+        // elsewhere (Access Pass listing). Found by sweeping every
+        // route-bound method in this controller for the same pattern.
+        if (!auth()->user()->hasRole('Super Admin') && $rent->flat->society_id !== $this->getSocietyId()) {
             return back()->with('error', 'Rent record not found.');
         }
         
@@ -389,7 +408,10 @@ class RentController extends BaseController
             $billDate = Carbon::parse($billDate);
             
             // Check for existing rent record
+            // Scoped to the caller's society: by bare flat id this answered "a rent record exists" for ANY
+            // society's unit, an oracle for another society's billing. (Super Admin has no society: any.)
             $existingRent = MaintenanceBill::where('flat_id', $unitId)
+                ->when(!auth()->user()->hasRole('Super Admin'), fn ($q) => $q->where('society_id', $this->getSocietyId()))
                 ->where('bill_type', 'rent')
                 ->whereMonth('bill_date', $billDate->month)
                 ->whereYear('bill_date', $billDate->year)
@@ -415,6 +437,9 @@ class RentController extends BaseController
      */
     public function addPayment(Request $request)
     {
+        // Only roll back a transaction this method opened: the validation/not-found paths run before it, and
+        // an unconditional rollback there undoes an enclosing transaction (it wiped the fixtures under test).
+        $began = false;
         try {
             $request->validate([
                 'rent_id' => 'required|exists:maintenance_bills,id',
@@ -453,6 +478,7 @@ class RentController extends BaseController
             }
 
             DB::beginTransaction();
+            $began = true;
 
             // Handle file upload
             $receiptFilePath = null;
@@ -492,8 +518,20 @@ class RentController extends BaseController
                 'payment' => $payment
             ]);
 
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            // An incomplete form is the admin's to fix, not a server failure: 422 with the field errors
+            // (this used to fall into the generic handler below and answer 500 "Failed to add payment").
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed: ' . implode(' ', $e->validator->errors()->all()),
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['success' => false, 'message' => 'Rent record not found.'], 404);
         } catch (\Exception $e) {
-            DB::rollback();
+            if ($began) {
+                DB::rollback();
+            }
             Log::error('Error adding rent payment: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
@@ -510,8 +548,14 @@ class RentController extends BaseController
         // Admin/Super Admin manage rent; Accountant has read-only access.
         $this->authorizeRole('Super Admin', 'Admin', 'Accountant');
         
-        // Verify rent record belongs to the same society
-        if ($rent->flat->society_id !== $this->getSocietyId()) {
+        // Verify rent record belongs to the same society. getSocietyId()
+        // returns null for Super Admin (they have no society_id of their
+        // own), so this used to fail-closed and block Super Admin from
+        // managing any rent record at all - the exact "exempt Super Admin
+        // explicitly" gap CLAUDE.md §3 already documents being fixed
+        // elsewhere (Access Pass listing). Found by sweeping every
+        // route-bound method in this controller for the same pattern.
+        if (!auth()->user()->hasRole('Super Admin') && $rent->flat->society_id !== $this->getSocietyId()) {
             return back()->with('error', 'Rent record not found.');
         }
         

@@ -26,7 +26,6 @@ class SettingsController extends Controller
             'currency' => SystemSetting::getGroup('currency', null),
             'email' => SystemSetting::getGroup('email', null),
             'payment' => SystemSetting::getGroup('payment', null),
-            'push' => SystemSetting::getGroup('push', null),
             'security' => SystemSetting::getGroup('security', null),
         ];
 
@@ -202,6 +201,10 @@ class SettingsController extends Controller
     {
         $request->validate(['test_email' => 'required|email']);
 
+        if (!\App\Support\ExternalMessaging::enabled()) {
+            return response()->json(['success' => false, 'message' => 'Not sent: external messaging is disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).']);
+        }
+
         try {
             Mail::raw('This is a test email from SocietyFlow.', function ($message) use ($request) {
                 $message->to($request->test_email)
@@ -376,30 +379,6 @@ class SettingsController extends Controller
         }
 
         return back()->with('success', 'Payment gateway settings updated successfully!');
-    }
-
-    public function updatePush(Request $request)
-    {
-        $validated = $request->validate([
-            'push_enabled' => 'nullable|boolean',
-            'fcm_server_key' => 'nullable|string',
-            'vapid_public_key' => 'nullable|string',
-            'vapid_private_key' => 'nullable|string',
-        ]);
-
-        SystemSetting::set('push', 'push_enabled', $request->boolean('push_enabled'), 'boolean', null);
-        
-        if ($validated['fcm_server_key']) {
-            SystemSetting::set('push', 'fcm_server_key', $validated['fcm_server_key'], 'encrypted', null);
-        }
-        if ($validated['vapid_public_key']) {
-            SystemSetting::set('push', 'vapid_public_key', $validated['vapid_public_key'], 'string', null);
-        }
-        if ($validated['vapid_private_key']) {
-            SystemSetting::set('push', 'vapid_private_key', $validated['vapid_private_key'], 'encrypted', null);
-        }
-
-        return back()->with('success', 'Push notification settings updated successfully!');
     }
 
     public function updateSecurity(Request $request)

@@ -183,12 +183,11 @@ class ResidentController extends BaseController
      */
     public function edit(Resident $resident)
     {
-        $societyId = $this->getSocietyId();
-        
-        // Verify resident belongs to the same society
-        if ($resident->society_id !== $societyId) {
+        // Verify resident belongs to the same society (any, for a Super Admin)
+        if (!$this->societyMatches($resident->society_id)) {
             return back()->with('error', 'Resident not found.');
         }
+        $societyId = $resident->society_id;
         
         $resident->load(['flat.building', 'flat.villaArea', 'society']);
         $societies = Society::where('status', 'active')->get();

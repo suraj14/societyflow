@@ -27,9 +27,6 @@
         </div>
     </div>
 
-    @if(session('success'))
-        <div class="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-lg">{{ session('success') }}</div>
-    @endif
 
     <div class="max-w-3xl bg-white rounded-lg shadow-md overflow-hidden">
         <div class="px-6 py-5 border-b border-gray-200 flex items-center justify-between">

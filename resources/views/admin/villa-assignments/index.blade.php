@@ -38,6 +38,9 @@
                                     <span class="inline-block bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full mt-1">
                                         No Villa Assigned
                                     </span>
+                                    @if($user->declaredUnit)
+                                    <p class="text-xs text-amber-700 mt-1">Owner record names {{ $user->declaredUnit->villa_name ?: $user->declaredUnit->flat_number }} &mdash; not yet linked. Assign it below to confirm.</p>
+                                    @endif
                                 </div>
                                 <button onclick="openAssignModal({{ $user->id }}, '{{ $user->name }}')" 
                                         class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors">
@@ -76,9 +79,15 @@
                                     <p class="text-sm text-gray-600">{{ $villa->villaArea->name ?? 'No Area' }}</p>
                                     <p class="text-sm text-gray-600">{{ $villa->bedrooms }} BR, {{ $villa->bathrooms }} BA</p>
                                     <p class="text-sm text-gray-600">Plot: {{ number_format($villa->plot_area) }} sqft</p>
+                                    @if($villa->declaredOwner)
+                                    <span class="inline-block bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded-full mt-1">
+                                        Recorded owner: {{ $villa->declaredOwner->name }} (not yet linked)
+                                    </span>
+                                    @else
                                     <span class="inline-block bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full mt-1">
                                         Available
                                     </span>
+                                    @endif
                                 </div>
                             </div>
                         </div>

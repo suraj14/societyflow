@@ -76,8 +76,13 @@ class EmailTemplate extends Model
      */
     public static function getTemplateForEvent($triggerEvent, $societyId = null)
     {
+        // A society's own template wins over the shared system one. With no ordering, ->first() returned
+        // whichever row came first - normally the system template (lower id) - so a society's customised
+        // template for an event never took effect even though the mapping screen listed it as configured.
         return self::active()
                    ->byEventAndSociety($triggerEvent, $societyId)
+                   ->orderByRaw('CASE WHEN society_id IS NULL THEN 1 ELSE 0 END')
+                   ->orderBy('id')
                    ->first();
     }
 

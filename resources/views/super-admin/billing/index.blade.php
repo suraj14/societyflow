@@ -17,9 +17,9 @@
 
             <select name="status" class="border border-gray-300 rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
                 <option value="">All Status</option>
-                <option value="completed" {{ request('status') === 'completed' ? 'selected' : '' }}>Completed</option>
+                <option value="success" {{ request('status') === 'success' ? 'selected' : '' }}>Paid</option>
                 <option value="pending" {{ request('status') === 'pending' ? 'selected' : '' }}>Pending</option>
-                <option value="failed" {{ request('status') === 'failed' ? 'selected' : '' }}>Failed</option>
+                <option value="failed" {{ request('status') === 'failed' ? 'selected' : '' }}>Failed</option>`n                <option value="refunded" {{ request('status') === 'refunded' ? 'selected' : '' }}>Refunded</option>
             </select>
 
             <input type="date" name="date_from" value="{{ request('date_from') }}" 
@@ -40,7 +40,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600">Total Revenue</p>
-                    <p class="text-2xl font-bold text-green-600">${{ number_format($stats['total_revenue'], 2) }}</p>
+                    <p class="text-2xl font-bold text-green-600">&#8377;{{ number_format($stats['total_revenue'], 2) }}</p>
                 </div>
                 <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                     <i class="fas fa-dollar-sign text-green-600 text-xl"></i>
@@ -52,7 +52,7 @@
             <div class="flex items-center justify-between">
                 <div>
                     <p class="text-sm text-gray-600">Monthly Revenue</p>
-                    <p class="text-2xl font-bold text-blue-600">${{ number_format($stats['monthly_revenue'], 2) }}</p>
+                    <p class="text-2xl font-bold text-blue-600">&#8377;{{ number_format($stats['monthly_revenue'], 2) }}</p>
                 </div>
                 <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                     <i class="fas fa-calendar text-blue-600 text-xl"></i>
@@ -124,24 +124,24 @@
                                 {{ ucfirst($payment->billing_cycle ?? 'N/A') }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {{ $payment->created_at ? $payment->created_at->format('d M Y') : 'N/A' }}
+                                {{ $payment->payment_date ? $payment->payment_date->format('d M Y') : 'N/A' }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 {{ $payment->next_payment_date ? $payment->next_payment_date->format('d M Y') : 'N/A' }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {{ $payment->transaction_id ?? 'NEMJUPOAAXM2M1' }}
+                                {{ $payment->transaction_id ?: '-' }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                {{ $payment->payment_gateway ?? 'offline' }}
+                                {{ ucfirst($payment->payment_gateway ?? '-') }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                ${{ number_format($payment->amount ?? 0, 2) }}
+                                &#8377;{{ number_format($payment->amount ?? 0, 2) }}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                 <a href="{{ route('super-admin.billing.show', $payment) }}" 
                                    class="text-blue-600 hover:text-blue-900 mr-3">
-                                    <i class="fas fa-download"></i>
+                                    <i class="fas fa-eye"></i>
                                 </a>
                             </td>
                         </tr>

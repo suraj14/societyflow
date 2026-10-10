@@ -116,9 +116,25 @@ class AccessPass extends Model
         return in_array($date->toDateString(), $dates, true);
     }
 
+    /**
+     * `now()` alone is the server's `APP_TIMEZONE` (UTC) - whenever UTC and
+     * the society's own timezone (IST by default) disagree on the
+     * calendar date, which is true for roughly 5.5 hours of every day
+     * (UTC evening = IST past midnight), `blockToday()`/`unblockToday()`
+     * writing plain UTC "today" while `isBlockedToday()` checks IST
+     * "today" (via `SocietyClock`) silently blocks/unblocks the wrong
+     * date. Found by `AccessPassViewRenderTest` failing at exactly such a
+     * moment, not by inspection. Every write here must agree with
+     * `isBlockedToday()`'s own read.
+     */
+    private function todayLocal(): string
+    {
+        return \App\Support\SocietyClock::local(now(), $this->society_id)->toDateString();
+    }
+
     public function blockToday(): void
     {
-        $today = now()->toDateString();
+        $today = $this->todayLocal();
         $dates = $this->blocked_dates ?? [];
 
         if (!in_array($today, $dates, true)) {
@@ -175,5 +191,41 @@ class AccessPass extends Model
         }
 
         return true;
+    }
+
+    /**
+     * Past its valid_until, on the society's own calendar.
+     *
+     * An open-ended pass (valid_until null) never expires, which is why
+     * this is not simply "not isWithinValidity()" - a pass whose
+     * valid_from is still in the future is not expired either, it has not
+     * started.
+     */
+    public function isExpired(?Carbon $at = null): bool
+    {
+        if (!$this->valid_until) {
+            return false;
+        }
+
+        $at = \App\Support\SocietyClock::local($at ?? now(), $this->society_id);
+
+        return $at->toDateString() > $this->valid_until->toDateString();
+    }
+
+    /** Lift a same-day block placed by blockToday(). */
+    public function unblockToday(): void
+    {
+        $today = $this->todayLocal();
+        $dates = array_values(array_filter(
+            $this->blocked_dates ?? [],
+            fn ($d) => $d !== $today && $d >= $today
+        ));
+
+        $this->update(['blocked_dates' => $dates]);
+    }
+
+    public function isBlockedToday(): bool
+    {
+        return $this->isBlockedOn(\App\Support\SocietyClock::local(now(), $this->society_id));
     }
 }

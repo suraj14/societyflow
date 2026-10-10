@@ -16,31 +16,52 @@ class UserApartmentAssignmentController extends BaseController
 {
     use ResolvesPropertyOwner;
 
+    /**
+     * 'Owner' is canonical; 'Apartment Owner' is kept for users not yet
+     * migrated. Matched through the roles relation, NOT Spatie's role()
+     * scope, which throws RoleDoesNotExist (a 500 for the whole screen) when
+     * any listed role is missing from the roles table.
+     */
+    private const OWNER_ROLES = ['Owner', 'Apartment Owner'];
+
     public function index()
     {
         // Only admin and super admin can access this
         $this->authorizeRole('Super Admin', 'Admin');
-        
+
+        // Scope by default, exempt Super Admin explicitly (CLAUDE.md §3):
+        // getSocietyId() is null for Super Admin and "WHERE society_id =
+        // NULL" matched nothing, leaving them an empty screen.
         $societyId = $this->getSocietyId();
-        
-        // Get apartment owners without assigned apartments ('Owner' is
-        // canonical; 'Apartment Owner' kept for users not yet migrated)
-        $unassignedApartmentOwners = User::bySociety($societyId)
-            ->role(['Owner', 'Apartment Owner'])
+
+        $owners = fn () => User::query()
+            ->when($societyId !== null, fn ($q) => $q->bySociety($societyId))
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', self::OWNER_ROLES));
+
+        // Get apartment owners without assigned apartments
+        $unassignedApartmentOwners = $owners()
             ->whereDoesntHave('ownedFlat')
             ->with('resident')
             ->get();
 
         // Get available apartments (not assigned to any owner)
-        $availableApartments = Flat::bySociety($societyId)
+        $availableApartments = Flat::query()
+            ->when($societyId !== null, fn ($q) => $q->bySociety($societyId))
             ->apartments()
             ->whereNull('owner_id')
             ->with('building')
             ->get();
+        $this->annotateDeclaredOwners($availableApartments);
+
+        // See UserVillaAssignmentController::index(): an owner whose own record
+        // names an apartment is not "unassigned" just because owner_id is unset.
+        foreach ($unassignedApartmentOwners as $ownerUser) {
+            $declared = \App\Support\UserFlatResolver::ownedFlatIds($ownerUser);
+            $ownerUser->setRelation('declaredUnit', $declared->isEmpty() ? null : Flat::apartments()->whereIn('id', $declared)->first());
+        }
 
         // Get assigned apartment owners
-        $assignedApartmentOwners = User::bySociety($societyId)
-            ->role(['Owner', 'Apartment Owner'])
+        $assignedApartmentOwners = $owners()
             ->whereHas('ownedFlat')
             ->with(['ownedFlat.building', 'resident'])
             ->get();
@@ -66,17 +87,20 @@ class UserApartmentAssignmentController extends BaseController
         $apartment = Flat::findOrFail($request->apartment_id);
         
         // Verify user is an owner
-        if (!$user->hasAnyRole(['Owner', 'Apartment Owner'])) {
+        if (!$user->hasAnyRole(self::OWNER_ROLES)) {
             return back()->with('error', 'User must have the Owner role to be assigned an apartment.');
         }
-        
+
         // Verify apartment is available
         if ($apartment->owner_id) {
             return back()->with('error', 'This apartment is already assigned to another owner.');
         }
-        
-        // Verify apartment belongs to the same society
-        if ($apartment->society_id !== $this->getSocietyId()) {
+
+        // Verify apartment belongs to the acting admin's society. Super Admin
+        // has none (getSocietyId() is null) so was refused every apartment;
+        // the owner check below pins the owner to the apartment's society.
+        $mySociety = $this->getSocietyId();
+        if ($mySociety !== null && (int) $apartment->society_id !== (int) $mySociety) {
             return back()->with('error', 'Apartment must belong to the same society.');
         }
         
@@ -87,11 +111,16 @@ class UserApartmentAssignmentController extends BaseController
         
         // Resolve the owner record. flats.owner_id is a foreign key to
         // owners.id, so writing $user->id here attributes the apartment to
-        // whichever owner happens to share that integer.
-        $owner = $this->resolveOwnerFor($user);
+        // whichever owner happens to share that integer. The owner must
+        // belong to the APARTMENT's society.
+        $owner = $this->resolveOwnerFor($user, (int) $apartment->society_id);
 
         if (!$owner instanceof Owner) {
             return $owner; // a redirect carrying the reason
+        }
+
+        if ($refusal = $this->refuseIfDeclaredToAnother($apartment, $owner, 'apartment')) {
+            return $refusal;
         }
 
         // Assign apartment to user
@@ -125,12 +154,20 @@ class UserApartmentAssignmentController extends BaseController
         ]);
         
         $user = User::findOrFail($request->user_id);
+
+        // user_id is client input: without this an Admin of one society could
+        // vacate (and close the residency of) an owner in ANOTHER society by
+        // posting that owner's id. Super Admin is exempt.
+        $this->authorizeSocietyAccess($user);
+
         $apartment = $user->ownedFlat;
-        
+
         if (!$apartment) {
             return back()->with('error', 'User does not have an assigned apartment.');
         }
-        
+
+        $this->authorizeSocietyAccess($apartment);
+
         // Unassign apartment
         $apartment->update([
             'owner_id' => null,
@@ -160,13 +197,17 @@ class UserApartmentAssignmentController extends BaseController
         ]);
         
         $currentUser = User::findOrFail($request->current_user_id);
+        $this->authorizeSocietyAccess($currentUser); // client-supplied id; see unassign()
+
         $currentApartment = $currentUser->ownedFlat;
         $newApartment = Flat::findOrFail($request->new_apartment_id);
-        
+
         if (!$currentApartment) {
             return back()->with('error', 'User does not have an assigned apartment.');
         }
-        
+
+        $this->authorizeSocietyAccess($currentApartment);
+
         if ($newApartment->owner_id) {
             return back()->with('error', 'The new apartment is already assigned to another owner.');
         }
@@ -177,15 +218,23 @@ class UserApartmentAssignmentController extends BaseController
         }
 
         // The destination gets the same society check as a fresh assignment;
-        // a transfer carries a client-supplied id too.
-        if ($newApartment->society_id !== $this->getSocietyId()) {
+        // a transfer carries a client-supplied id too. It must be in the
+        // acting admin's society (Super Admin has none, so is exempt) and in
+        // the SAME society as the apartment being vacated.
+        $mySociety = $this->getSocietyId();
+        if (($mySociety !== null && (int) $newApartment->society_id !== (int) $mySociety)
+            || (int) $newApartment->society_id !== (int) $currentApartment->society_id) {
             return back()->with('error', 'Apartment must belong to the same society.');
         }
 
-        $owner = $this->resolveOwnerFor($currentUser);
+        $owner = $this->resolveOwnerFor($currentUser, (int) $newApartment->society_id);
 
         if (!$owner instanceof Owner) {
             return $owner;
+        }
+
+        if ($refusal = $this->refuseIfDeclaredToAnother($newApartment, $owner, 'apartment')) {
+            return $refusal;
         }
 
         // Unassign current apartment

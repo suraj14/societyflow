@@ -38,10 +38,20 @@ class GuardController extends BaseController
     }
 
     /**
-     * Today's four gate counters, one grouped query rather than four counts.
+     * The gate counters, one grouped query rather than four counts.
      * Shared by the dashboard render and the check-in/check-out JSON
      * response, so a fetch()-based update and a full page load can never
      * disagree about the numbers.
+     *
+     * "Inside" is deliberately *not* bounded to today, while the other
+     * three are. Someone who entered last night and has not checked out is
+     * still on the premises now, and the dashboard's own "Visitors Inside"
+     * list (see dashboard()) has always listed them - only this counter
+     * filtered them out, by a date column describing when they were
+     * *expected* rather than whether they had left. The list and the number
+     * above it therefore disagreed across midnight and during any
+     * overnight stay. The list is the one that matters in an evacuation,
+     * so the counter now matches it.
      */
     private function todaysStats(int $societyId): array
     {
@@ -55,15 +65,26 @@ class GuardController extends BaseController
 
         foreach ($counts as $row) {
             if ($row->entry_status === 'entered') {
-                $stats['inside'] += $row->total;
+                continue; // counted below, over all time
             } elseif ($row->entry_status === 'exited') {
                 $stats['departed'] += $row->total;
             } elseif ($row->approval_status === 'allowed') {
                 $stats['expected'] += $row->total;
-            } else {
-                $stats['waiting'] += $row->total;
             }
+            // Anything else from today is waiting; counted below over all days.
         }
+
+        // "Waiting" is the actionable queue: every visitor still awaiting a
+        // resident's decision, from any day. It must match the list beneath the
+        // tiles and the API's \`pending\` figure, or one screen disagrees with another.
+        $stats['waiting'] = Visitor::where('society_id', $societyId)
+            ->where('approval_status', 'pending')
+            ->where('entry_status', 'pending')
+            ->count();
+
+        $stats['inside'] = Visitor::where('society_id', $societyId)
+            ->where('entry_status', 'entered')
+            ->count();
 
         return $stats;
     }
@@ -151,36 +172,8 @@ class GuardController extends BaseController
             'entry_status'        => 'pending',
         ]);
 
-        $this->notifyOccupants($visitor, $flat);
-
         return redirect()->route('guard.dashboard')
             ->with('success', $visitor->visitor_name . ' registered. Awaiting resident approval.');
-    }
-
-    /**
-     * Tell the property's tenant (or owner, if not rented) that someone is
-     * at the gate. The request also appears as Pending in their Visitors
-     * list, where they Approve/Deny it - a push is best-effort on top.
-     */
-    private function notifyOccupants(Visitor $visitor, Flat $flat): void
-    {
-        try {
-            $push = app(\App\Services\PushNotificationService::class);
-
-            foreach (\App\Support\VisitorPropertyScope::occupantUsers($flat) as $occupant) {
-                $push->sendToUser($occupant, 'visitor_arrived', [
-                    'visitor_name'  => $visitor->visitor_name,
-                    'visitor_phone' => $visitor->visitor_phone,
-                    'visitor_type'  => ucfirst($visitor->visitor_type),
-                    'flat_number'   => \App\Support\VisitorPropertyScope::unitLabel($flat),
-                ], [
-                    'visitor_id' => $visitor->id,
-                    'action'     => 'visitor_approval',
-                ]);
-            }
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Visitor occupant notification failed: ' . $e->getMessage());
-        }
     }
 
     /**
@@ -357,26 +350,22 @@ class GuardController extends BaseController
         $societyId = $this->societyId();
 
         // Pre-approved guest first - a visitor row already exists and is
-        // simply waiting to be marked entered (reuses checkIn() below).
-        $guest = Visitor::where('qr_token', $token)->first();
-        if ($guest) {
-            if ((int) $guest->society_id !== $societyId) {
-                return $this->scanResponse($request, false, 'QR code not recognised.');
-            }
-            if ($guest->approval_status !== 'allowed') {
-                return $this->scanResponse($request, false, 'This guest has not been approved yet.');
-            }
-            if ($guest->entry_status !== 'pending') {
-                return $this->scanResponse($request, false, 'This guest is already checked in.');
+        // simply waiting to be marked entered. The check and the write run
+        // under one lock, so a double scan cannot admit them twice.
+        $guest = $passes->checkInGuest($token, $societyId, auth()->user());
+        if ($guest['found']) {
+            if (!$guest['ok']) {
+                return $this->scanResponse($request, false, $this->scanFailureMessage($guest['reason']));
             }
 
-            $guest->update(['entry_status' => 'entered', 'actual_entry_time' => now()]);
-            $guest->addLog(auth()->user(), 'entry', 'Guest QR scanned in');
-
-            return $this->scanResponse($request, true, $guest->visitor_name . ' - entry allowed.', $guest);
+            return $this->scanResponse($request, true, $guest['visitor']->visitor_name . ' - entry allowed.', $guest['visitor']);
         }
 
-        $result = $passes->verify($token, $societyId);
+        // Verification and check-in are one atomic step - see the service.
+        // Society-wide staff have no single visit to check in/out of via
+        // "Visitors Inside" - the same QR toggles them out on the scan that
+        // finds them already in, instead of being refused as a duplicate.
+        $result = $passes->verifyAndCheckIn($token, $societyId, auth()->user());
 
         if (!$result['ok']) {
             return $this->scanResponse($request, false, $this->scanFailureMessage($result['reason']), null, $result['pass']);
@@ -384,18 +373,11 @@ class GuardController extends BaseController
 
         $pass = $result['pass'];
 
-        // Society-wide staff have no single visit to check in/out of via
-        // "Visitors Inside" - the same QR toggles them out on the scan that
-        // finds them already in, instead of being refused as a duplicate.
-        if ($pass->isSocietyWide() && $pass->currently_inside) {
-            $passes->checkOutSocietyWide($pass);
-
+        if ($result['action'] === 'checked_out') {
             return $this->scanResponse($request, true, $pass->person_name . ' - checked out.', null, $pass);
         }
 
-        $visitor = $passes->checkIn($pass, auth()->user());
-
-        return $this->scanResponse($request, true, $pass->person_name . ' - entry allowed.', $visitor, $pass);
+        return $this->scanResponse($request, true, $pass->person_name . ' - entry allowed.', $result['visitor'], $pass);
     }
 
     private function scanFailureMessage(?string $reason): string
@@ -409,6 +391,9 @@ class GuardController extends BaseController
             AccessPassService::REASON_WRONG_DAY => 'Not an authorised day for this pass.',
             AccessPassService::REASON_WRONG_TIME => 'Outside the authorised time window.',
             AccessPassService::REASON_ALREADY_INSIDE => 'Already checked in - check out first.',
+            AccessPassService::REASON_GUEST_WRONG_SOCIETY => 'QR code not recognised.',
+            AccessPassService::REASON_GUEST_NOT_APPROVED => 'This guest has not been approved yet.',
+            AccessPassService::REASON_GUEST_ALREADY_IN => 'This guest is already checked in.',
             default => 'Access denied.',
         };
     }

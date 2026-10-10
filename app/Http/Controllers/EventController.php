@@ -167,8 +167,11 @@ class EventController extends BaseController
 
             Log::info('Event created', ['event_id' => $event->id, 'user_id' => $user->id]);
 
-            // Dispatch event for email notification
-            EventCreated::dispatch($event);
+            // Announce only an event that is actually going to happen. One created as
+            // already cancelled/completed used to go out as "New society event".
+            if ($event->status === 'pending') {
+                EventCreated::dispatch($event);
+            }
 
             return $event;
         }, 'Event created successfully.', 'events.index');
@@ -271,6 +274,8 @@ class EventController extends BaseController
                 throw new \Exception('Event cannot be marked as completed until after the event end date (' . $endDateTime->format('M d, Y H:i') . ').');
             }
 
+            $previousStatus = $event->status;
+
             $event->update([
                 'event_name' => $validated['event_name'],
                 'location' => $validated['location'],
@@ -285,11 +290,47 @@ class EventController extends BaseController
 
             Log::info('Event updated', ['event_id' => $event->id, 'user_id' => $user->id]);
 
-            // Send email notification
-            \App\Services\EmailNotificationService::sendEventNotification($event, 'updated');
+            // Tell people what actually happened, once. This used to re-send the
+            // "new event" email on every save - a cancellation read as an
+            // announcement, and a save that changed nothing emailed everyone again.
+            $kind = $this->changeKind($event, $previousStatus);
+            if ($kind !== null) {
+                \App\Events\EventChanged::dispatch($event, $kind);
+            }
 
             return $event;
         }, 'Event updated successfully.', 'events.index');
+    }
+
+    /**
+     * What, if anything, people should be told about the update that was just
+     * saved ($event->wasChanged() reflects it): cancelled | rescheduled | updated,
+     * or null when nothing worth announcing changed (a no-op save, an event that
+     * simply finished, or an edit to an event that is cancelled/completed).
+     */
+    private function changeKind(Event $event, string $previousStatus): ?string
+    {
+        $status = $event->status;
+
+        if ($status === 'cancelled') {
+            return $previousStatus !== 'cancelled' ? 'cancelled' : null;
+        }
+        if ($status === 'completed') {
+            return null;
+        }
+
+        // The event is scheduled (pending).
+        if ($previousStatus !== 'pending') {
+            return 'updated';   // reinstated after a cancellation
+        }
+        if ($event->wasChanged(['start_date', 'end_date'])) {
+            return 'rescheduled';
+        }
+        if ($event->wasChanged(['event_name', 'location', 'description', 'is_role_based', 'visible_roles', 'visible_users'])) {
+            return 'updated';
+        }
+
+        return null;
     }
 
     /**

@@ -35,9 +35,12 @@ class RequestController extends Controller
             return redirect()->route('villa-owner.dashboard');
         }
 
-        $categories = ComplaintCategory::where('society_id', $villa->society_id)
-            ->orWhereNull('society_id')
-            ->where('status', 'active')
+        // Grouped: the bare `where(society) OR whereNull(society) AND status` bound as `society OR (null AND active)`,
+        // which also offered this society's INACTIVE categories.
+        $categories = ComplaintCategory::where('status', 'active')
+            ->where(function ($q) use ($villa) {
+                $q->where('society_id', $villa->society_id)->orWhereNull('society_id');
+            })
             ->get();
 
         return view('villa-owner.requests.create', compact('villa', 'categories'));
@@ -53,22 +56,30 @@ class RequestController extends Controller
         }
 
         $validated = $request->validate([
-            'category_id' => 'nullable|exists:complaint_categories,id',
+            // This society's active categories (or the shared ones): an unscoped `exists` accepted any society's id.
+            'category_id' => ['nullable', \Illuminate\Validation\Rule::exists('complaint_categories', 'id')
+                ->where(fn ($q) => $q->where('status', 'active')
+                    ->where(fn ($s) => $s->where('society_id', $villa->society_id)->orWhereNull('society_id')))],
             'title' => 'required|string|max:255',
             'description' => 'required|string',
             'priority' => 'required|in:low,medium,high,urgent',
         ]);
 
-        Complaint::create([
+        $complaint = Complaint::create([
             'society_id' => $villa->society_id,
             'flat_id' => $villa->id,
-            'category_id' => $validated['category_id'],
+            // The column is complaint_category_id; `category_id` is not fillable, so the chosen category
+            // was silently dropped from every request submitted here.
+            'complaint_category_id' => $validated['category_id'] ?? null,
             'created_by' => $user->id,
             'title' => $validated['title'],
             'description' => $validated['description'],
             'priority' => $validated['priority'],
             'status' => 'open',
         ]);
+
+        // The office hears about it exactly as for a complaint filed on the main form (this path never told them).
+        \App\Support\BusinessNotifications::complaintCreated($complaint);
 
         return redirect()->route('villa-owner.requests')
             ->with('success', 'Request submitted successfully. We will get back to you soon.');

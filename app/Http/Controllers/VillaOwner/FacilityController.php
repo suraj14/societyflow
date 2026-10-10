@@ -2,30 +2,50 @@
 
 namespace App\Http\Controllers\VillaOwner;
 
+use App\Exceptions\FacilityBookingException;
 use App\Http\Controllers\Controller;
 use App\Models\Facility;
 use App\Models\FacilityBooking;
+use App\Models\Flat;
+use App\Models\User;
+use App\Services\FacilityBookingService;
+use App\Support\BusinessNotifications;
 use Illuminate\Http\Request;
 
+/**
+ * The legacy villa-owner portal (/my/facilities, /my/bookings).
+ *
+ * Two things were wrong with it and are fixed here:
+ *
+ *  1. "My villa" fell back to Flat::where('owner_id', $user->owner_id) - with
+ *     NO owner link that is `owner_id IS NULL`, i.e. the first unassigned
+ *     villa of ANY society. Any logged-in account (tenant, guard, staff...)
+ *     was treated as that villa's owner and could list another society's
+ *     facilities, book them, and cancel bookings made on that villa. An
+ *     account with no owner link now owns no villa.
+ *
+ *  2. It kept its own copy of the booking rules (a time-overlap check that
+ *     misses a booking which contains another, no opening hours, no advance
+ *     limit, no maximum length) and never told the office. Booking now goes
+ *     through FacilityBookingService - the one definition the web form and
+ *     the mobile API already share - and the admin is notified exactly as
+ *     they are for those.
+ */
 class FacilityController extends Controller
 {
+    /** The villa this account owns, or null. */
+    private function villaFor(User $user): ?Flat
+    {
+        if (!$user->owner_id) {
+            return null;
+        }
+
+        return $user->ownedVilla ?? Flat::ownedBy($user->owner_id)->villas()->first();
+    }
+
     public function index()
     {
-        $user = auth()->user();
-        
-        // Get villa through ownedVilla relationship or direct owner_id
-        $villa = null;
-        
-        if ($user->owner_id) {
-            $villa = $user->ownedVilla;
-        }
-        
-        // If not found through relationship, try direct owner_id match
-        if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
-                                    ->where('property_type', 'villa')
-                                    ->first();
-        }
+        $villa = $this->villaFor(auth()->user());
 
         if (!$villa) {
             return redirect()->route('villa-owner.dashboard')
@@ -41,23 +61,9 @@ class FacilityController extends Controller
 
     public function book(Facility $facility)
     {
-        $user = auth()->user();
-        
-        // Get villa through ownedVilla relationship or direct owner_id
-        $villa = null;
-        
-        if ($user->owner_id) {
-            $villa = $user->ownedVilla;
-        }
-        
-        // If not found through relationship, try direct owner_id match
-        if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
-                                    ->where('property_type', 'villa')
-                                    ->first();
-        }
+        $villa = $this->villaFor(auth()->user());
 
-        if (!$villa || $facility->society_id !== $villa->society_id) {
+        if (!$villa || (int) $facility->society_id !== (int) $villa->society_id) {
             abort(403);
         }
 
@@ -66,23 +72,10 @@ class FacilityController extends Controller
 
     public function storeBooking(Request $request, Facility $facility)
     {
-        $user = auth()->user();
-        
-        // Get villa through ownedVilla relationship or direct owner_id
-        $villa = null;
-        
-        if ($user->owner_id) {
-            $villa = $user->ownedVilla;
-        }
-        
-        // If not found through relationship, try direct owner_id match
-        if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
-                                    ->where('property_type', 'villa')
-                                    ->first();
-        }
+        $user  = auth()->user();
+        $villa = $this->villaFor($user);
 
-        if (!$villa || $facility->society_id !== $villa->society_id) {
+        if (!$villa || (int) $facility->society_id !== (int) $villa->society_id) {
             abort(403);
         }
 
@@ -94,37 +87,29 @@ class FacilityController extends Controller
             'guests_count' => 'nullable|integer|min:1',
         ]);
 
-        // Check for conflicts
-        $conflict = FacilityBooking::where('facility_id', $facility->id)
-            ->where('booking_date', $validated['booking_date'])
-            ->where('status', '!=', 'cancelled')
-            ->where(function ($query) use ($validated) {
-                $query->whereBetween('start_time', [$validated['start_time'], $validated['end_time']])
-                    ->orWhereBetween('end_time', [$validated['start_time'], $validated['end_time']]);
-            })
-            ->exists();
-
-        if ($conflict) {
-            return back()->with('error', 'This time slot is already booked. Please choose another time.');
+        try {
+            $booking = FacilityBookingService::create(
+                (int) $villa->society_id,
+                $user,
+                $facility->id,
+                $villa->id,
+                [
+                    'booking_date'    => $validated['booking_date'],
+                    'start_time'      => $validated['start_time'],
+                    'end_time'        => $validated['end_time'],
+                    'purpose'         => $validated['purpose'] ?? null,
+                    'expected_guests' => $validated['guests_count'] ?? 1,
+                ]
+            );
+        } catch (FacilityBookingException $e) {
+            return back()->withInput()->with('error', $e->getMessage());
         }
 
-        FacilityBooking::create([
-            'society_id' => $villa->society_id,
-            'facility_id' => $facility->id,
-            'flat_id' => $villa->id,
-            'user_id' => $user->id,
-            'booking_date' => $validated['booking_date'],
-            'start_time' => $validated['start_time'],
-            'end_time' => $validated['end_time'],
-            'purpose' => $validated['purpose'] ?? null,
-            'guests_count' => $validated['guests_count'] ?? 1,
-            'status' => $facility->requires_approval ? 'pending' : 'approved',
-            'booking_amount' => $facility->booking_charge ?? 0,
-        ]);
+        BusinessNotifications::facilityBookingRequested($booking->load('facility'));
 
-        $message = $facility->requires_approval 
-            ? 'Booking request submitted. Waiting for approval.' 
-            : 'Facility booked successfully!';
+        $message = $booking->status === 'approved'
+            ? 'Facility booked successfully!'
+            : 'Booking request submitted. Waiting for approval.';
 
         return redirect()->route('villa-owner.bookings')
             ->with('success', $message);
@@ -132,21 +117,7 @@ class FacilityController extends Controller
 
     public function bookings()
     {
-        $user = auth()->user();
-        
-        // Get villa through ownedVilla relationship or direct owner_id
-        $villa = null;
-        
-        if ($user->owner_id) {
-            $villa = $user->ownedVilla;
-        }
-        
-        // If not found through relationship, try direct owner_id match
-        if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
-                                    ->where('property_type', 'villa')
-                                    ->first();
-        }
+        $villa = $this->villaFor(auth()->user());
 
         if (!$villa) {
             return redirect()->route('villa-owner.dashboard')
@@ -163,23 +134,9 @@ class FacilityController extends Controller
 
     public function cancelBooking(FacilityBooking $booking)
     {
-        $user = auth()->user();
-        
-        // Get villa through ownedVilla relationship or direct owner_id
-        $villa = null;
-        
-        if ($user->owner_id) {
-            $villa = $user->ownedVilla;
-        }
-        
-        // If not found through relationship, try direct owner_id match
-        if (!$villa) {
-            $villa = \App\Models\Flat::where('owner_id', $user->owner_id)
-                                    ->where('property_type', 'villa')
-                                    ->first();
-        }
+        $villa = $this->villaFor(auth()->user());
 
-        if (!$villa || $booking->flat_id !== $villa->id) {
+        if (!$villa || (int) $booking->flat_id !== (int) $villa->id) {
             abort(403);
         }
 
@@ -187,7 +144,13 @@ class FacilityController extends Controller
             return back()->with('error', 'This booking is already cancelled.');
         }
 
-        $booking->update(['status' => 'cancelled']);
+        if (!in_array($booking->status, ['pending', 'approved'], true)) {
+            return back()->with('error', 'This booking can no longer be cancelled.');
+        }
+
+        $booking->update(['status' => 'cancelled', 'cancelled_at' => now()]);
+
+        BusinessNotifications::facilityBookingCancelled($booking->load('facility'));
 
         return back()->with('success', 'Booking cancelled successfully.');
     }

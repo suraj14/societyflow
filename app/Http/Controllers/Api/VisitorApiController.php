@@ -7,7 +7,6 @@ use App\Http\Controllers\Api\ApiImageHelper;
 use App\Http\Controllers\Api\Concerns\ResolvesUserFlats;
 use App\Models\Visitor;
 use App\Models\User;
-use App\Services\PushNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -86,6 +85,10 @@ class VisitorApiController extends Controller
             'expected_exit_time'  => 'nullable|date',
             'vehicle_number'      => 'nullable|string|max:20',
             'flat_id'             => 'nullable|exists:flats,id',
+            // From a scanned ID at the gate. The number is redacted below,
+            // not trusted as sent.
+            'visitor_id_proof'    => 'nullable|string|in:' . implode(',', \App\Support\IdProof::TYPES),
+            'visitor_id_number'   => 'nullable|string|max:40',
         ]);
 
         $user    = $request->user();
@@ -142,12 +145,11 @@ class VisitorApiController extends Controller
             'approval_status'     => $approvalStatus,
             'entry_status'        => 'pending',
             'security_notes'      => $isStaff ? 'Registered by guard: ' . $user->name : null,
+            'visitor_id_proof'    => $request->visitor_id_proof,
+            // An Aadhaar is reduced to its last four digits here, on arrival,
+            // however complete the client sent it.
+            'visitor_id_number'   => \App\Support\IdProof::redact($request->visitor_id_proof, $request->visitor_id_number),
         ]);
-
-        // Notify the resident if registered by guard
-        if ($isStaff && $hostUserId !== $user->id) {
-            $this->notifyResident($visitor, $hostUserId);
-        }
 
         $visitor->load('flat.building');
 
@@ -161,36 +163,68 @@ class VisitorApiController extends Controller
     }
 
     /**
-     * Send push notification to resident about pending visitor
+     * Has this number been here before, and is there a pass for it?
+     *
+     * The gate asks this before registering anyone, so a regular visitor
+     * becomes a check-in rather than a third duplicate row. Scoped to the
+     * caller's society, and restricted to gate staff: letting a resident
+     * look up arbitrary numbers would turn this into a "who visits whom"
+     * lookup over the whole society.
      */
-    private function notifyResident(Visitor $visitor, int $residentUserId): void
+    public function lookup(Request $request): JsonResponse
     {
-        try {
-            $residentUser = User::find($residentUserId);
-            if (!$residentUser) return;
+        $request->validate(['phone' => 'required|string|min:6|max:20']);
 
-            $flatLabel = $visitor->flat
-                ? (($visitor->flat->building?->name ?? '') . ' ' . $visitor->flat->flat_number)
-                : 'your unit';
+        $user = $request->user();
 
-            $pushService = app(PushNotificationService::class);
-            $pushService->sendToUser(
-                $residentUser,
-                'visitor_arrived',
-                [
-                    'visitor_name'  => $visitor->visitor_name,
-                    'visitor_phone' => $visitor->visitor_phone,
-                    'visitor_type'  => ucfirst($visitor->visitor_type),
-                    'flat_number'   => $flatLabel,
-                ],
-                [
-                    'visitor_id' => $visitor->id,
-                    'action'     => 'visitor_approval',
-                ]
-            );
-        } catch (\Throwable $e) {
-            Log::warning('Visitor resident notification failed: ' . $e->getMessage());
+        if (!$user->hasAnyRole(['Staff', 'Guard', 'Admin', 'Super Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only gate staff can look up visitors by number.',
+            ], 403);
         }
+
+        $digits = \App\Support\IdProof::phoneDigits($request->phone);
+
+        if (strlen($digits) < 6) {
+            return response()->json(['success' => true, 'data' => ['found' => false, 'visitor' => null, 'access_pass' => null]]);
+        }
+
+        // Stored numbers are inconsistent (some with a country code, some
+        // without), so match on the trailing digits as well as exactly.
+        $match = function ($query, string $column) use ($digits) {
+            $bare = "REPLACE(REPLACE(REPLACE(REPLACE($column, ' ', ''), '-', ''), '(', ''), ')', '')";
+            $query->where($column, $digits)
+                ->orWhereRaw("$bare LIKE ?", ['%' . $digits]);
+        };
+
+        $visitor = Visitor::where('society_id', $user->society_id)
+            ->where(fn ($q) => $match($q, 'visitor_phone'))
+            ->with('flat.building')
+            ->latest('id')
+            ->first();
+
+        $pass = \App\Models\AccessPass::where('society_id', $user->society_id)
+            ->where(fn ($q) => $match($q, 'person_phone'))
+            ->where('status', 'active')
+            ->latest('id')
+            ->first();
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'found'       => $visitor !== null || $pass !== null,
+                'visitor'     => $visitor ? $this->formatVisitor($visitor) : null,
+                'access_pass' => $pass ? [
+                    'id'            => $pass->id,
+                    'person_name'   => $pass->person_name,
+                    'category'      => $pass->category,
+                    'valid_until'   => optional($pass->valid_until)->toDateString(),
+                    'currently_inside' => (bool) $pass->currently_inside,
+                    // Never the token: a pass token is a credential.
+                ] : null,
+            ],
+        ]);
     }
 
     public function checkIn(Request $request, int $id): JsonResponse

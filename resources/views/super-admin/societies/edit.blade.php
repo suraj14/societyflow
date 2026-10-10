@@ -144,6 +144,20 @@
                         <input type="text" name="pincode" value="{{ old('pincode', $society->pincode) }}" required
                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
                     </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Registration Number</label>
+                        <input type="text" name="registration_number" maxlength="100" value="{{ old('registration_number', $society->registration_number) }}"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                        @error('registration_number')<p class="text-red-500 text-sm mt-1">{{ $message }}</p>@enderror
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Registered / Established On</label>
+                        <input type="date" name="registered_on" max="{{ now()->toDateString() }}" value="{{ old('registered_on', optional($society->registered_on)->toDateString()) }}"
+                               class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                        @error('registered_on')<p class="text-red-500 text-sm mt-1">{{ $message }}</p>@enderror
+                    </div>
                 </div>
             </div>
 

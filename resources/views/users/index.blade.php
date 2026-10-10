@@ -10,11 +10,11 @@
             <h1 class="text-3xl font-bold text-gray-900">User Management</h1>
             <p class="text-gray-600 mt-1">Manage all users and their roles</p>
         </div>
-        <button onclick="openAddUserDrawer()" 
-                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
+        <a href="{{ route('users.create') }}"
+           class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
             <i class="fas fa-plus mr-2"></i>
             Add
-        </button>
+        </a>
     </div>
 
 
@@ -134,11 +134,14 @@
                                         @if($user->id === auth()->id())
                                             <span class="text-gray-500 text-xs">You cannot change own role</span>
                                         @else
-                                            <button onclick="openUpdateUserDrawer({{ $user->id }})" 
-                                                    class="text-indigo-600 hover:text-indigo-900 transition-colors"
-                                                    title="Update User">
+                                            {{-- The standard edit page (photo preview, validation errors shown
+                                                 in place, committee designation) - the old right-side drawer
+                                                 hid its own validation errors and never showed the photo. --}}
+                                            <a href="{{ route('users.edit', $user) }}"
+                                               class="text-indigo-600 hover:text-indigo-900 transition-colors"
+                                               title="Update {{ $user->name }}">
                                                 Update
-                                            </button>
+                                            </a>
                                         @endif
                                         
                                         @if($user->id !== auth()->id())
@@ -178,11 +181,11 @@
                 </div>
                 <h3 class="text-lg font-medium text-gray-900 mb-2">No users found</h3>
                 <p class="text-gray-500 mb-6">Get started by adding your first user.</p>
-                <button onclick="openAddUserDrawer()" 
-                        class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
+                <a href="{{ route('users.create') }}"
+                   class="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors">
                     <i class="fas fa-plus mr-2"></i>
                     Add Your First User
-                </button>
+                </a>
             </div>
         @endif
     </div>
@@ -250,212 +253,6 @@
     </div>
 </div>
 
-<!-- Add User Drawer -->
-<div id="addUserDrawer" class="fixed inset-0 overflow-hidden z-50 hidden">
-    <div class="absolute inset-0 overflow-hidden">
-        <div class="absolute inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onclick="closeAddUserDrawer()"></div>
-        <section class="absolute right-0 top-0 h-full w-full max-w-md flex flex-col bg-white shadow-xl">
-            <div class="flex-1 overflow-y-auto">
-                <div class="px-4 py-6 bg-gray-50 sm:px-6">
-                    <div class="flex items-center justify-between">
-                        <h2 class="text-lg font-medium text-gray-900">Add User</h2>
-                        <button onclick="closeAddUserDrawer()" class="text-gray-400 hover:text-gray-600">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-                <form id="addUserForm" action="{{ route('users.store') }}" method="POST" enctype="multipart/form-data" class="px-4 py-6 sm:px-6" novalidate>
-                    @csrf
-                    
-                    <!-- Display Validation Errors -->
-                    @if($errors->any())
-                        <div class="mb-4 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
-                            <div class="flex items-start">
-                                <i class="fas fa-exclamation-circle text-red-500 mr-3 mt-0.5"></i>
-                                <div>
-                                    <h4 class="text-sm font-medium text-red-800 mb-1">Please fix the following errors:</h4>
-                                    <ul class="text-sm text-red-700 list-disc list-inside">
-                                        @foreach($errors->all() as $error)
-                                            <li>{{ $error }}</li>
-                                        @endforeach
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    @endif
-                    
-                    <div class="space-y-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
-                            <input type="text" name="name" required 
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Email Address *</label>
-                            <input type="email" name="email" required 
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
-                            <div class="flex">
-                                <span class="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
-                                    +91
-                                </span>
-                                <input type="text" name="phone" required 
-                                       class="flex-1 px-4 py-2 border border-gray-300 rounded-r-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Role *</label>
-                            <select name="role" required 
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Select Role</option>
-                                @foreach($roles as $role)
-                                    <option value="{{ $role->name }}">{{ $role->name }}</option>
-                                @endforeach
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Upload Profile Image</label>
-                            <input type="file" name="avatar" accept="image/*" 
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                    </div>
-                    
-                    <!-- Submit Button Inside Form -->
-                    <div class="flex-shrink-0 px-4 py-4 flex justify-end space-x-3 border-t border-gray-200 mt-6">
-                        <button type="button" onclick="closeAddUserDrawer()" 
-                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-                            Cancel
-                        </button>
-                        <button type="submit" 
-                                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700">
-                            Save
-                        </button>
-                    </div>
-                </form>
-            </div>
-            <!-- Remove duplicate buttons section below -->
-            <!--
-            <div class="flex-shrink-0 px-4 py-4 flex justify-end space-x-3 border-t border-gray-200">
-                <button onclick="closeAddUserDrawer()" 
-                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-                    Cancel
-                </button>
-                <button type="submit" 
-                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700">
-                    Save
-                </button>
-            </div>
-            -->
-            </div>
-        </section>
-    </div>
-</div>
-
-<!-- Update User Drawer -->
-<div id="updateUserDrawer" class="fixed inset-0 overflow-hidden z-50 hidden">
-    <div class="absolute inset-0 overflow-hidden">
-        <div class="absolute inset-0 bg-gray-500 bg-opacity-75 transition-opacity" onclick="closeUpdateUserDrawer()"></div>
-        <section class="absolute right-0 top-0 h-full w-full max-w-md flex flex-col bg-white shadow-xl">
-            <div class="flex-1 overflow-y-auto">
-                <div class="px-4 py-6 bg-gray-50 sm:px-6">
-                    <div class="flex items-center justify-between">
-                        <h2 class="text-lg font-medium text-gray-900">Update User</h2>
-                        <button onclick="closeUpdateUserDrawer()" class="text-gray-400 hover:text-gray-600">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-                <form id="updateUserForm" method="POST" enctype="multipart/form-data" class="px-4 py-6 sm:px-6" novalidate>
-                    @csrf
-                    @method('PUT')
-                    <div class="space-y-6">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Full Name *</label>
-                            <input type="text" name="name" id="updateUserName" required 
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Email Address</label>
-                            <input type="email" id="updateUserEmail" readonly 
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500">
-                            <p class="text-xs text-gray-500 mt-1">Email cannot be changed after creation</p>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
-                            <div class="flex">
-                                <span class="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">
-                                    +91
-                                </span>
-                                <input type="text" name="phone" id="updateUserPhone" required 
-                                       class="flex-1 px-4 py-2 border border-gray-300 rounded-r-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Status *</label>
-                            <select name="status" id="updateUserStatus" required 
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Role *</label>
-                            <select name="role" id="updateUserRole" required 
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                @foreach($roles as $role)
-                                    <option value="{{ $role->name }}">{{ $role->name }}</option>
-                                @endforeach
-                            </select>
-                            <p id="roleChangeWarning" class="text-xs text-red-500 mt-1 hidden">You cannot change your own role</p>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Upload Profile Image</label>
-                            <input type="file" name="avatar" accept="image/*" 
-                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                    </div>
-                    
-                    <!-- Submit Button Inside Form -->
-                    <div class="flex-shrink-0 px-4 py-4 flex justify-end space-x-3 border-t border-gray-200 mt-6">
-                        <button type="button" onclick="closeUpdateUserDrawer()" 
-                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-                            Cancel
-                        </button>
-                        <button type="submit" 
-                                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700">
-                            Save
-                        </button>
-                    </div>
-                </form>
-            </div>
-            <!-- Remove duplicate buttons section below -->
-            <!--
-            <div class="flex-shrink-0 px-4 py-4 flex justify-end space-x-3 border-t border-gray-200">
-                <button onclick="closeUpdateUserDrawer()" 
-                        class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
-                    Cancel
-                </button>
-                <button type="submit" 
-                        class="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700">
-                    Save
-                </button>
-            </div>
-            -->
-            </div>
-        </section>
-    </div>
-</div>
 
 @endsection
 
@@ -519,46 +316,6 @@ const usersData = {!! json_encode($users->map(function($user) {
 })) !!};
 
 const currentUserId = {{ auth()->id() }};
-
-// Drawer functions
-function openAddUserDrawer() {
-    document.getElementById('addUserDrawer').classList.remove('hidden');
-}
-
-function closeAddUserDrawer() {
-    document.getElementById('addUserDrawer').classList.add('hidden');
-    document.getElementById('addUserForm').reset();
-}
-
-function openUpdateUserDrawer(userId) {
-    const user = usersData.find(u => u.id === userId);
-    if (!user) return;
-    
-    document.getElementById('updateUserName').value = user.name;
-    document.getElementById('updateUserEmail').value = user.email;
-    document.getElementById('updateUserPhone').value = user.phone;
-    document.getElementById('updateUserStatus').value = user.status;
-    document.getElementById('updateUserRole').value = user.role;
-    
-    const roleSelect = document.getElementById('updateUserRole');
-    const roleWarning = document.getElementById('roleChangeWarning');
-    
-    if (userId === currentUserId) {
-        roleSelect.disabled = true;
-        roleWarning.classList.remove('hidden');
-    } else {
-        roleSelect.disabled = false;
-        roleWarning.classList.add('hidden');
-    }
-    
-    document.getElementById('updateUserForm').action = `/users/${userId}`;
-    document.getElementById('updateUserDrawer').classList.remove('hidden');
-}
-
-function closeUpdateUserDrawer() {
-    document.getElementById('updateUserDrawer').classList.add('hidden');
-    document.getElementById('updateUserForm').reset();
-}
 
 // Filter functions
 function filterUsers() {
@@ -649,15 +406,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('roleFilter').addEventListener('change', filterUsers);
     document.getElementById('statusFilter').addEventListener('change', filterUsers);
     
-    // Ensure drawer is visible before form submits (fixes browser validation on hidden fields)
-    document.getElementById('updateUserForm').addEventListener('submit', function(e) {
-        // Make sure drawer is visible
-        document.getElementById('updateUserDrawer').classList.remove('hidden');
-    });
-    
-    document.getElementById('addUserForm').addEventListener('submit', function(e) {
-        document.getElementById('addUserDrawer').classList.remove('hidden');
-    });
 });
 
 function showSuccessMessage(message) {

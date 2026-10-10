@@ -31,7 +31,8 @@ class DynamicEmailService
         string $triggerEvent,
         array $recipients,
         array $variables = [],
-        ?int $societyId = null
+        ?int $societyId = null,
+        ?string $notificationKey = null,
     ): bool {
         try {
             // Validate event
@@ -71,7 +72,7 @@ class DynamicEmailService
 
             // Send to each recipient
             foreach ($recipients as $recipient) {
-                self::sendToRecipient($template, $recipient, $variables, $triggerEvent, $societyId);
+                self::sendToRecipient($template, $recipient, $variables, $triggerEvent, $societyId, $notificationKey);
             }
 
             return true;
@@ -92,7 +93,8 @@ class DynamicEmailService
         array $recipient,
         array $variables,
         string $triggerEvent,
-        ?int $societyId
+        ?int $societyId,
+        ?string $notificationKey = null,
     ): void {
         try {
             // Load email configuration
@@ -117,6 +119,8 @@ class DynamicEmailService
                 'recipient_email' => $recipient['email'],
                 'recipient_name' => $recipient['name'] ?? null,
                 'trigger_action' => $triggerEvent,
+                'channel' => 'email',
+                'notification_key' => $notificationKey,
                 'variables' => $variables,
                 'status' => 'sent',
                 'sent_at' => now(),
@@ -142,6 +146,8 @@ class DynamicEmailService
                     'recipient_email' => $recipient['email'],
                     'recipient_name' => $recipient['name'] ?? null,
                     'trigger_action' => $triggerEvent,
+                    'channel' => 'email',
+                    'notification_key' => $notificationKey,
                     'variables' => $variables,
                     'status' => 'failed',
                     'error_message' => $e->getMessage(),

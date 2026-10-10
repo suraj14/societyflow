@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SystemSetting;
+use App\Traits\HandlesFormSubmissions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
@@ -14,6 +15,8 @@ use Exception;
 
 class SettingsController extends Controller
 {
+    use HandlesFormSubmissions;
+
     public function index(Request $request)
     {
         $user = auth()->user();
@@ -41,13 +44,19 @@ class SettingsController extends Controller
             'theme' => SystemSetting::getGroup('theme', $societyId),
             'email' => SystemSetting::getGroup('email', $societyId),
             'payment' => SystemSetting::getGroup('payment', $societyId),
-            'push' => SystemSetting::getGroup('push', $societyId),
             'sms' => SystemSetting::getGroup('sms', $societyId),
+            'whatsapp' => SystemSetting::getGroup('whatsapp', $societyId),
             'security' => SystemSetting::getGroup('security', $societyId),
             'permissions' => SystemSetting::getGroup('permissions', $societyId),
             'currency' => SystemSetting::getGroup('currency', $societyId),
             'features' => SystemSetting::getGroup('features', $societyId),
         ];
+
+        // Saved provider credentials are encrypted at rest, but were being
+        // decrypted and rendered into value="..." - visible in page source
+        // whatever the input type said. The form now receives a mask and
+        // posting it back means "unchanged" (see SettingSecrets).
+        $settings = \App\Support\SettingSecrets::maskAll($settings);
 
         // Get complaint categories for this society
         $complaintCategories = \App\Models\ComplaintCategory::where('society_id', $societyId)->get();
@@ -70,9 +79,13 @@ class SettingsController extends Controller
             'theme' => SystemSetting::getGroup('theme', null),
             'email' => SystemSetting::getGroup('email', null),
             'payment' => SystemSetting::getGroup('payment', null),
-            'push' => SystemSetting::getGroup('push', null),
             'security' => SystemSetting::getGroup('security', null),
+            'whatsapp' => SystemSetting::getGroup('whatsapp', null),
         ];
+
+        // Same masking as the society branch - the global settings page
+        // renders the same inputs from the same group names.
+        $settings = \App\Support\SettingSecrets::maskAll($settings);
 
         $languages = [
             'en' => 'English',
@@ -256,8 +269,9 @@ class SettingsController extends Controller
         SystemSetting::set('storage', 'storage_driver', $validated['storage_driver'], 'string', null);
         
         if ($validated['storage_driver'] === 's3') {
-            SystemSetting::set('storage', 'aws_key', $validated['aws_key'], 'encrypted', null);
-            SystemSetting::set('storage', 'aws_secret', $validated['aws_secret'], 'encrypted', null);
+            // The form is shown a mask for a saved key, never the key: posting the mask back means "unchanged".
+            SystemSetting::set('storage', 'aws_key', \App\Support\SettingSecrets::resolve('storage', 'aws_key', $validated['aws_key'] ?? null, null), 'encrypted', null);
+            SystemSetting::set('storage', 'aws_secret', \App\Support\SettingSecrets::resolve('storage', 'aws_secret', $validated['aws_secret'] ?? null, null), 'encrypted', null);
             SystemSetting::set('storage', 'aws_region', $validated['aws_region'], 'string', null);
             SystemSetting::set('storage', 'aws_bucket', $validated['aws_bucket'], 'string', null);
         }
@@ -277,6 +291,10 @@ class SettingsController extends Controller
             $driver = SystemSetting::get('storage', 'storage_driver', 'local', null);
             
             if ($driver === 's3') {
+                if (!\App\Support\ExternalMessaging::enabled()) {
+                    return response()->json(['success' => false, 'message' => 'Not tested: external services are disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).']);
+                }
+
                 $client = new S3Client([
                     'version' => 'latest',
                     'region' => SystemSetting::get('storage', 'aws_region', null, null),
@@ -299,7 +317,14 @@ class SettingsController extends Controller
             
             return response()->json(['success' => true, 'message' => 'Storage connection successful!']);
         } catch (Exception $e) {
-            return response()->json(['success' => false, 'message' => 'Connection failed: ' . $e->getMessage()]);
+            // The provider's message can quote the access key; never hand a credential back to the browser.
+            $message = \App\Services\SmsService::safeProviderMessage(mb_substr($e->getMessage(), 0, 300), (string) SystemSetting::get('storage', 'aws_secret', '', null));
+            $key = (string) SystemSetting::get('storage', 'aws_key', '', null);
+            if ($key !== '') {
+                $message = str_replace($key, '[hidden]', $message);
+            }
+
+            return response()->json(['success' => false, 'message' => 'Connection failed: ' . $message]);
         }
     }
 
@@ -327,25 +352,22 @@ class SettingsController extends Controller
         SystemSetting::set('theme', 'sidebar_theme', $validated['sidebar_theme'], 'string', $societyId);
         SystemSetting::set('theme', 'button_style', $validated['button_style'], 'string', $societyId);
 
-        // Handle logo upload (Admin only)
+        // Handle logo upload (Admin only). Previously built the stored
+        // filename from the client's own filename (the same bug confirmed
+        // live in UserController's avatar upload - a colon in the source
+        // filename crashes move() on Windows) and never deleted the old
+        // logo "to avoid fileinfo error" - deleting a file touches no
+        // fileinfo function; that comment described a workaround for this
+        // same unfixed bug, not a reason to leak the old file forever.
         if ($request->hasFile('society_logo') && $user->hasRole('Admin')) {
             try {
-                // Don't try to delete old logo - just skip it to avoid fileinfo error
-                
-                // Store new logo
-                $file = $request->file('society_logo');
-                $uploadPath = public_path('storage/society-logos');
-                @mkdir($uploadPath, 0777, true);
-                $filename = time() . '_' . $file->getClientOriginalName();
-                try {
-                    $file->move($uploadPath, $filename);
-                } catch (\Exception $e) {
-                    @chmod($uploadPath, 0777);
-                    $file->move($uploadPath, $filename);
-                }
-                $logoPath = 'society-logos/' . $filename;
+                $oldLogo = SystemSetting::get('theme', 'society_logo', null, $societyId);
+                $logoPath = $this->handleFileUpload($request, 'society_logo', 'society-logos', ['jpeg', 'png', 'jpg']);
                 SystemSetting::set('theme', 'society_logo', $logoPath, 'string', $societyId);
-                
+                if ($oldLogo) {
+                    $this->deleteUploadedFile($oldLogo);
+                }
+
                 \Log::info('Logo uploaded successfully', ['path' => $logoPath, 'society_id' => $societyId]);
             } catch (\Exception $e) {
                 \Log::error('Logo upload failed', ['error' => $e->getMessage(), 'society_id' => $societyId]);
@@ -353,25 +375,16 @@ class SettingsController extends Controller
             }
         }
 
-        // Handle favicon upload (Admin only)
+        // Handle favicon upload (Admin only) - see the logo block above.
         if ($request->hasFile('society_favicon') && $user->hasRole('Admin')) {
             try {
-                // Don't try to delete old favicon - just skip it to avoid fileinfo error
-                
-                // Store new favicon
-                $file = $request->file('society_favicon');
-                $uploadPath = public_path('storage/society-favicons');
-                @mkdir($uploadPath, 0777, true);
-                $filename = time() . '_' . $file->getClientOriginalName();
-                try {
-                    $file->move($uploadPath, $filename);
-                } catch (\Exception $e) {
-                    @chmod($uploadPath, 0777);
-                    $file->move($uploadPath, $filename);
-                }
-                $faviconPath = 'society-favicons/' . $filename;
+                $oldFavicon = SystemSetting::get('theme', 'society_favicon', null, $societyId);
+                $faviconPath = $this->handleFileUpload($request, 'society_favicon', 'society-favicons', ['jpeg', 'png', 'jpg', 'ico']);
                 SystemSetting::set('theme', 'society_favicon', $faviconPath, 'string', $societyId);
-                
+                if ($oldFavicon) {
+                    $this->deleteUploadedFile($oldFavicon);
+                }
+
                 \Log::info('Favicon uploaded successfully', ['path' => $faviconPath, 'society_id' => $societyId]);
             } catch (\Exception $e) {
                 \Log::error('Favicon upload failed', ['error' => $e->getMessage(), 'society_id' => $societyId]);
@@ -431,7 +444,17 @@ class SettingsController extends Controller
         SystemSetting::set('email', 'mail_host', $validated['mail_host'], 'string', $societyId);
         SystemSetting::set('email', 'mail_port', $validated['mail_port'], 'integer', $societyId);
         SystemSetting::set('email', 'mail_username', $validated['mail_username'], 'string', $societyId);
-        SystemSetting::set('email', 'mail_password', $validated['mail_password'], 'encrypted', $societyId);
+        // The form was shown a mask, not the stored password. Posting the
+        // mask back means "unchanged" - without this, simply opening the
+        // page and pressing Save would overwrite the real password with
+        // asterisks and silently break outgoing mail.
+        SystemSetting::set(
+            'email',
+            'mail_password',
+            \App\Support\SettingSecrets::resolve('email', 'mail_password', $validated['mail_password'], $societyId),
+            'encrypted',
+            $societyId
+        );
         SystemSetting::set('email', 'mail_encryption', $validated['mail_encryption'], 'string', $societyId);
         SystemSetting::set('email', 'mail_from_address', $validated['mail_from_address'], 'string', $societyId);
         SystemSetting::set('email', 'mail_from_name', $validated['mail_from_name'], 'string', $societyId);
@@ -439,60 +462,73 @@ class SettingsController extends Controller
         // Apply settings to current Laravel mail configuration
         EmailConfigurationService::applyMailConfiguration($validated);
 
-        return back()->with('success', 'Email settings updated successfully!');
+        // New settings have not been tested yet - the old "Connected" no
+        // longer describes them.
+        \App\Support\ChannelStatus::clear('email', $societyId);
+
+        return redirect()->route('settings.index', ['tab' => 'email'])->with('success', 'Email settings saved. Send a test email to confirm they work.');
     }
 
+    /**
+     * Sends a real email through the society's SAVED settings (not whatever
+     * is typed in the form) and records the outcome as the channel status.
+     * The admin sees a plain result; the provider's own error is only in
+     * "View technical details", sanitised so the password never appears.
+     */
     public function testEmail(Request $request)
     {
         $request->validate(['test_email' => 'required|email']);
 
-        try {
-            $user = auth()->user();
-            $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
-            $subject = $user->hasRole('Super Admin') ? 'Test Email - SocietyFlow' : 'Test Email - ' . ($user->society->name ?? 'SocietyFlow');
-            
-            // Load and apply society-specific email settings
-            $emailSettings = EmailConfigurationService::loadAndApplySettings($societyId);
-            
-            // Check if email settings are configured
-            if (empty($emailSettings) || empty($emailSettings['mail_driver']) || empty($emailSettings['mail_from_address'])) {
-                return response()->json([
-                    'success' => false, 
-                    'message' => 'Email settings not configured for this society. Please configure email settings first.',
-                    'details' => 'Go to Settings → Email Settings to configure SMTP settings.'
-                ]);
-            }
-            
-            // Get current mail configuration for debugging
-            $mailConfig = config('mail');
-            Log::info('Testing email with society-specific configuration', [
-                'society_id' => $societyId,
-                'society_name' => $user->society->name ?? 'Global',
-                'driver' => $mailConfig['default'],
-                'host' => $mailConfig['mailers']['smtp']['host'] ?? 'Not set',
-                'port' => $mailConfig['mailers']['smtp']['port'] ?? 'Not set',
-                'from' => $mailConfig['from']['address'] ?? 'Not set',
-                'to' => $request->test_email
-            ]);
-            
-            Mail::raw('This is a test email from SocietyFlow. If you received this, your email configuration is working correctly!', function ($message) use ($request, $subject) {
-                $message->to($request->test_email)->subject($subject);
-            });
+        $user = auth()->user();
+        $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
+        $emailSettings = EmailConfigurationService::loadAndApplySettings($societyId);
 
-            return response()->json(['success' => true, 'message' => 'Test email sent successfully!']);
-        } catch (Exception $e) {
-            Log::error('Email test failed', [
-                'society_id' => $societyId ?? 'unknown',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            
+        // Never report "sent" for a message that was only written to the log.
+        if (!\App\Support\ExternalMessaging::enabled()) {
             return response()->json([
-                'success' => false, 
-                'message' => 'Failed to send email: ' . $e->getMessage(),
-                'details' => 'Check your SMTP settings and ensure your email credentials are correct.'
+                'success' => false,
+                'message' => 'Not sent: external messaging is disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).',
+                'details' => null,
             ]);
         }
+
+        if (empty($emailSettings['mail_host']) || empty($emailSettings['mail_from_address'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Email is not set up yet. Fill in the SMTP host and From email address, save, then test.',
+                'details' => null,
+            ]);
+        }
+
+        $subject = 'Test email - ' . ($user->society->name ?? 'SocietyFlow');
+
+        try {
+            Mail::raw(
+                "This is a test email from SocietyFlow.\n\nIf you can read this, your email settings work and SocietyFlow will send society notifications from this address.",
+                fn ($message) => $message->to($request->test_email)->subject($subject)
+            );
+        } catch (\Throwable $e) {
+            $detail = \App\Services\SmsService::safeProviderMessage(
+                mb_substr($e->getMessage(), 0, 500),
+                (string) ($emailSettings['mail_password'] ?? '')
+            );
+            \App\Support\ChannelStatus::record('email', $societyId, false, 'Test email failed', $detail);
+            Log::warning('Settings test email failed', ['society_id' => $societyId, 'error_class' => get_class($e)]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Test email failed. Please check your SMTP settings.',
+                'details' => $detail,
+            ]);
+        }
+
+        \App\Support\ChannelStatus::record('email', $societyId, true, "Test email sent to {$request->test_email}");
+
+        return response()->json([
+            'success' => true,
+            'message' => "Test email sent successfully to {$request->test_email}. Check the inbox (and spam folder).",
+            'details' => null,
+        ]);
     }
 
     public function updatePayment(Request $request)
@@ -503,7 +539,7 @@ class SettingsController extends Controller
             abort(403, 'Unauthorized access.');
         }
 
-        $validated = $request->validate([
+        $rules = [
             'payment_test_mode' => 'nullable|boolean',
             'razorpay_enabled' => 'nullable|boolean',
             'razorpay_key' => 'nullable|string|max:255',
@@ -541,9 +577,24 @@ class SettingsController extends Controller
             'ccavenue_merchant_id' => 'nullable|string|max:255',
             'ccavenue_working_key' => 'nullable|string|max:255',
             'ccavenue_access_code' => 'nullable|string|max:255',
-        ]);
+        ];
+        $validated = $request->validate($rules);
+        // validate() leaves out every optional field the form did not send; this method reads them
+        // all by key, so a partial submission used to crash with "Undefined array key". Treat absent as empty.
+        $validated += array_fill_keys(array_keys($rules), null);
 
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
+
+        // The form was shown a mask for each saved credential, never the
+        // credential itself. Blanking the masked ones here means the
+        // existing `if ($validated[...])` guards below skip them and the
+        // stored value survives - otherwise opening the page and pressing
+        // Save would overwrite every live gateway secret with asterisks.
+        foreach (\App\Support\SettingSecrets::keysFor('payment') as $secretKey) {
+            if (\App\Support\SettingSecrets::isMask($validated[$secretKey] ?? null)) {
+                $validated[$secretKey] = null;
+            }
+        }
 
         SystemSetting::set('payment', 'payment_test_mode', $request->boolean('payment_test_mode'), 'boolean', $societyId);
         
@@ -658,38 +709,6 @@ class SettingsController extends Controller
         return back()->with('success', 'Payment gateway settings updated successfully!');
     }
 
-    public function updatePush(Request $request)
-    {
-        $user = auth()->user();
-        
-        if (!$user->hasRole(['Super Admin', 'Admin'])) {
-            abort(403, 'Unauthorized access.');
-        }
-
-        $validated = $request->validate([
-            'push_enabled' => 'nullable|boolean',
-            'fcm_server_key' => 'nullable|string',
-            'vapid_public_key' => 'nullable|string',
-            'vapid_private_key' => 'nullable|string',
-        ]);
-
-        $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
-
-        SystemSetting::set('push', 'push_enabled', $request->boolean('push_enabled'), 'boolean', $societyId);
-        
-        if ($validated['fcm_server_key']) {
-            SystemSetting::set('push', 'fcm_server_key', $validated['fcm_server_key'], 'encrypted', $societyId);
-        }
-        if ($validated['vapid_public_key']) {
-            SystemSetting::set('push', 'vapid_public_key', $validated['vapid_public_key'], 'string', $societyId);
-        }
-        if ($validated['vapid_private_key']) {
-            SystemSetting::set('push', 'vapid_private_key', $validated['vapid_private_key'], 'encrypted', $societyId);
-        }
-
-        return back()->with('success', 'Push notification settings updated successfully!');
-    }
-
     public function updateSms(Request $request)
     {
         $user = auth()->user();
@@ -700,6 +719,16 @@ class SettingsController extends Controller
             'fast2sms_route'             => 'nullable|in:otp,dlt',
             'fast2sms_sender_id'         => 'nullable|string|max:20',
             'fast2sms_template_id'       => 'nullable|string|max:50',
+            'fast2sms_otp_id'            => 'nullable|string|max:50',
+            // DLT compliance metadata (Entity ID). Fast2SMS's send APIs do not
+            // take this as a request parameter - it is the registration record
+            // kept for the admin's own reference, matched against what the
+            // telecom DLT portal has on file.
+            'fast2sms_entity_id'         => 'nullable|string|max:30',
+            'otp_sms_enabled'            => 'nullable|boolean',
+            'visitor_sms_enabled'        => 'nullable|boolean',
+            'access_pass_sms_enabled'    => 'nullable|boolean',
+            'notification_sms_enabled'   => 'nullable|boolean',
             'bulksmsplans_api_id'        => 'nullable|string|max:200',
             'bulksmsplans_api_password'  => 'nullable|string|max:200',
             'bulksmsplans_sender_id'     => 'nullable|string|max:20',
@@ -712,7 +741,10 @@ class SettingsController extends Controller
         SystemSetting::set('sms', 'sms_enabled',  $request->boolean('sms_enabled'), 'boolean', $societyId);
         SystemSetting::set('sms', 'sms_provider',  $request->sms_provider, 'string', $societyId);
 
-        if ($request->filled('fast2sms_api_key')) {
+        // A masked field means "unchanged" - never store the mask itself.
+        // SettingSecrets::isMask() is checked here because filled() alone
+        // treats the mask as a real new value and overwrites the saved key.
+        if ($request->filled('fast2sms_api_key') && !\App\Support\SettingSecrets::isMask($request->fast2sms_api_key)) {
             SystemSetting::set('sms', 'fast2sms_api_key', $request->fast2sms_api_key, 'encrypted', $societyId);
         }
         SystemSetting::set('sms', 'fast2sms_route', $request->fast2sms_route ?? 'otp', 'string', $societyId);
@@ -722,10 +754,29 @@ class SettingsController extends Controller
         if ($request->filled('fast2sms_template_id')) {
             SystemSetting::set('sms', 'fast2sms_template_id', $request->fast2sms_template_id, 'string', $societyId);
         }
-        if ($request->filled('bulksmsplans_api_id')) {
+        // Approved Smart OTP template ID. Plain config, not a secret.
+        SystemSetting::set('sms', 'fast2sms_otp_id', trim((string) $request->input('fast2sms_otp_id', '')), 'string', $societyId);
+        SystemSetting::set('sms', 'fast2sms_entity_id', trim((string) $request->input('fast2sms_entity_id', '')), 'string', $societyId);
+
+        // Per-purpose channels. 'otp_sms_enabled' mirrors 'sms_enabled' (the
+        // flag SmsService::sendOtp has always read) under the clearer name
+        // the Settings page now shows; the other three gate DLT notification
+        // sends a caller makes through SmsService::sendDltNotification() for
+        // that purpose - see that method's docblock for what is, and is not,
+        // wired to an actual trigger yet.
+        SystemSetting::set('sms', 'otp_sms_enabled', $request->boolean('otp_sms_enabled', $request->boolean('sms_enabled')), 'boolean', $societyId);
+        // Only toggles present in the form are written: the simplified SMS
+        // page shows one "notifications by SMS" switch, and a toggle missing
+        // from the form must keep its saved value rather than turn off.
+        foreach (['visitor_sms_enabled', 'access_pass_sms_enabled', 'notification_sms_enabled'] as $toggle) {
+            if ($request->has($toggle)) {
+                SystemSetting::set('sms', $toggle, $request->boolean($toggle), 'boolean', $societyId);
+            }
+        }
+        if ($request->filled('bulksmsplans_api_id') && !\App\Support\SettingSecrets::isMask($request->bulksmsplans_api_id)) {
             SystemSetting::set('sms', 'bulksmsplans_api_id', $request->bulksmsplans_api_id, 'encrypted', $societyId);
         }
-        if ($request->filled('bulksmsplans_api_password')) {
+        if ($request->filled('bulksmsplans_api_password') && !\App\Support\SettingSecrets::isMask($request->bulksmsplans_api_password)) {
             SystemSetting::set('sms', 'bulksmsplans_api_password', $request->bulksmsplans_api_password, 'encrypted', $societyId);
         }
         if ($request->filled('bulksmsplans_sender_id')) {
@@ -736,25 +787,218 @@ class SettingsController extends Controller
             SystemSetting::set('sms', 'custom_sms_api_url', $request->custom_sms_api_url, 'string', $societyId);
         }
 
-        return back()->with('success', 'SMS settings saved successfully!');
+        \App\Support\ChannelStatus::clear('sms', $societyId);
+
+        return redirect()->route('settings.index', ['tab' => 'sms'])->with('success', 'SMS settings saved. Use "Connect & Verify" to check them.');
     }
 
     public function testSms(Request $request)
+    {
+        $request->validate([
+            'phone' => 'required|string|min:10|max:15',
+            // Lets the Settings page test OTP and DLT independently of
+            // whichever route is currently saved - without this, there was
+            // no way to verify the one not selected before switching to it.
+            'route' => 'nullable|in:otp,dlt',
+            // 'notification' tests the template used for notification SMS.
+            'template' => 'nullable|in:otp,notification',
+            'test_value' => 'nullable|string|max:30',
+        ]);
+
+        $user      = auth()->user();
+        $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
+        $value     = trim((string) $request->input('test_value', '')) ?: '1234';
+
+        try {
+            $result = $request->input('template') === 'notification'
+                ? \App\Services\SmsService::sendDltNotification('notification', $request->phone, $value, $societyId, force: true)
+                : \App\Services\SmsService::sendOtp($request->phone, $value, $societyId, $request->route);
+        } catch (\Throwable $e) {
+            // Never a 500 for the admin, and never the exception text: it can
+            // carry request detail. The class is enough to diagnose.
+            \Illuminate\Support\Facades\Log::error('Test SMS failed', ['class' => get_class($e), 'society_id' => $societyId]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Test SMS failed. The SMS service could not be reached - try again.',
+                'details' => 'Fast2SMS request failed: ' . get_class($e),
+            ]);
+        }
+
+        // Success is only reported when the provider actually accepted the
+        // request - never because SMS is switched off (dev_mode).
+        if ($result['success'] && $result['message'] !== 'dev_mode') {
+            \App\Support\ChannelStatus::record('sms', $societyId, true, 'Test SMS accepted for ' . \App\Services\SmsService::maskPhone($request->phone));
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Test SMS sent to ' . \App\Services\SmsService::maskPhone($request->phone) . '. Fast2SMS accepted it for delivery.',
+            ]);
+        }
+
+        if ($result['message'] === 'dev_mode') {
+            return response()->json([
+                'success' => false,
+                'message' => 'SMS is turned off for this society. Switch on "Enable SMS / OTP", save, then test again.',
+            ]);
+        }
+
+        // Provider messages are passed through only after the key and any
+        // header value are stripped; the service never puts them in its text,
+        // but this keeps that guarantee in one place.
+        $provider = \App\Services\SmsService::safeProviderMessage($result['message'] ?? '');
+        \App\Support\ChannelStatus::record('sms', $societyId, false, 'Test SMS failed', $provider);
+        $p = strtolower($provider);
+        $reason = match (true) {
+            str_contains($p, 'otp id is not set') => 'The Fast2SMS OTP ID is not set. Enter it under "How OTPs are sent", or switch to your DLT template.',
+            str_contains($p, 'dlt template id') => 'The saved template is a telecom DLT Template ID. Use "Connect & Verify" and pick your template from the list.',
+            str_contains($p, 'authori') || str_contains($p, 'authentic') => 'Fast2SMS did not accept the API key.',
+            str_contains($p, 'not set') || str_contains($p, 'not configured') => 'The SMS template is not chosen yet.',
+            str_contains($p, 'message') && str_contains($p, 'invalid') => 'Fast2SMS does not recognise the chosen template. Use "Connect & Verify" and pick it again.',
+            str_contains($p, 'sender') => 'The sender ID does not match the template. Pick the template again from the list.',
+            str_contains($p, 'balance') || str_contains($p, 'wallet') => 'Your Fast2SMS balance is too low.',
+            str_contains($p, 'unavailable') => 'Could not reach Fast2SMS. Check the internet connection.',
+            default => 'Check the number and the chosen template.',
+        };
+
+        return response()->json([
+            'success' => false,
+            'message' => "Test SMS failed. {$reason}",
+            'details' => 'Fast2SMS request failed: ' . $provider,
+        ]);
+    }
+
+    /**
+     * WhatsApp (Fast2SMS WABA) configuration. Same masked-secret contract as
+     * updateEmail/updateSms: a submitted mask means "unchanged", encrypted
+     * at rest, never echoed back.
+     */
+    public function updateWhatsApp(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user->hasRole(['Super Admin', 'Admin'])) {
+            abort(403, 'Unauthorized access.');
+        }
+
+        $validated = $request->validate([
+            'whatsapp_enabled'                      => 'nullable|boolean',
+            'whatsapp_api_key'                       => 'nullable|string|max:500',
+            'whatsapp_api_version'                    => 'nullable|string|max:20',
+            'whatsapp_phone_number_id'                => 'nullable|string|max:40',
+            // WhatsApp Business Account ID - needed only for the approved-template
+            // sync (GET .../message_templates reads it from the URL), not for
+            // sending; sending uses whatsapp_phone_number_id instead.
+            'whatsapp_waba_id'                        => 'nullable|string|max:40',
+            'whatsapp_template_language'              => 'nullable|string|max:10',
+            'whatsapp_otp_template_name'              => 'nullable|string|max:255',
+            'whatsapp_visitor_template_name'          => 'nullable|string|max:255',
+            'whatsapp_access_pass_template_name'      => 'nullable|string|max:255',
+            'whatsapp_complaint_template_name'        => 'nullable|string|max:255',
+            'whatsapp_payment_template_name'          => 'nullable|string|max:255',
+            'whatsapp_service_request_template_name'  => 'nullable|string|max:255',
+            'whatsapp_emergency_template_name'        => 'nullable|string|max:255',
+            'whatsapp_document_template_name'         => 'nullable|string|max:255',
+        ]);
+
+        $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
+
+        SystemSetting::set('whatsapp', 'whatsapp_enabled', $request->boolean('whatsapp_enabled'), 'boolean', $societyId);
+
+        if ($request->filled('whatsapp_api_key') && !\App\Support\SettingSecrets::isMask($request->whatsapp_api_key)) {
+            SystemSetting::set('whatsapp', 'whatsapp_api_key', $request->whatsapp_api_key, 'encrypted', $societyId);
+        }
+
+        // Read unguarded before, so any save without this field was a 500.
+        if ($request->has('whatsapp_api_version')) {
+            SystemSetting::set('whatsapp', 'whatsapp_api_version', ($validated['whatsapp_api_version'] ?? null) ?: 'v26.0', 'string', $societyId);
+        }
+
+        // Only keys actually present in the form are written. The Settings
+        // page no longer has one template box per notification (templates
+        // are attached from the synced list instead), and writing every
+        // missing key as '' used to wipe those assignments on every save.
+        foreach ([
+            'whatsapp_phone_number_id', 'whatsapp_waba_id', 'whatsapp_template_language',
+            'whatsapp_otp_template_name', 'whatsapp_visitor_template_name',
+            'whatsapp_access_pass_template_name', 'whatsapp_complaint_template_name',
+            'whatsapp_payment_template_name', 'whatsapp_service_request_template_name',
+            'whatsapp_emergency_template_name', 'whatsapp_document_template_name',
+        ] as $key) {
+            if ($request->has($key)) {
+                SystemSetting::set('whatsapp', $key, trim((string) ($validated[$key] ?? '')), 'string', $societyId);
+            }
+        }
+
+        \App\Support\ChannelStatus::clear('whatsapp', $societyId);
+
+        return redirect()->route('settings.index', ['tab' => 'whatsapp'])->with('success', 'WhatsApp settings saved. Use "Connect & Verify" to check them.');
+    }
+
+    /**
+     * Sends a real WhatsApp message through whichever template is actually
+     * configured - the OTP/authentication one if set, otherwise the first
+     * notification template found - using a test value in its variable
+     * slot. Never claims success without a provider acceptance.
+     */
+    public function testWhatsApp(Request $request)
     {
         $request->validate(['phone' => 'required|string|min:10|max:15']);
 
         $user      = auth()->user();
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
 
-        $result = \App\Services\SmsService::sendOtp($request->phone, '1234', $societyId);
+        if (!\App\Services\WhatsAppService::isEnabled($societyId)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'WhatsApp is turned off for this society. Tick "Enable WhatsApp", save, then test again.',
+            ]);
+        }
+
+        $otpTemplate = SystemSetting::get('whatsapp', 'whatsapp_otp_template_name', null, $societyId);
+
+        try {
+            if (!empty($otpTemplate)) {
+                $result = \App\Services\WhatsAppService::sendOtp($request->phone, '123456', $societyId);
+            } else {
+                $purpose = collect(['visitor', 'access_pass', 'complaint', 'payment', 'service_request', 'emergency', 'document'])
+                    ->first(fn ($p) => !empty(SystemSetting::get('whatsapp', "whatsapp_{$p}_template_name", null, $societyId)));
+
+                if (!$purpose) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'No WhatsApp template is configured yet. Add at least one template name and save.',
+                    ]);
+                }
+
+                $result = \App\Services\WhatsAppService::sendNotification($purpose, $request->phone, ['This is a test message from SocietyFlow.'], $societyId);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Test WhatsApp failed', ['class' => get_class($e), 'society_id' => $societyId]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'WhatsApp request failed: the service could not be reached. Try again.',
+            ]);
+        }
 
         if ($result['success'] && $result['message'] !== 'dev_mode') {
-            return response()->json(['success' => true, 'message' => 'Test SMS sent to ' . $request->phone . '. Check your phone for OTP: 1234']);
+            return response()->json([
+                'success' => true,
+                'message' => 'Test WhatsApp message sent to ' . \App\Services\SmsService::maskPhone($request->phone) . '.',
+            ]);
         }
+
         if ($result['message'] === 'dev_mode') {
-            return response()->json(['success' => false, 'message' => 'SMS not configured. Enter your Fast2SMS API key and enable SMS first, then save settings.']);
+            return response()->json([
+                'success' => false,
+                'message' => 'WhatsApp is not fully configured (API key or Phone Number ID missing).',
+            ]);
         }
-        return response()->json(['success' => false, 'message' => $result['message']]);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'WhatsApp request failed: ' . $result['message'],
+        ]);
     }
 
     public function updateSecurity(Request $request)

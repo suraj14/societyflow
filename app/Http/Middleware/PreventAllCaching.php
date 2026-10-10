@@ -25,22 +25,22 @@ class PreventAllCaching
         $response = $next($request);
 
         // CRITICAL: Prevent browser caching
-        $response->header('Cache-Control', 'no-store, no-cache, no-transform, must-revalidate, private, max-age=0, post-check=0, pre-check=0');
-        $response->header('Pragma', 'no-cache');
-        $response->header('Expires', 'Thu, 01 Jan 1970 00:00:00 GMT');
+        $response->headers->set('Cache-Control', 'no-store, no-cache, no-transform, must-revalidate, private, max-age=0, post-check=0, pre-check=0');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', 'Thu, 01 Jan 1970 00:00:00 GMT');
         
         // Prevent proxy/CDN caching
-        $response->header('Surrogate-Control', 'no-store');
-        $response->header('Vary', 'Accept-Encoding, Accept, Authorization, Cookie');
+        $response->headers->set('Surrogate-Control', 'no-store');
+        $response->headers->set('Vary', 'Accept-Encoding, Accept, Authorization, Cookie');
         
         // Prevent service worker caching
-        $response->header('Service-Worker-Allowed', '/');
+        $response->headers->set('Service-Worker-Allowed', '/');
         
         // Security headers
-        $response->header('X-Content-Type-Options', 'nosniff');
-        $response->header('X-Frame-Options', 'SAMEORIGIN');
-        $response->header('X-XSS-Protection', '1; mode=block');
-        $response->header('Referrer-Policy', 'strict-origin-when-cross-origin');
+        $response->headers->set('X-Content-Type-Options', 'nosniff');
+        $response->headers->set('X-Frame-Options', 'SAMEORIGIN');
+        $response->headers->set('X-XSS-Protection', '1; mode=block');
+        $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
 
         return $response;
     }

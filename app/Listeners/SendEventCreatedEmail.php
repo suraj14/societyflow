@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\EventCreated;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -85,12 +86,13 @@ class SendEventCreatedEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                DispatchEventNotification::dispatch(
                     'event_created',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "event_created:{$eventModel->id}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Event created email sent', [

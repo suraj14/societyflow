@@ -13,6 +13,7 @@ use App\Models\Notice;
 use App\Models\Owner;
 use App\Models\Payment;
 use App\Models\Resident;
+use App\Models\ServiceRequest;
 use App\Models\Society;
 use App\Models\Visitor;
 use Illuminate\Http\Request;
@@ -98,63 +99,11 @@ class DashboardController extends Controller
         $user = auth()->user();
         $societyId = $user->society_id;
 
-        // The society's configured property type decides which figures mean
-        // anything: a villa township has no buildings to count, and an
-        // apartment society has no villas. A mixed society sees both, split
-        // out, so "120 villas / 80 apartments" is legible rather than a
-        // single opaque "200 units".
         $society = $user->society;
-        $propertyStats = $this->propertyStats($societyId);
 
-        $residents = $this->residentCounts($societyId);
-        $dues = MaintenanceBill::when($societyId, fn($q) => $q->where('society_id', $societyId))
-            ->whereIn('status', ['pending', 'partial', 'overdue'])
-            ->selectRaw('COALESCE(SUM(balance_amount), 0) as sum, COUNT(*) as cnt')
-            ->first();
-
-        $stats = [
-            'total_buildings' => Building::when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
-            'total_units' => Flat::when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
-            'total_villas' => $propertyStats['villas'],
-            'total_apartments' => $propertyStats['apartments'],
-            'vacant_units' => $propertyStats['vacant'],
-            // Residents = active owners + active tenants (the two canonical
-            // person records; `residents` is the legacy table). One person
-            // holding both is counted once, matched on email.
-            'total_residents' => $residents['total'],
-            'active_owners' => $residents['owners'],
-            'active_tenants' => $residents['tenants'],
-            'occupied_units' => $propertyStats['occupied'],
-            'owner_occupied_units' => $propertyStats['owner_occupied'],
-            'tenant_occupied_units' => $propertyStats['tenant_occupied'],
-            // Open + in progress: the same "still unresolved" set the
-            // complaints list and Complaint::scopeOpenTickets use.
-            'open_tickets' => Complaint::when($societyId, fn($q) => $q->where('society_id', $societyId))->openTickets()->count(),
-            // Outstanding balance on unpaid maintenance bills (ledger-derived
-            // by MaintenanceBill::syncFromLedger) - the same figure the
-            // Accountant dashboard and the financial report show. It used to
-            // sum *pending payments*, which are unverified claims, not dues.
-            'pending_dues' => (float) $dues->sum,
-            'pending_bills_count' => (int) $dues->cnt,
-            // Was ->where('status','paid')->whereMonth('paid_at', ...).
-            // payments has no paid_at column and no row ever has status
-            // 'paid' - the real values are 'pending' and 'success', and the
-            // date column is payment_date. On SQLite a double-quoted unknown
-            // column degrades to a string literal, so this silently summed to
-            // zero instead of erroring; on MySQL it is a hard failure.
-            'monthly_revenue' => Payment::when($societyId, fn($q) => $q->where('society_id', $societyId))
-                ->success()
-                ->whereMonth('payment_date', \App\Support\SocietyClock::now()->month)
-                ->whereYear('payment_date', \App\Support\SocietyClock::now()->year)
-                ->sum('amount'),
-            // Society/common expenses only - a property's own expense is
-            // never society spend (see FinancialReportService).
-            'monthly_expenses' => $this->monthlySocietyExpenses($societyId),
-            // visitors has no visit_date column; the scheduled arrival is
-            // expected_entry_time.
-            'visitors_today' => Visitor::when($societyId, fn($q) => $q->where('society_id', $societyId))->whereBetween('expected_entry_time', \App\Support\SocietyClock::dayBounds())->count(),
-        ];
-        $stats['monthly_net'] = $stats['monthly_revenue'] - $stats['monthly_expenses'];
+        // One definition of the headline figures, shared with the mobile admin
+        // dashboard (App\Support\SocietyOverview) so the two cannot disagree.
+        $stats = \App\Support\SocietyOverview::kpis($societyId);
 
         $recentTickets = Complaint::when($societyId, fn($q) => $q->where('society_id', $societyId))
             ->with('createdBy')
@@ -174,49 +123,69 @@ class DashboardController extends Controller
             ->take(3)
             ->get();
 
-        return view('admin.dashboard', compact('stats', 'recentTickets', 'recentVisitors', 'notices', 'society'));
+        $needsAttention = $this->needsAttention($societyId);
+
+        return view('admin.dashboard', compact('stats', 'recentTickets', 'recentVisitors', 'notices', 'society', 'needsAttention'));
     }
 
     /**
-     * Unit counts split by property type, in one pass.
+     * Action-first counts for the dashboard's "Needs Attention" panel -
+     * five counts, one query each, no rows hydrated. Deliberately separate
+     * from `$stats` above: those are totals/history for the month, this is
+     * "what has not been dealt with yet, right now" - a brand-new society
+     * with zero history still sees this panel and it is correctly empty,
+     * not a dashboard that only shows after enough data accumulates.
      *
-     * A single grouped query rather than four counts, so adding the
-     * property-type figures to the dashboard does not add round trips.
+     * Each entry links straight to the filtered list, not to the module's
+     * own home page - clicking "3 pending bookings" lands an admin on the
+     * 3 bookings, not on every booking the society has ever had.
      *
-     * @return array{villas:int,apartments:int,occupied:int,vacant:int}
+     * @return array<int, array{label:string, count:int, url:string, icon:string}>
      */
-    /**
-     * Active owners + active tenants of the society, one person counted once
-     * (an owner who also rents elsewhere appears in both tables under the
-     * same email). Two cheap pluck queries, no models hydrated.
-     *
-     * @return array{total:int,owners:int,tenants:int}
-     */
-    private function residentCounts(?int $societyId): array
+    private function needsAttention(?int $societyId): array
     {
-        $owners = Owner::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'active')->pluck('email');
-        $tenants = \App\Models\Tenant::when($societyId, fn($q) => $q->where('society_id', $societyId))->where('status', 'active')->pluck('email');
-
-        $distinct = $owners->merge($tenants)->map(fn ($e) => strtolower(trim((string) $e)))->filter()->unique()->count();
-        $blank = $owners->filter(fn ($e) => trim((string) $e) === '')->count() + $tenants->filter(fn ($e) => trim((string) $e) === '')->count();
-
-        return ['total' => $distinct + $blank, 'owners' => $owners->count(), 'tenants' => $tenants->count()];
-    }
-
-    private function propertyStats(?int $societyId): array
-    {
-        // The same canonical occupancy rule as Property & Occupancy, the
-        // Villas/Flats pages and the owner screens - not the stored status.
-        $c = \App\Support\PropertyOccupancy::counts($societyId);
-
-        return [
-            'villas'          => $c['villas'],
-            'apartments'      => $c['apartments'],
-            'occupied'        => $c['occupied'],
-            'owner_occupied'  => $c['owner_occupied'],
-            'tenant_occupied' => $c['tenant_occupied'],
-            'vacant'          => $c['vacant'],
+        $items = [
+            [
+                'label' => 'Visitors waiting for approval',
+                'count' => Visitor::when($societyId, fn ($q) => $q->where('society_id', $societyId))
+                    ->where('approval_status', 'pending')->count(),
+                'url'   => route('visitors.index', ['status' => 'pending']),
+                'icon'  => 'user-clock',
+            ],
+            [
+                'label' => 'New complaints',
+                'count' => Complaint::when($societyId, fn ($q) => $q->where('society_id', $societyId))
+                    ->where('status', 'open')->count(),
+                'url'   => route('complaints.index', ['status' => 'open']),
+                'icon'  => 'exclamation-circle',
+            ],
+            [
+                'label' => 'Service requests to assign',
+                'count' => ServiceRequest::when($societyId, fn ($q) => $q->where('society_id', $societyId))
+                    ->where('status', 'pending')->count(),
+                'url'   => route('service-requests.index', ['status' => 'pending']),
+                'icon'  => 'tools',
+            ],
+            [
+                'label' => 'Overdue bills',
+                'count' => MaintenanceBill::when($societyId, fn ($q) => $q->where('society_id', $societyId))
+                    ->overdue()->count(),
+                'url'   => route('admin.rents.index'),
+                'icon'  => 'file-invoice-dollar',
+            ],
+            [
+                'label' => 'Facility bookings to review',
+                'count' => FacilityBooking::when($societyId, fn ($q) => $q->where('society_id', $societyId))
+                    ->where('status', 'pending')->count(),
+                'url'   => route('facility-bookings.index', ['status' => 'pending']),
+                'icon'  => 'calendar-check',
+            ],
         ];
+
+        // Zero-count rows are kept out of the view, not hidden with CSS -
+        // an admin with nothing pending should see an empty-state message,
+        // not a row of cards all reading "0".
+        return array_values(array_filter($items, fn ($item) => $item['count'] > 0));
     }
 
     private function ownerDashboard()
@@ -286,23 +255,27 @@ class DashboardController extends Controller
             }
         }
         
-        // Method 5: Create property if user has owner role but no property (auto-fix)
-        if ($properties->isEmpty() && $user->hasAnyRole(['Owner', 'Apartment Owner', 'Villa Owner'])) {
-            $this->createPropertyForOwner($user);
-            // Reload properties after creation
-            $properties = $user->fresh()->ownedProperties()->with(['building', 'villaArea'])->get();
-        }
+        // There is deliberately no "create a property for an owner with none"
+        // step. It used to invent a flat (random floor, bedrooms, bathrooms
+        // and area, in a building it created if need be) and assign it to the
+        // owner, plus a Resident row, merely because the owner opened their
+        // dashboard. An owner whose unit has not been assigned yet sees an
+        // honest empty state; the office assigns the real unit.
 
         // Get primary unit (first property for display)
         $unit = $properties->first();
+
+        // Outstanding bills on the user's own units - the same rule as the mobile dashboard (Api\DashboardApiController);
+        // this used to count the user's own pending Payment rows, so an unpaid maintenance bill showed as 0 due.
+        $outstanding = $this->outstandingBillsFor($user);
 
         // Enhanced stats for multi-property owners
         $stats = [
             'total_properties' => $properties->count(),
             'apartments' => $properties->where('property_type', 'apartment')->count(),
             'villas' => $properties->where('property_type', 'villa')->count(),
-            'pending_bills' => Payment::where('user_id', $user->id)->where('status', 'pending')->count(),
-            'total_due' => Payment::where('user_id', $user->id)->where('status', 'pending')->sum('amount'),
+            'pending_bills' => $outstanding->count(),
+            'total_due' => (float) $outstanding->sum('balance_amount'),
             'my_tickets' => Complaint::where('created_by', $user->id)->count(),
             'open_tickets' => Complaint::where('created_by', $user->id)->where('status', 'open')->count(),
             'my_bookings' => FacilityBooking::where('user_id', $user->id)->where('status', 'approved')->count(),
@@ -385,17 +358,7 @@ class DashboardController extends Controller
     /** This month's approved society-scoped expenses (never property ones). */
     private function monthlySocietyExpenses(?int $societyId): float
     {
-        // Full-day bounds: see FinancialReportService::bounds().
-        // expense_date is a DATE column: calendar month on the society's clock.
-        $now   = \App\Support\SocietyClock::now($societyId);
-        $start = $now->copy()->startOfMonth()->toDateTimeString();
-        $end   = $now->copy()->endOfMonth()->toDateTimeString();
-
-        return (float) \App\Models\Expense::when($societyId, fn($q) => $q->where('society_id', $societyId))
-            ->where('scope', \App\Models\Expense::SCOPE_SOCIETY)
-            ->where('status', 'approved')
-            ->whereBetween('expense_date', [$start, $end])
-            ->sum('amount');
+        return \App\Support\SocietyOverview::monthlySocietyExpenses($societyId);
     }
 
     private function staffDashboard()
@@ -424,9 +387,12 @@ class DashboardController extends Controller
             'assigned_services' => 0, // TODO: Implement when service assignment feature is added
             
             // 4. Today's Events
+            // The society's calendar day (like visitors_today above), not the server's UTC date: an event
+            // overlaps today when it starts before the day ends and ends after the day began.
             'todays_events' => \App\Models\Event::when($societyId, fn($q) => $q->where('society_id', $societyId))
-                ->whereDate('event_date', today())
-                ->where('status', 'published')
+                ->where('start_date', '<=', \App\Support\SocietyClock::dayBounds()[1])
+                ->where('end_date', '>=', \App\Support\SocietyClock::dayBounds()[0])
+                ->where('status', 'pending') // events.status is pending|completed|cancelled; pending = still scheduled
                 ->count(),
         ];
 
@@ -459,6 +425,20 @@ class DashboardController extends Controller
         return view('staff.dashboard', compact('stats', 'assignedTickets', 'todayVisitors', 'notices'));
     }
 
+    /** Unpaid maintenance/rent bills on the units this user lives in or owns (pending, partial, overdue). */
+    private function outstandingBillsFor($user)
+    {
+        $flatIds = \App\Support\UserFlatResolver::flatIdsFor($user);
+        if (!$flatIds) {
+            return collect();
+        }
+
+        return MaintenanceBill::whereIn('flat_id', $flatIds)
+            ->where('society_id', $user->society_id)
+            ->whereIn('status', ['pending', 'partial', 'overdue'])
+            ->get(['id', 'balance_amount']);
+    }
+
     private function tenantDashboard()
     {
         $user = auth()->user();
@@ -477,32 +457,46 @@ class DashboardController extends Controller
             $tenant = \App\Models\Tenant::where('user_id', $user->id)->first();
         }
         
-        // Method 3: Find tenant by email/name matching
-        if (!$tenant) {
-            $tenant = \App\Models\Tenant::where('email', $user->email)
-                ->orWhere('name', $user->name)
+        // Method 3: link by the account's own e-mail - and ONLY that.
+        //
+        // This used to be ->where('email', ...)->orWhere('name', ...), with
+        // no society filter, and then persisted tenant_id. Any tenant in any
+        // society who happened to share a display name was permanently
+        // attached to this login (the same flaw the owner lookup above
+        // already fixed). A name proves nothing; the e-mail is unique on
+        // tenants, so it is matched inside this user's OWN society, and never
+        // taken over from a tenant record that already belongs to another
+        // login.
+        if (!$tenant && $user->society_id && $user->email) {
+            $tenant = \App\Models\Tenant::where('society_id', $user->society_id)
+                ->where('email', $user->email)
+                ->where(fn ($q) => $q->whereNull('user_id')->orWhere('user_id', $user->id))
                 ->first();
-                
-            // Auto-fix the relationship
+
             if ($tenant && !$user->tenant_id) {
                 $user->update(['tenant_id' => $tenant->id]);
             }
         }
-        
-        // Method 4: Create tenant if user has tenant role but no tenant record
-        if (!$tenant && $user->hasRole('Tenant')) {
-            $tenant = $this->createTenantForUser($user);
-        }
+
+        // There is deliberately no "create a tenant if none" step. It used to
+        // invent a tenancy (random rent and deposit) on the first vacant flat
+        // of the society and a matching Resident row, just because a tenant
+        // login opened its dashboard. A login with no tenancy gets an honest
+        // empty dashboard until the office assigns one.
 
         // Get tenant's unit
         if ($tenant && $tenant->flat_id) {
             $unit = Flat::with(['building', 'villaArea'])->find($tenant->flat_id);
         }
 
+        // Outstanding bills on the user's own units - the same rule as the mobile dashboard (Api\DashboardApiController);
+        // this used to count the user's own pending Payment rows, so an unpaid maintenance bill showed as 0 due.
+        $outstanding = $this->outstandingBillsFor($user);
+
         // Tenant-specific stats
         $stats = [
-            'pending_bills' => Payment::where('user_id', $user->id)->where('status', 'pending')->count(),
-            'total_due' => Payment::where('user_id', $user->id)->where('status', 'pending')->sum('amount'),
+            'pending_bills' => $outstanding->count(),
+            'total_due' => (float) $outstanding->sum('balance_amount'),
             'my_tickets' => Complaint::where('created_by', $user->id)->count(),
             'open_tickets' => Complaint::where('created_by', $user->id)->where('status', 'open')->count(),
             'my_bookings' => FacilityBooking::where('user_id', $user->id)->where('status', 'approved')->count(),
@@ -534,211 +528,4 @@ class DashboardController extends Controller
         return view('tenant.dashboard', compact('unit', 'tenant', 'stats', 'myBills', 'myTickets', 'notices', 'upcomingBookings'));
     }
 
-    /**
-     * Create a property for an owner user who doesn't have one assigned
-     */
-    private function createPropertyForOwner($user)
-    {
-        try {
-            // Find or create Owner record
-            $owner = Owner::where('email', $user->email)
-                ->orWhere('name', $user->name)
-                ->first();
-
-            if (!$owner) {
-                // Villa Owner/Apartment Owner used to say which type to
-                // create; the canonical 'Owner' role carries no such signal,
-                // so fall back to what the society actually supports (a
-                // villa-only society has nothing else to create).
-                $society = $user->society;
-                $propertyType = $user->hasRole('Villa Owner')
-                    ? 'villa'
-                    : (($society && $society->supportsVillas() && !$society->supportsApartments()) ? 'villa' : 'apartment');
-
-                $owner = Owner::create([
-                    'society_id' => $user->society_id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'phone' => $user->phone ?? '9876543210',
-                    'property_type' => $propertyType,
-                    'status' => 'active',
-                ]);
-            }
-
-            // Link user to owner
-            if ($user->owner_id !== $owner->id) {
-                $user->update(['owner_id' => $owner->id]);
-            }
-
-            // Create a flat for the owner
-            $building = $this->findOrCreateBuilding($user->society_id);
-            $flatNumber = $this->generateUniqueFlatNumber($user->society_id);
-            
-            $flat = Flat::create([
-                'society_id' => $user->society_id,
-                'building_id' => $building->id,
-                'owner_id' => $owner->id,
-                'flat_number' => $flatNumber,
-                'floor' => rand(1, 5),
-                'property_type' => $owner->property_type,
-                'bedrooms' => rand(1, 3),
-                'bathrooms' => rand(1, 2),
-                'area_sqft' => rand(800, 1500),
-                'status' => 'occupied'
-            ]);
-
-            // Create resident record
-            Resident::create([
-                'society_id' => $user->society_id,
-                'user_id' => $user->id,
-                'flat_id' => $flat->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone ?? '9876543210',
-                'type' => 'owner',
-                'move_in_date' => now()->subMonths(6),
-                'status' => 'active',
-            ]);
-
-            \Log::info("Auto-created property for owner: {$user->name} - Flat: {$flat->flat_number}");
-            
-            return $flat;
-        } catch (\Exception $e) {
-            \Log::error("Failed to create property for owner {$user->name}: " . $e->getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Find or create a building for the society
-     */
-    private function findOrCreateBuilding($societyId)
-    {
-        $building = Building::where('society_id', $societyId)->first();
-        
-        if (!$building) {
-            $building = Building::create([
-                'society_id' => $societyId,
-                'name' => 'Tower A',
-                'floors' => 10,
-                'flats_per_floor' => 4,
-                'status' => 'active'
-            ]);
-        }
-
-        return $building;
-    }
-
-    /**
-     * Generate a unique flat number for the society
-     */
-    private function generateUniqueFlatNumber($societyId)
-    {
-        $existingNumbers = Flat::where('society_id', $societyId)
-            ->pluck('flat_number')
-            ->toArray();
-
-        // Try common flat numbers first
-        $commonNumbers = ['1A', '1B', '2A', '2B', '3A', '3B', '101', '102', '103', '104', '201', '202'];
-        
-        foreach ($commonNumbers as $number) {
-            if (!in_array($number, $existingNumbers)) {
-                return $number;
-            }
-        }
-
-        // Generate numbered flats
-        for ($i = 1; $i <= 100; $i++) {
-            $flatNumber = str_pad($i, 2, '0', STR_PAD_LEFT);
-            if (!in_array($flatNumber, $existingNumbers)) {
-                return $flatNumber;
-            }
-        }
-
-        // Last resort - random number
-        return rand(101, 999);
-    }
-
-    /**
-     * Create a tenant record for a user who doesn't have one assigned
-     */
-    private function createTenantForUser($user)
-    {
-        try {
-            // Find an available flat or create one
-            $flat = $this->findOrCreateAvailableFlat($user);
-            
-            $tenant = \App\Models\Tenant::create([
-                'society_id' => $user->society_id,
-                'user_id' => $user->id,
-                'flat_id' => $flat->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone ?? '9876543210',
-                'move_in_date' => now()->subMonths(3),
-                'lease_start_date' => now()->subMonths(3),
-                'lease_end_date' => now()->addMonths(9),
-                'monthly_rent' => rand(15000, 25000),
-                'security_deposit' => rand(30000, 50000),
-                'status' => 'active',
-            ]);
-
-            // Link user to tenant
-            $user->update(['tenant_id' => $tenant->id]);
-
-            // Create resident record
-            Resident::create([
-                'society_id' => $user->society_id,
-                'user_id' => $user->id,
-                'flat_id' => $flat->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'phone' => $user->phone ?? '9876543210',
-                'type' => 'tenant',
-                'move_in_date' => $tenant->move_in_date,
-                'status' => 'active',
-            ]);
-
-            \Log::info("Auto-created tenant record for user: {$user->name} - Flat: {$flat->flat_number}");
-            
-            return $tenant;
-        } catch (\Exception $e) {
-            \Log::error("Failed to create tenant for user {$user->name}: " . $e->getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Find or create an available flat for tenant
-     */
-    private function findOrCreateAvailableFlat($user)
-    {
-        // Try to find an unoccupied flat
-        $flat = Flat::where('society_id', $user->society_id)
-            ->where('status', 'vacant')
-            ->first();
-
-        if (!$flat) {
-            // Create a new flat
-            $building = $this->findOrCreateBuilding($user->society_id);
-            $flatNumber = $this->generateUniqueFlatNumber($user->society_id);
-            
-            $flat = Flat::create([
-                'society_id' => $user->society_id,
-                'building_id' => $building->id,
-                'flat_number' => $flatNumber,
-                'floor' => rand(1, 5),
-                'property_type' => 'apartment',
-                'bedrooms' => rand(1, 3),
-                'bathrooms' => rand(1, 2),
-                'area_sqft' => rand(800, 1500),
-                'status' => 'occupied'
-            ]);
-        } else {
-            // Mark as occupied
-            $flat->update(['status' => 'occupied']);
-        }
-
-        return $flat;
-    }
 }

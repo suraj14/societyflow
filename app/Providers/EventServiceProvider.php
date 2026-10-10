@@ -19,12 +19,17 @@ use App\Events\PasswordReset;
 use App\Events\TenantOwnerAdded;
 use App\Events\VisitorApproved;
 use App\Events\ReportGenerated;
+use App\Events\AccessPassCreated;
+use App\Events\AccessPassRevoked;
+use App\Events\FacilityBookingStatusUpdated;
+use App\Events\SocietyDocumentPublished;
 
 // Application Listeners
 use App\Listeners\SendUserWelcomeEmail;
 use App\Listeners\SendBillGeneratedEmail;
 use App\Listeners\SendPaymentConfirmationEmail;
 use App\Listeners\SendNoticePublishedEmail;
+use App\Listeners\SendNoticePublishedSms;
 use App\Listeners\SendEventCreatedEmail;
 use App\Listeners\SendPaymentOverdueEmail;
 use App\Listeners\SendTicketUpdatedEmail;
@@ -32,6 +37,14 @@ use App\Listeners\SendPasswordResetEmail;
 use App\Listeners\SendTenantOwnerAddedEmail;
 use App\Listeners\SendVisitorApprovedEmail;
 use App\Listeners\SendReportGeneratedEmail;
+use App\Listeners\SendAccessPassCreatedEmail;
+use App\Listeners\SendAccessPassRevokedEmail;
+use App\Listeners\SendAccessPassRevokedSms;
+use App\Listeners\SendAccessPassRevokedWhatsApp;
+use App\Listeners\SendFacilityBookingStatusUpdatedEmail;
+use App\Listeners\SendSocietyDocumentPublishedEmail;
+use App\Listeners\SendSocietyDocumentPublishedSms;
+use App\Listeners\SendSocietyDocumentPublishedWhatsApp;
 
 class EventServiceProvider extends ServiceProvider
 {
@@ -40,6 +53,14 @@ class EventServiceProvider extends ServiceProvider
      *
      * @var array<class-string, array<int, class-string>>
      */
+    /**
+     * Header-bell entries and WhatsApp for the business events above, kept
+     * apart from the email/SMS listeners so neither can stop the other.
+     */
+    protected $subscribe = [
+        \App\Listeners\BusinessNotificationSubscriber::class,
+    ];
+
     protected $listen = [
         // Laravel Auth Events
         Registered::class => [
@@ -58,6 +79,7 @@ class EventServiceProvider extends ServiceProvider
         ],
         NoticePublished::class => [
             SendNoticePublishedEmail::class,
+            SendNoticePublishedSms::class,
         ],
         EventCreated::class => [
             SendEventCreatedEmail::class,
@@ -79,6 +101,27 @@ class EventServiceProvider extends ServiceProvider
         ],
         ReportGenerated::class => [
             SendReportGeneratedEmail::class,
+        ],
+
+        // P1-61: Access Pass, Bill (reactivated), Facility Booking
+        AccessPassCreated::class => [
+            SendAccessPassCreatedEmail::class,
+        ],
+        AccessPassRevoked::class => [
+            SendAccessPassRevokedEmail::class,
+            SendAccessPassRevokedSms::class,
+            SendAccessPassRevokedWhatsApp::class,
+        ],
+        FacilityBookingStatusUpdated::class => [
+            SendFacilityBookingStatusUpdatedEmail::class,
+        ],
+        \App\Events\EventChanged::class => [
+            \App\Listeners\SendEventChangedEmail::class,
+        ],
+        SocietyDocumentPublished::class => [
+            SendSocietyDocumentPublishedEmail::class,
+            SendSocietyDocumentPublishedSms::class,
+            SendSocietyDocumentPublishedWhatsApp::class,
         ],
     ];
 

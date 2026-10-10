@@ -52,8 +52,8 @@ class PackageController extends Controller
             'max_flats' => $request->max_flats ?? 0,
             'max_users' => 0, // Default value
             'max_staff' => 0, // Default value
-            'features' => json_encode($request->features), // Explicitly encode as JSON
-            'limitations' => json_encode([]), // Explicitly encode empty array as JSON
+            'features' => array_values($request->features), // the model casts this to JSON; encoding it here as well stored a JSON string inside JSON
+            'limitations' => [],
             'trial_days' => 0, // Default value
             'is_popular' => false, // Default value
             'status' => $request->status,
@@ -106,7 +106,7 @@ class PackageController extends Controller
             'monthly_price' => $request->monthly_price,
             'yearly_price' => $request->annual_price, // Map annual_price to yearly_price
             'max_flats' => $request->max_flats ?? 0,
-            'features' => json_encode($request->features), // Explicitly encode as JSON
+            'features' => array_values($request->features), // the model casts this to JSON; encoding it here as well stored a JSON string inside JSON
             'status' => $request->status,
         ];
 

@@ -91,7 +91,7 @@ Route::prefix('super-admin')->name('super-admin.')->middleware(['auth', 'role:Su
     Route::resource('packages', PackageController::class);
     
     // Billing Management
-    Route::resource('billing', BillingController::class)->only(['index', 'show']);
+    Route::resource('billing', BillingController::class)->only(['index', 'show'])->parameters(['billing' => 'payment']);
     Route::post('billing/{payment}/mark-paid', [BillingController::class, 'markAsPaid'])->name('billing.mark-paid');
     Route::get('billing/{payment}/invoice', [BillingController::class, 'downloadInvoice'])->name('billing.invoice');
     
@@ -300,12 +300,12 @@ Route::middleware(['auth', 'restrict.staff'])->group(function () {
     Route::post('payments/{payment}/approve', [PaymentController::class, 'approve'])->name('payments.approve');
     Route::post('payments/{payment}/reject', [PaymentController::class, 'reject'])->name('payments.reject');
     Route::get('bills/{bill}/upi-link', [PaymentController::class, 'upiLink'])->name('bills.upi-link');
-    // Route::resource('utility-bills', UtilityBillController::class);
-    // Route::patch('utility-bills/{utilityBill}/payment', [UtilityBillController::class, 'addPayment'])->name('utility-bills.add-payment');
-});
 
-// Temporary: Move utility-bills outside middleware for testing
-Route::middleware(['auth'])->group(function () {
+    // Utility bills are a financial module like payments above. They had
+    // been moved out of this group "temporarily for testing" and left
+    // out, which is also why RestrictStaffAccess carried a commented-out
+    // 'utility-bills' entry that could never fire: that denylist only
+    // runs on the groups it is attached to.
     Route::resource('utility-bills', UtilityBillController::class);
     Route::patch('utility-bills/{utilityBill}/payment', [UtilityBillController::class, 'addPayment'])->name('utility-bills.add-payment');
 });
@@ -387,9 +387,20 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     Route::post('settings/email', [App\Http\Controllers\SettingsController::class, 'updateEmail'])->name('settings.email.update');
     Route::post('settings/email/test', [App\Http\Controllers\SettingsController::class, 'testEmail'])->name('settings.email.test');
     Route::post('settings/payment', [App\Http\Controllers\SettingsController::class, 'updatePayment'])->name('settings.payment.update');
-    Route::post('settings/push', [App\Http\Controllers\SettingsController::class, 'updatePush'])->name('settings.push.update');
     Route::post('settings/sms', [App\Http\Controllers\SettingsController::class, 'updateSms'])->name('settings.sms.update');
     Route::post('settings/sms/test', [App\Http\Controllers\SettingsController::class, 'testSms'])->name('settings.sms.test');
+    Route::post('settings/whatsapp', [App\Http\Controllers\SettingsController::class, 'updateWhatsApp'])->name('settings.whatsapp.update');
+    Route::post('settings/whatsapp/test', [App\Http\Controllers\SettingsController::class, 'testWhatsApp'])->name('settings.whatsapp.test');
+    // Verify-and-pick actions for SMS / WhatsApp (read the saved key, ask Fast2SMS).
+    Route::post('settings/sms/connect', [App\Http\Controllers\CommunicationSettingsController::class, 'smsConnect'])->name('settings.sms.connect');
+    Route::post('settings/sms/verify', [App\Http\Controllers\CommunicationSettingsController::class, 'smsVerify'])->name('settings.sms.verify');
+    Route::post('settings/sms/use-template', [App\Http\Controllers\CommunicationSettingsController::class, 'smsUseTemplate'])->name('settings.sms.use-template');
+    Route::post('settings/whatsapp/connect', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappConnect'])->name('settings.whatsapp.connect');
+    Route::post('settings/whatsapp/sync', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappSync'])->name('settings.whatsapp.sync');
+    Route::post('settings/whatsapp/verify-template', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappVerifyTemplate'])->name('settings.whatsapp.verify-template');
+    Route::post('settings/whatsapp/assign', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappAssign'])->name('settings.whatsapp.assign');
+    Route::post('settings/whatsapp/unassign', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappUnassign'])->name('settings.whatsapp.unassign');
+    Route::post('settings/whatsapp/test-template', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappTest'])->name('settings.whatsapp.test-template');
     Route::post('settings/security', [App\Http\Controllers\SettingsController::class, 'updateSecurity'])->name('settings.security.update');
     Route::post('settings/clear-cache', [App\Http\Controllers\SettingsController::class, 'clearCache'])->name('settings.clear-cache');
     
@@ -417,6 +428,10 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
         Route::get('email-logs/{emailLog}', [App\Http\Controllers\Admin\EmailLogController::class, 'show'])->name('email-logs.show');
         Route::post('email-logs/{emailLog}/retry', [App\Http\Controllers\Admin\EmailLogController::class, 'retry'])->name('email-logs.retry');
 
+        // The Communication Center was folded into Settings (Email / SMS / WhatsApp).
+        // Old bookmarks and links land on Settings instead of a 404.
+        Route::redirect('communication-center', '/settings?tab=email')->name('communication-center.index');
+
         // Email Template Mapping Management
         Route::get('email-template-mappings', [App\Http\Controllers\Admin\EmailTemplateMappingController::class, 'index'])->name('email-template-mappings.index');
         Route::get('email-template-mappings/templates/{eventValue}', [App\Http\Controllers\Admin\EmailTemplateMappingController::class, 'getTemplatesForEvent'])->name('email-template-mappings.templates');
@@ -424,23 +439,45 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
         Route::put('email-template-mappings/{eventValue}', [App\Http\Controllers\Admin\EmailTemplateMappingController::class, 'update'])->name('email-template-mappings.update');
         Route::delete('email-template-mappings/{eventValue}', [App\Http\Controllers\Admin\EmailTemplateMappingController::class, 'destroy'])->name('email-template-mappings.destroy');
 
-        // Push Notification Management
-        Route::get('push-notifications/settings', [App\Http\Controllers\Admin\PushNotificationController::class, 'settings'])->name('push-notifications.settings');
-        Route::post('push-notifications/settings', [App\Http\Controllers\Admin\PushNotificationController::class, 'updateSettings'])->name('push-notifications.update-settings');
-        Route::get('push-notifications/logs', [App\Http\Controllers\Admin\PushNotificationController::class, 'logs'])->name('push-notifications.logs');
-        Route::post('push-notifications/test', [App\Http\Controllers\Admin\PushNotificationController::class, 'test'])->name('push-notifications.test');
-        Route::get('push-notifications/templates', [App\Http\Controllers\Admin\PushNotificationController::class, 'templates'])->name('push-notifications.templates');
-        Route::get('push-notifications/templates/{template}/edit', [App\Http\Controllers\Admin\PushNotificationController::class, 'editTemplate'])->name('push-notifications.templates.edit');
-        Route::put('push-notifications/templates/{template}', [App\Http\Controllers\Admin\PushNotificationController::class, 'updateTemplate'])->name('push-notifications.templates.update');
-        Route::get('push-notifications/statistics', [App\Http\Controllers\Admin\PushNotificationController::class, 'statistics'])->name('push-notifications.statistics');
+        // Guard Shift & Multi-Gate Management - additive module, see the
+        // creating migration's docblock. Admin manages gates/shifts/roster;
+        // the guard-facing side lives in the `guard.` route group below.
+        Route::resource('gates', App\Http\Controllers\Admin\GateController::class)->except(['show']);
+        Route::resource('shifts', App\Http\Controllers\Admin\ShiftController::class)->except(['show']);
+        Route::get('shift-assignments', [App\Http\Controllers\Admin\ShiftAssignmentController::class, 'index'])->name('shift-assignments.index');
+        Route::get('shift-assignments/create', [App\Http\Controllers\Admin\ShiftAssignmentController::class, 'create'])->name('shift-assignments.create');
+        Route::post('shift-assignments', [App\Http\Controllers\Admin\ShiftAssignmentController::class, 'store'])->name('shift-assignments.store');
+        Route::post('shift-assignments/{shiftAssignment}/replace', [App\Http\Controllers\Admin\ShiftAssignmentController::class, 'replace'])->name('shift-assignments.replace');
+        Route::delete('shift-assignments/{shiftAssignment}', [App\Http\Controllers\Admin\ShiftAssignmentController::class, 'destroy'])->name('shift-assignments.destroy');
+        Route::post('shift-assignments/{shiftAssignment}/absent', [App\Http\Controllers\Admin\ShiftAssignmentController::class, 'markAbsent'])->name('shift-assignments.absent');
+
+        // Society Rules & Documents - management side (Settings -> Rules & Documents).
+        Route::resource('society-documents', App\Http\Controllers\Admin\SocietyDocumentController::class);
+        Route::get('society-documents/{societyDocument}/new-version', [App\Http\Controllers\Admin\SocietyDocumentController::class, 'createVersion'])->name('society-documents.new-version');
+        Route::post('society-documents/{societyDocument}/versions', [App\Http\Controllers\Admin\SocietyDocumentController::class, 'storeVersion'])->name('society-documents.versions.store');
+        Route::post('society-documents/{societyDocument}/publish', [App\Http\Controllers\Admin\SocietyDocumentController::class, 'publish'])->name('society-documents.publish');
+        Route::post('society-documents/{societyDocument}/unpublish', [App\Http\Controllers\Admin\SocietyDocumentController::class, 'unpublish'])->name('society-documents.unpublish');
+        Route::post('society-documents/{societyDocument}/archive', [App\Http\Controllers\Admin\SocietyDocumentController::class, 'archive'])->name('society-documents.archive');
+        Route::get('society-documents/{societyDocument}/file', [App\Http\Controllers\Admin\SocietyDocumentController::class, 'file'])->name('society-documents.file');
     });
 });
 
-// Push Subscription Routes (All authenticated users)
-Route::middleware(['auth'])->group(function () {
-    Route::post('api/push/subscribe', [App\Http\Controllers\PushSubscriptionController::class, 'subscribe'])->name('push.subscribe');
-    Route::post('api/push/unsubscribe', [App\Http\Controllers\PushSubscriptionController::class, 'unsubscribe'])->name('push.unsubscribe');
-    Route::get('api/push/vapid-key', [App\Http\Controllers\PushSubscriptionController::class, 'getVapidPublicKey'])->name('push.vapid-key');
+// Header bell: in-app notifications for the logged-in user only.
+Route::middleware(['auth'])->prefix('notifications')->name('notifications.')->group(function () {
+    Route::get('/', [App\Http\Controllers\NotificationController::class, 'index'])->name('index');
+    Route::get('/feed', [App\Http\Controllers\NotificationController::class, 'feed'])->name('feed');
+    Route::post('/read-all', [App\Http\Controllers\NotificationController::class, 'markAllRead'])->name('read-all');
+    Route::post('/{id}/read', [App\Http\Controllers\NotificationController::class, 'markRead'])->name('read');
+});
+
+// Society Rules & Documents - reader side for residents. The controller
+// rejects Staff/Accountant (SocietyDocument::isReader) and scopes every
+// lookup to published documents of the user's own society.
+Route::middleware(['auth'])->prefix('society-rules')->name('society-rules.')->group(function () {
+    Route::get('/', [App\Http\Controllers\SocietyRulesController::class, 'index'])->name('index');
+    Route::get('/{document}', [App\Http\Controllers\SocietyRulesController::class, 'show'])->whereNumber('document')->name('show');
+    Route::get('/{document}/file', [App\Http\Controllers\SocietyRulesController::class, 'file'])->whereNumber('document')->name('file');
+    Route::post('/{document}/acknowledge', [App\Http\Controllers\SocietyRulesController::class, 'acknowledge'])->whereNumber('document')->name('acknowledge');
 });
 
 // Services Routes (All authenticated users)
@@ -450,6 +487,18 @@ Route::middleware(['auth'])->group(function () {
     Route::get('services/attendance', [App\Http\Controllers\ServiceController::class, 'attendance'])->name('services.attendance');
     Route::post('services/clock-in', [App\Http\Controllers\ServiceController::class, 'clockIn'])->name('services.clock-in');
     Route::post('services/clock-out', [App\Http\Controllers\ServiceController::class, 'clockOut'])->name('services.clock-out');
+
+    // Service requests: residents see and cancel their own; staff see every
+    // request in the society and act on it below.
+    Route::get('service-requests', [App\Http\Controllers\ServiceController::class, 'requests'])->name('service-requests.index');
+    Route::post('service-requests/{serviceRequest}/cancel', [App\Http\Controllers\ServiceController::class, 'updateRequestStatus'])->name('service-requests.cancel');
+});
+
+// Service request management (assign / progress) - Admin & Super Admin only,
+// the same boundary as service-providers above.
+Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(function () {
+    Route::post('service-requests/{serviceRequest}/assign', [App\Http\Controllers\ServiceController::class, 'assignRequest'])->name('service-requests.assign');
+    Route::post('service-requests/{serviceRequest}/status', [App\Http\Controllers\ServiceController::class, 'updateRequestStatus'])->name('service-requests.status');
 });
 
 // Service Providers Routes (Admin & Super Admin only) - RESTRICTED FOR STAFF
@@ -573,6 +622,19 @@ Route::prefix('guard')->name('guard.')->middleware(['auth', 'role:Guard|Admin|Su
     Route::get('/history', [App\Http\Controllers\GuardController::class, 'history'])->name('history');
     Route::get('/scan', [App\Http\Controllers\GuardController::class, 'scanForm'])->name('scan');
     Route::post('/scan', [App\Http\Controllers\GuardController::class, 'scan'])->name('scan.submit');
+
+    // Guard's own shift: what am I on right now, start/end it, hand it over.
+    Route::get('/shift', [App\Http\Controllers\GuardShiftController::class, 'current'])->name('shift.current');
+    Route::post('/shift/start', [App\Http\Controllers\GuardShiftController::class, 'start'])->name('shift.start');
+    Route::post('/shift/end', [App\Http\Controllers\GuardShiftController::class, 'end'])->name('shift.end');
+    Route::post('/shift/handover', [App\Http\Controllers\GuardShiftController::class, 'startHandover'])->name('shift.handover.start');
+    Route::post('/shift/handover/{shiftHandover}/accept', [App\Http\Controllers\GuardShiftController::class, 'acceptHandover'])->name('shift.handover.accept');
+
+    // Guard-visible society rules (security SOPs, visitor & gate rules).
+    Route::get('/rules', [App\Http\Controllers\SocietyRulesController::class, 'index'])->name('rules.index');
+    Route::get('/rules/{document}', [App\Http\Controllers\SocietyRulesController::class, 'show'])->whereNumber('document')->name('rules.show');
+    Route::get('/rules/{document}/file', [App\Http\Controllers\SocietyRulesController::class, 'file'])->whereNumber('document')->name('rules.file');
+    Route::post('/rules/{document}/acknowledge', [App\Http\Controllers\SocietyRulesController::class, 'acknowledge'])->whereNumber('document')->name('rules.acknowledge');
 });
 
 // Access passes (recurring staff / temporary service provider gate access) -
@@ -584,7 +646,9 @@ Route::prefix('guard')->name('guard.')->middleware(['auth', 'role:Guard|Admin|Su
 // point for something that is not their job.
 Route::middleware(['auth', 'role:Super Admin|Admin|Owner|Villa Owner|Apartment Owner|Tenant'])->group(function () {
     Route::resource('access-passes', App\Http\Controllers\AccessPassController::class)
-        ->only(['index', 'create', 'store', 'show']);
+        ->only(['index', 'create', 'store', 'show', 'edit', 'update']);
+    Route::post('access-passes/{accessPass}/extend', [App\Http\Controllers\AccessPassController::class, 'extend'])->name('access-passes.extend');
     Route::post('access-passes/{accessPass}/block-today', [App\Http\Controllers\AccessPassController::class, 'blockToday'])->name('access-passes.block-today');
+    Route::post('access-passes/{accessPass}/unblock-today', [App\Http\Controllers\AccessPassController::class, 'unblockToday'])->name('access-passes.unblock-today');
     Route::post('access-passes/{accessPass}/revoke', [App\Http\Controllers\AccessPassController::class, 'revoke'])->name('access-passes.revoke');
 });

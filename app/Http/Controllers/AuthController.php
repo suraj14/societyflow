@@ -267,7 +267,7 @@ class AuthController extends Controller
                     'max_flats' => 999999,
                     'max_users' => 999999,
                     'max_staff' => 999999,
-                    'features' => json_encode(['unlimited_access', 'all_modules']),
+                    'features' => ['unlimited_access', 'all_modules'],   // the model casts to JSON; pre-encoding double-encoded it
                     'trial_days' => 0,
                     'status' => 'active',
                 ]);

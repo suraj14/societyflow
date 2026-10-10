@@ -63,7 +63,7 @@ class PaymentController extends Controller
             }
             
             // Also check for villas with direct owner_id match
-            $directVillas = \App\Models\Flat::where('owner_id', $user->owner_id)
+            $directVillas = \App\Models\Flat::ownedBy($user->owner_id)
                                            ->where('property_type', 'villa')
                                            ->pluck('id');
             
@@ -89,7 +89,7 @@ class PaymentController extends Controller
             }
             
             // Also check for apartments with direct owner_id match
-            $directApartments = \App\Models\Flat::where('owner_id', $user->owner_id)
+            $directApartments = \App\Models\Flat::ownedBy($user->owner_id)
                                                ->where('property_type', 'apartment')
                                                ->pluck('id');
             
@@ -106,7 +106,7 @@ class PaymentController extends Controller
         // villa or apartment - property type is a flat attribute, not a
         // separate role, so this is one branch instead of two.
         elseif ($user->hasRole('Owner')) {
-            $flatIds = \App\Models\Flat::where('owner_id', $user->owner_id)->pluck('id');
+            $flatIds = \App\Models\Flat::ownedBy($user->owner_id)->pluck('id');
 
             if ($flatIds->count() > 0) {
                 $query->whereIn('flat_id', $flatIds);
@@ -154,7 +154,7 @@ class PaymentController extends Controller
             }
             
             // Also check for villas with direct owner_id match
-            $directVillas = \App\Models\Flat::where('owner_id', $user->owner_id)
+            $directVillas = \App\Models\Flat::ownedBy($user->owner_id)
                                            ->where('property_type', 'villa')
                                            ->pluck('id');
             
@@ -179,7 +179,7 @@ class PaymentController extends Controller
             }
             
             // Also check for apartments with direct owner_id match
-            $directApartments = \App\Models\Flat::where('owner_id', $user->owner_id)
+            $directApartments = \App\Models\Flat::ownedBy($user->owner_id)
                                                ->where('property_type', 'apartment')
                                                ->pluck('id');
             
@@ -194,7 +194,7 @@ class PaymentController extends Controller
         // Owner (canonical role): same combined villa+apartment scope as the
         // list query above.
         elseif ($user->hasRole('Owner')) {
-            $flatIds = \App\Models\Flat::where('owner_id', $user->owner_id)->pluck('id');
+            $flatIds = \App\Models\Flat::ownedBy($user->owner_id)->pluck('id');
 
             if ($flatIds->count() > 0) {
                 $statsQuery->whereIn('flat_id', $flatIds);
@@ -257,7 +257,7 @@ class PaymentController extends Controller
             }
             
             $directVillas = Flat::with('villaArea')
-                            ->where('owner_id', $user->owner_id)
+                            ->ownedBy($user->owner_id)
                             ->where('property_type', 'villa')
                             ->where('society_id', $societyId)
                             ->get();
@@ -268,7 +268,7 @@ class PaymentController extends Controller
             $apartments = Flat::with('building')
                             ->where('property_type', 'apartment')
                             ->where('society_id', $societyId)
-                            ->where('owner_id', $user->owner_id)
+                            ->ownedBy($user->owner_id)
                             ->get();
             
             // If no apartments found via owner_id, check through Resident model
@@ -440,16 +440,17 @@ class PaymentController extends Controller
                 'status' => 'success',
             ];
             
-            // Handle file upload
+            // Handle file upload. Previously built the stored filename from
+            // the client's own filename and silently swallowed any
+            // failure - a receipt photo with a colon in its name (a common
+            // phone export/share-sheet name) crashed the underlying
+            // Storage write exactly like the avatar bug in UserController,
+            // and the resident had no way to know their receipt never
+            // attached. handleFileUpload() never uses the client's
+            // filename; a genuine failure now reaches store()'s own
+            // try/catch below, which reports it instead of hiding it.
             if ($request->hasFile('receipt_file')) {
-                try {
-                    $file = $request->file('receipt_file');
-                    $filename = time() . '_' . $file->getClientOriginalName();
-                    $filePath = $file->storeAs('payment-receipts', $filename, 'public');
-                    $paymentData['receipt_file_path'] = $filePath;
-                } catch (\Exception $e) {
-                    // File upload failed, but continue without it
-                }
+                $paymentData['receipt_file_path'] = $this->handleFileUpload($request, 'receipt_file', 'payment-receipts', ['pdf', 'jpg', 'jpeg', 'png']);
             }
             
             $payment = Payment::create($paymentData);
@@ -541,20 +542,14 @@ class PaymentController extends Controller
                 'notes' => $request->notes,
             ];
             
-            // Handle file upload
+            // Handle file upload - see store() for why this no longer
+            // builds the filename from the client's own filename or
+            // silently discards a failure.
             if ($request->hasFile('receipt_file')) {
-                try {
-                    // Delete old file if exists
-                    if ($payment->receipt_file_path && \Storage::disk('public')->exists($payment->receipt_file_path)) {
-                        \Storage::disk('public')->delete($payment->receipt_file_path);
-                    }
-                    
-                    $file = $request->file('receipt_file');
-                    $filename = time() . '_' . $file->getClientOriginalName();
-                    $filePath = $file->storeAs('payment-receipts', $filename, 'public');
-                    $paymentData['receipt_file_path'] = $filePath;
-                } catch (\Exception $e) {
-                    // File upload failed, but continue without it
+                $oldReceipt = $payment->receipt_file_path;
+                $paymentData['receipt_file_path'] = $this->handleFileUpload($request, 'receipt_file', 'payment-receipts', ['pdf', 'jpg', 'jpeg', 'png']);
+                if ($oldReceipt) {
+                    $this->deleteUploadedFile($oldReceipt);
                 }
             }
             

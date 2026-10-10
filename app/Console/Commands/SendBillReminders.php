@@ -48,26 +48,41 @@ class SendBillReminders extends Command
                 ]);
 
                 if (!empty($recipients)) {
-                    $data = [
-                        'subject' => "Bill Due Reminder - " . $bill->society->name,
-                        'bill' => $bill,
-                        'bill_type' => 'maintenance',
-                        'amount' => $bill->total_amount,
-                        'due_date' => $bill->due_date,
-                        'view_url' => route('payments.show', $bill->id),
-                        'user' => (object) ['name' => $recipients[0]['name'] ?? 'Resident'],
+                    // This previously called EmailNotificationService::send(),
+                    // a method that does not exist on that class - every
+                    // attempt threw an uncaught Error (not an Exception, so
+                    // the catch below never saw it) and no bill reminder was
+                    // ever sent, for any society, since the command shipped.
+                    // sendByTrigger() is the method that actually exists and
+                    // matches the 'bill-due-reminder' template's own
+                    // placeholders.
+                    $variables = [
+                        'user_name'      => $recipients[0]['name'] ?? 'Resident',
+                        'bill_type'      => 'maintenance',
+                        'amount'         => $bill->total_amount,
+                        'due_date'       => $bill->due_date,
+                        'days_remaining' => (int) Carbon::parse($bill->due_date)->diffInDays($today),
+                        'view_url'       => route('payments.show', $bill->id),
                     ];
 
-                    EmailNotificationService::send('bill-due-reminder', $data, $recipients, $bill->society_id);
+                    EmailNotificationService::sendByTrigger('bill-due-reminder', $recipients, $variables, $bill->society_id);
                     $maintenanceCount++;
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $this->error("Failed to send reminder for maintenance bill {$bill->id}: " . $e->getMessage());
             }
         }
 
-        // Send utility bill reminders
-        $utilityBills = UtilityBill::where('payment_status', 'pending')
+        // Send utility bill reminders. utility_bills has no payment_status
+        // column - that name belongs to a different table entirely
+        // (facility_bookings). The real column is status
+        // (unpaid|partial|paid); != 'paid' matches UtilityBill::scopeOverdue
+        // so a partially paid bill still gets reminded. This previously
+        // errored on MySQL (unknown column) and silently matched zero rows
+        // on SQLite, where an unrecognised identifier is treated as a
+        // string literal rather than raising - no utility bill reminder has
+        // ever sent, on either engine.
+        $utilityBills = UtilityBill::where('status', '!=', 'paid')
             ->where('due_date', '<=', $reminderDate)
             ->with(['flat', 'society'])
             ->get();
@@ -81,26 +96,25 @@ class SendBillReminders extends Command
                 ]);
 
                 if (!empty($recipients)) {
-                    $data = [
-                        'subject' => "Utility Bill Due Reminder - " . $bill->society->name,
-                        'bill' => $bill,
-                        'bill_type' => 'utility',
-                        'amount' => $bill->amount,
-                        'due_date' => $bill->due_date,
-                        'view_url' => route('utility-bills.show', $bill->id),
-                        'user' => (object) ['name' => $recipients[0]['name'] ?? 'Resident'],
+                    $variables = [
+                        'user_name'      => $recipients[0]['name'] ?? 'Resident',
+                        'bill_type'      => 'utility',
+                        'amount'         => $bill->bill_amount,
+                        'due_date'       => $bill->due_date,
+                        'days_remaining' => (int) Carbon::parse($bill->due_date)->diffInDays($today),
+                        'view_url'       => route('utility-bills.show', $bill->id),
                     ];
 
-                    EmailNotificationService::send('bill-due-reminder', $data, $recipients, $bill->society_id);
+                    EmailNotificationService::sendByTrigger('bill-due-reminder', $recipients, $variables, $bill->society_id);
                     $utilityCount++;
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $this->error("Failed to send reminder for utility bill {$bill->id}: " . $e->getMessage());
             }
         }
 
         $this->info("Sent {$maintenanceCount} maintenance bill reminders and {$utilityCount} utility bill reminders.");
-        
+
         return Command::SUCCESS;
     }
 }

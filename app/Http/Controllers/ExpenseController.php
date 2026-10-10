@@ -331,22 +331,6 @@ class ExpenseController extends BaseController
         abort_unless($expense->isSocietyExpense(), 404);
     }
 
-    /**
-     * Writes need a society. Super Admin has none of their own and records
-     * expenses for a society through "Login as Admin"; sending them to the
-     * create form with no society would otherwise produce a NOT NULL error.
-     */
-    private function requireSocietyForWrite(): int
-    {
-        $societyId = $this->getSocietyId();
-
-        if (!$societyId) {
-            abort(403, 'Select a society first (Super Admin: use "Login as Admin" on the society) to manage its expenses.');
-        }
-
-        return (int) $societyId;
-    }
-
     private function auditPayload(Expense $expense): array
     {
         return [

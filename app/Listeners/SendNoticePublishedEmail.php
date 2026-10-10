@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Events\NoticePublished;
 use App\Services\DynamicEmailService;
+use App\Jobs\DispatchEventNotification;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
@@ -32,6 +33,14 @@ class SendNoticePublishedEmail
             // Get recipients based on target audience
             $recipients = [];
             
+            // $users was previously left unset whenever target_audience was a
+            // non-empty array with no overlap in $allowedRoles (e.g. every value
+            // naming a role this event excludes) - the foreach below then ran on
+            // an undefined variable, threw, and the catch silently logged the
+            // notice as failed instead of sending to anyone. Starting from an
+            // empty collection makes "no matching recipients" an empty send,
+            // not an exception.
+            $users = collect();
             if ($notice->target_audience && is_array($notice->target_audience)) {
                 // Get users with specific roles that are in allowed list
                 $allowedTargetRoles = array_intersect($notice->target_audience, $allowedRoles);
@@ -80,12 +89,13 @@ class SendNoticePublishedEmail
                     'user_name' => $recipient['name'],
                 ]);
 
-                DynamicEmailService::sendByEvent(
+                DispatchEventNotification::dispatch(
                     'notice_published',
-                    [$recipient],
+                    $recipient,
                     $variables,
-                    $societyId
-                );
+                    $societyId,
+                    "notice_published:{$notice->id}:{$recipient['email']}",
+                )->afterCommit();
             }
 
             Log::info('Notice published email sent', [
