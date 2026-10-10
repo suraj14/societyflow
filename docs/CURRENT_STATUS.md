@@ -2,7 +2,1054 @@
 
 Update this after every major task. Keep it short; link, don't paste.
 
-**Last updated:** 2026-10-03 (session 13 — release blockers, timezone, Android bring-up, 8-card dashboard)
+**Last updated:** 2026-10-11 (complete web audit and repair)
+
+## 2026-10-11 — web audit completion and release sign-off (see [WEB_AUDIT_TRACKER.md](WEB_AUDIT_TRACKER.md))
+
+Branch `production-readiness`. **Not pushed, not deployed.** Release decision: **NOT READY for production; READY FOR STAGING.**
+
+- **D-31 mutation check: PASS.** Removing the status filter, and separately the show() guard, each made `NoticeDraftVisibilityTest` fail; both restored byte-identical. The same leak was then found on `/notices-pending`, `/notices-history` and the villa-owner portal (D-33) and fixed.
+- **Modules:** A PASS (mail delivery NOT TESTED) · I PASS (Guard screens driven in Chrome at 390px; valid QR scan NOT TESTED) · L PASS (D-34 dues from the wrong table, D-35 Staff events on the UTC date) · N PASS at 320/360/390px (D-37 dialog overflow; D-38 missing reset/forgot confirmations) · booking advance window: web and API share `facilities.advance_booking_days` (default 30); the reported "defect" was a script artifact; D-36 (web used the server's date) fixed.
+- **Tests (final, after the last code change):** SQLite 8 shards **1612 tests / 6990 assertions, 0 failures, 4 skipped**; MariaDB 10.4 (throwaway :3307, fresh databases) 6 shards **1612 / 6988, 0 failures, 2 skipped** (engine-specific skips). The MariaDB run caught the Staff-events test failing in the last hour of the UTC day (real bug D-35). Flutter: 162 tests pass, `flutter analyze` 2 known info-level deprecations. 365 changed PHP files lint clean.
+- **Browser (real Chrome, isolated copy, messaging off):** `flows.js` 28/28 · `guard.js` 31/31 · `phone.js` 77 pages × 3 widths clean · `phoneflow.js` 29/30 (30th confirmed separately) · `auth.js` 6/6.
+- **Credentials: NOT ROTATED.** `credentials:audit` fingerprints are unchanged from the 2026-10-10 baseline (exit 1). Operator task: [CREDENTIAL_ROTATION.md](CREDENTIAL_ROTATION.md).
+- **NOT TESTED:** real email/SMS/WhatsApp/payment delivery, Android device, valid QR scan in a browser. Event SMS stays disabled until its own approved DLT template + setting exist.
+- **Next task:** operator rotates credentials (P1-95), then staging delivery verification with approved recipients (P1-96).
+
+## 2026-10-10 — audit, fixes and verification
+
+Branch `production-readiness`, uncommitted. **Not deployed.** Release decision: **NOT READY for production; READY FOR STAGING** with the gaps below.
+
+- **Done and verified (tests, both engines):** P1-76 N+1, P1-77 villa/apartment assignment (a 500 and a cross-society unassign hole fixed), P1-17/18/19 and P0-4 schema/money parity, mandatory profile-image editing for every role (web + `POST /api/v1/profile`), "Society Info" (Society Details / Committee / Documents) on web and Flutter, User Management drawer replaced by the standard edit page, Super Admin surface and role-permission editing locked down (`SuperAdminSurfaceTest`, `RolePermissionUpdateTest`).
+- **Bugs found and fixed:** dashboards/tenant pages fabricating random flats/tenants/residents on read; cross-society name linking of tenants; `owner_id IS NULL` leak (unlinked "Owner" accounts owned every unassigned unit; `Flat::ownedBy()`); legacy `/my/*` villa portal; Staff dashboard 500 on MariaDB (`events.event_date` / `status=published` do not exist).
+- **New migrations (4, unapplied on the dev DB):** `2026_10_09_000001`, `2026_10_10_000001`, `_000002`, `_000003`. Back up `database/database.sqlite`, then `php artisan migrate --force`.
+- **Test evidence (superseded by "Final gate" below):** earlier run: **SQLite 1351 tests / 5679 assertions, 0 failures, 4 skipped; MariaDB 10.4 (throwaway, port 3307) 1351 tests / 5677 assertions, 0 failures, 2 skipped** (skips are engine-specific by design). The first MariaDB run failed once (Staff dashboard 500) — that was the real bug fixed above, not a test change. Flutter: 162 tests pass; `flutter analyze` 2 info-level deprecations (known, intentional).
+- **NOT TESTED:** real device / APK run, browser automation, real email/WhatsApp/payment delivery, MariaDB on the original XAMPP data dir (it crashed on my start attempt; not touched since — a throwaway instance on port 3307 was used).
+- **Remaining risks:** see P1-82..84 in [TODO.md](TODO.md).
+
+### Staging hardening (same day, later)
+
+- **Migrations applied to the local dev DB** (`database/database.sqlite`, SQLite, not production): verified target, verified backup (`C:\Users\USER\SocietyFlow-backups\database-pre-migrate-*.sqlite`, integrity ok), rehearsed migrate / rollback / re-migrate on a copy first. After: 0 pending, every table's row count unchanged, `tenants/flats/residents/owners/payments/maintenance_bills/visitors/notices` byte-identical, only `societies` (2 new columns) and 9 `users.avatar` values (mirrored from their Owner photo) changed. Rehearsal found two broken `down()` methods (SQLite, MariaDB) — fixed.
+- **Logout:** was already POST + CSRF; GET is a redirect stub. Pinned by `LogoutTest`.
+- **Piyus / Suraj:** root causes found and fixed in code; **the two data changes were not made.** Plan with exact rows and rollback SQL: [DATA_REPAIR_PLAN_2026-10-10.md](DATA_REPAIR_PLAN_2026-10-10.md).
+- **Add User** is now the full page; **browser run** (real Chrome, isolated server on a copy DB with mail set to `log`): 16/16 checks.
+- **Android:** `flutter build apk --debug` compiles. **No device or emulator exists on this machine: device testing NOT TESTED.**
+- **External delivery NOT TESTED:** SMTP is configured but nothing was sent; no WhatsApp or payment keys exist.
+- Throwaway MariaDB (port 3307) is separate from the XAMPP data directory, which was not touched.
+
+## P0-10/P1-15: MariaDB user-delete cascade fix + 3 more bugs found testing it — 2026-10-09
+
+Picked up P0-10 and P1-15 from `docs/SCHEMA_PARITY.md` (open since 2026-09-15):
+deleting a user on MariaDB was `CASCADE`-deleting the resident and visitor
+rows that pointed at them — a security/audit record disappearing because
+an unrelated account was removed, never reproducible on the SQLite dev DB
+because that engine already had the correct `SET NULL`. Fixed, then found
+3 more real, independent bugs as a direct byproduct of regression-testing
+the fix — each demonstrated before being fixed, none inferred.
+
+- **The fix** (`database/migrations/2026_10_09_000001_align_user_delete_cascades_on_mysql.php`,
+  MySQL/MariaDB only — SQLite was already correct, confirmed by reading
+  every relevant migration rather than assumed): `residents.user_id` and
+  `visitors.host_user_id` now `SET NULL` on delete, matching SQLite.
+  `visitors.host_user_id` also had to become nullable first (MySQL refuses
+  `ON DELETE SET NULL` on a `NOT NULL` column) — the second half of this,
+  tracked separately as P1-15. **Demonstrated on real MariaDB 10.4.27**, not
+  just asserted against the schema: deleting a user now leaves the
+  resident/visitor row in place with the link cleared, where it previously
+  deleted both rows outright. `down()` is deliberately a no-op (reversing
+  would restore the exact data-loss bug this exists to close).
+- **Found while regression-testing the fix, each independently real:**
+  1. **`SendBillReminders` (the `bills:send-reminders` scheduled command)**
+     queried `UtilityBill::where('payment_status', 'pending')` — that
+     column does not exist on `utility_bills` (it belongs to a different
+     table, `facility_bookings`). Threw outright on MySQL; on SQLite the
+     unrecognised identifier was silently treated as a string literal
+     rather than raising (CLAUDE.md §8's own warning, caught in the wild),
+     so the query always matched zero rows. No utility bill reminder has
+     ever sent, on either engine, since this command shipped. Also fixed
+     `$bill->amount` (no such attribute) → `$bill->bill_amount`.
+  2. **`User::ownedVilla()`/`ownedFlat()`/`ownedProperties()`** — the
+     bigger one. Each branched on `if ($this->owner_id)`, returning the
+     real relation only when true and an always-dead relation otherwise.
+     That branch reads instance state that plainly does not exist whenever
+     Eloquent builds the relation without a loaded row first —
+     `whereHas('ownedVilla')`, `whereDoesntHave('ownedVilla')`, and
+     `User::whereHas('ownedProperties', ...)` all call this method against
+     a throwaway, unhydrated `User`, where `$this->owner_id` is always
+     null. Every such call silently took the dead branch, unconditionally,
+     forever — `$user->ownedVilla` on an already-loaded instance was never
+     affected, which is exactly why dozens of existing call sites kept
+     working while this went unnoticed. Affected 5 real call sites:
+     `EmailNotificationService::getRecipients()`, `EmailTriggerService`,
+     and 3 event listeners (`SendBillGeneratedEmail`,
+     `SendPaymentOverdueEmail`, `SendTenantOwnerAddedEmail`) — an owner has
+     never once been resolved as a notification recipient through this
+     path — plus `Admin\UserVillaAssignmentController`'s villa-assignment
+     screen, which was showing every owner as unassigned and nobody as
+     assigned. Fixed to a single unconditional relation; fixing it exposed
+     a second-order **ambiguous-column bug** at all 5 call sites
+     (`where('id', ...)` inside the `whereHas` closure is ambiguous once
+     joined through `owners` — fixed to `where('flats.id', ...)`).
+  3. **3 `AuthorizationIsolationTest` facility-booking tests** created
+     their resident test users with no role at all, so
+     `FacilityApiController::canBook()` always returned false regardless
+     of the scenario under test — a test bug, not an app bug (confirmed:
+     the fix is 6 one-line `assignRole()` additions, and `git diff`
+     confirms zero production files were touched for it).
+- **Found, documented, not fixed — separate scope, a performance issue not
+  a correctness bug:** `QueryPerformanceTest::test_facility_booking_list_does_not_scale_queries_with_rows`
+  — `GET /api/v1/facility-bookings` scales 9→44 queries as booking rows
+  grow (a real N+1 in `FacilityApiController::bookings()`). Confirmed
+  pre-existing and unrelated: reproduces identically before and after every
+  change above, on both engines. Tracked as P1-76.
+- **Also found, not yet covered by its own test:** `Admin\UserVillaAssignmentController`'s
+  villa-assignment screen has no HTTP-level feature test at all (confirmed
+  by grep). Its queries are now correct (fix #2 above), but the
+  controller/view itself remains unverified end to end. Tracked as P1-77.
+- **Verification, both engines, full evidence:**
+  - Targeted run (`--filter "SchemaParityTest|BillReminderCommandTest|UserOwnedPropertiesRelationTest|AuthorizationIsolationTest"`):
+    **43/43 passing, 106 assertions** — identical on SQLite and real
+    MariaDB 10.4.27 (`DB_CONNECTION=mysql DB_DATABASE=societyflow_test`,
+    the project's own documented throwaway MySQL test DB — the real dev
+    database `database/database.sqlite` was never touched, confirmed by
+    its unchanged modification timestamp).
+  - Full backend regression, both engines: **SQLite 1181 tests / 4459
+    assertions / 1 failure; MariaDB 1181 tests / 4455 assertions / 1
+    failure** — the one failure on each engine is the pre-existing P1-76
+    N+1 above, nothing new.
+  - No real notification was sent anywhere in this verification: the bill-
+    reminder test uses `Mail::fake()`, and the code path it exercises has
+    no SMS/WhatsApp/HTTP call site at all (confirmed by grep) — only
+    `Mail::send()`.
+  - Every changed file reviewed with `git diff` against the last commit:
+    each edit is isolated to its stated fix (`User.php`'s 3-method rewrite;
+    5 one-line `where('id', ...)` → `where('flats.id', ...)` fixes in
+    `EmailNotificationService`/`EmailTriggerService`/3 listeners; the 2
+    column-name fixes in `SendBillReminders`; 6 one-line `assignRole()`
+    additions in the test file; `SchemaParityTest` is a pure addition, 61
+    lines, 0 deletions). `app/Http/Controllers/Api/FacilityApiController.php`
+    shows as modified in `git status` but confirmed untouched by this
+    session — that diff belongs to earlier, unrelated uncommitted work.
+- **Not attempted this round:** `P1-17` (`tenants.user_id`/`flat_id`
+  cascade-rule mismatch, the next item in `docs/SCHEMA_PARITY.md`), `P1-18`
+  (missing unique index on `flats(building_id, flat_number)` on MariaDB),
+  `P1-19` (two NOT-NULL-without-default columns on MariaDB only) — each is
+  its own scoped fix with its own evidence requirement, not a continuation
+  of this one.
+
+## Society Rules & Documents + notification pipeline fixes — 2026-10-08
+
+Resumed from the Guard Shift state (nothing rebuilt). Built one new module
+end to end and, by testing it in a real browser instead of trusting faked
+tests, found that **no queued notification email had ever been delivered**.
+
+**Fixed (each with a regression test that fails without the fix):**
+
+- **P0-15 — every queued email was discarded.** `config/queue.php` never
+  existed, so `queue.default` was null → `NullQueue`. Every
+  `DispatchEventNotification` (welcome, payment, notice, ticket, visitor,
+  bill, access pass, facility booking) vanished, whatever `QUEUE_CONNECTION`
+  said. Earlier "notifications PASS" claims rested on `Bus::fake()` tests that
+  only checked a job was dispatched. Added the standard config.
+  `QueueConfigurationTest` (3, no fakes).
+- **P0-16** — `access_pass_created`, `access_pass_revoked`,
+  `facility_booking_status_updated` were missing from `EmailEvent`, so
+  `DynamicEmailService` rejected them even with the queue fixed.
+  `EmailEventWhitelistTest` runs the real send for every registered
+  trigger_event email (26).
+- **P0-17** — global `PreventBackHistory`/`PreventAllCaching` and web
+  `SetCacheHeaders` (+ `RefreshCsrfToken`) called `->header()`, which file
+  and streamed responses lack: every file download route 500'd on web and
+  API. `CacheHeadersFileResponseTest` (6).
+- **P1-75** — 11 views duplicated the layout's flash (every save message
+  shown twice). `FlashMessageDuplicationTest` scans all views.
+
+**Society Rules & Documents (P1-73)** — Settings → Rules & Documents (and a
+sidebar entry). Draft → publish → new version (old one archived, never
+overwritten) / unpublish / archive; only a never-published draft can be
+deleted. PDFs on the private disk, served only through authorising routes;
+byte-level `%PDF-`/`%%EOF` check on top of mime rules; 10 MB cap; stored
+name is a UUID. Residents: `/society-rules` (PDF.js reader, zoom, search
+list). Guards: `/guard/rules` + header button, guard-visible docs only.
+Staff/Accountant: 403. Optional "I have read this" with admin list
+(`n of m residents`). Optional announce via Email/SMS/WhatsApp, chosen per
+publish, sent at most once per version (`announced_at`); WhatsApp uses a new
+`document` purpose template in Settings → WhatsApp. API
+`/api/v1/society-documents` (+ `/file`, `/acknowledge`). Flutter: Profile →
+Society Rules & Documents, guard home → Gate Rules, native viewer (`pdfx`).
+
+**Verified:** `SocietyDocumentTest` 28 · real-browser journey (headless
+Chrome via CDP against a live server on a throwaway SQLite DB in the session
+scratchpad — never the dev DB) **37/37**: admin upload/publish/announce/
+new version, tenant (Villa 159) read + zoom + acknowledge, mobile 390px no
+overflow, Society B tenant direct-id attempts → 404, guard sees only guard
+docs, staff 403, real `email_logs` rows `sent` to exactly the two Society A
+residents · Flutter analyze 2 pre-existing infos, `flutter test` 71/71,
+`flutter build apk --release` built.
+
+**USB dev (`scripts/run_android_usb.ps1`, already existed):** now
+distinguishes unauthorized / offline / missing device, prints the exact
+failing `adb reverse` command and output, detects a non-SocietyFlow process
+holding the port (names it), and passes `API_BASE_URL` automatically for a
+non-default `-Port`. Only the no-device path was exercised (no phone
+attached); release builds still cannot use a local URL
+(`ApiConfig.resolveBaseUrl`).
+
+**Not done this session (stated, not skipped):** gate-level scan
+authorization, patrol, vehicle registry/webhook, delivery, household help,
+material pass, overstay, Security Center, SOS, child-exit, move-in/out,
+OTP device E2E, broad UI redesign — see TODO P1-72. Flutter viewer not yet
+run on a device (P1-74).
+
+## Query-scoping bug sweep — 2026-10-08
+
+Latest "do everything" mega-prompt (81 sections) asked for a global
+query-scoping audit across the whole codebase. Full codebase audit of that
+scale is not a one-pass task; instead swept every controller using the
+established technique (grep every route-model-bound method signature,
+verify each calls `authorizeSocietyAccess`/an equivalent Super-Admin-
+exempted inline check). Found and fixed 2 real bugs; `ExpenseController`,
+`ComplaintController`, `ServiceController`, `NoticeController`,
+`EventController` were all already correctly scoped.
+
+- **`FacilityBookingController::editStatus()`** had the identical bug
+  already fixed once this session in its sibling `updateStatus()` — a bare
+  `can('manage_facilities')` check with no model scoping at all, letting an
+  Admin in any society view another society's booking details by id.
+  Fixed by adding `authorizeSocietyAccess($facilityBooking)`.
+- **`Admin\RentController`** (`edit()`, `update()`, `destroy()`, `receipt()`)
+  compared `$rent->flat->society_id !== $this->getSocietyId()` with no
+  Super Admin exemption. `getSocietyId()` returns `null` for Super Admin
+  (no society of their own), so this *fails closed* — it blocked Super
+  Admin from managing any rent record at all. Fixed by adding
+  `!auth()->user()->hasRole('Super Admin') &&` to all 4 checks, matching
+  the "scope by default, exempt Super Admin explicitly" rule in CLAUDE.md §3.
+- New regression suite: `tests/Feature/QueryScopingBugSweepTest.php` (3
+  tests) — covers both fixes plus confirms Admin is still blocked from a
+  genuinely cross-society rent record.
+- Also verified this round: the user's specifically-named "Villa 160 via
+  Access Pass" claim does **not** currently reproduce — already covered by
+  `AccessPassPropertyScopeTest`'s 13 passing tests.
+- **Not attempted this round** (explicitly, not silently dropped): Context
+  Engine, finance-domain refactor beyond confirming Expense is already
+  correct, Patrol/Vehicle/Delivery/Household-Help/Material-Pass/Overstay/
+  Security-Center/SOS/Child-Exit/Move-in-out subsystems, UI redesign,
+  browser/E2E testing, `docs/FINAL_PRODUCTION_CERTIFICATION.md`,
+  `docs/PRODUCT_COMPLETION_MATRIX.md`.
+
+## Guard Shift & Multi-Gate Management (new module) — 2026-10-08
+
+A "final product completion" brief asked for 12+ net-new subsystems
+(Guard Shift, multi-gate, handover, patrol, vehicle registry + hardware
+webhook, delivery, household help, material pass, overstay, Security
+Center, emergency/SOS, child-exit, move-in/out) plus a full UI redesign in
+one pass. Attempting a shallow version of all of it would itself have
+been the "no fake completion" violation the brief explicitly warned
+against. Committed instead to building **one** of them completely and
+for real - Guard Shift & Multi-Gate Management, the most foundational and
+most-requested piece across several rounds of this project's briefs - and
+stated the rest as explicitly not attempted, not silently skipped.
+
+- **New, additive module** (migration `2026_10_08_000001`): `gates`,
+  `shifts`, `shift_assignments` (attendance lives directly on this row -
+  one row per guard/shift/gate/date), `shift_handovers`. Deliberately
+  **not** wired into the existing visitor/access-pass gate authorization
+  path (`GuardController::scan()`, `AccessPassService`) - every society in
+  this project has operated single-gate with zero `gate_id` concept
+  anywhere in the schema, and forcing every already-tested guard action to
+  require a gate selection is exactly the "rewrite a working module" this
+  session's standing rules prohibit. This is a real, usable roster/
+  attendance/handover system on its own; integrating it into scan-time
+  authorization is separately-scoped future work.
+- **Correct overnight-shift math**: `Shift::windowStartingOn()`/
+  `coversMoment()` treat a shift's end time earlier than its start time as
+  crossing midnight, anchoring the end to the *next* calendar day rather
+  than a naive same-day comparison - the exact bug class this session's
+  own Access Pass block/unblock fix was for. `currentAssignmentFor()`
+  checks both today's and yesterday's date for exactly this reason (an
+  overnight shift that started yesterday is still "now" after midnight).
+- **Guard**: `/guard/shift` - current shift, start/end (on-time vs late by
+  grace period, both computed server-side from the shift's own window, not
+  trusted from the client), handover notes for the incoming guard.
+- **Admin**: `/admin/gates`, `/admin/shifts`, `/admin/shift-assignments`
+  (roster, filterable by date/gate/guard/status) - all society-scoped,
+  Admin/Super Admin only. Guard replacement is audited via the existing
+  `ActivityLog` model (who, original guard, replacement, reason, when) -
+  reused, not a new audit mechanism. The original assignment is marked
+  `replaced`, never mutated to pretend the original guard attended.
+- **Overlap prevention is real, not just a same-tuple unique index**: two
+  *different* shifts whose actual time windows overlap for the same guard
+  (including an overnight shift's tail overlapping a morning shift the
+  next day) are both rejected - verified by a dedicated test, not assumed
+  from the code existing.
+- **Three real bugs found and fixed while writing the tests, not by
+  inspection** (all three would have shipped broken without the tests
+  actually asserting on behavior, not just "the endpoint returns 200"):
+  1. A relation method named `guard()` collided with Eloquent's own
+     reserved `Model::guard()` (mass-assignment guarding) - a fatal error
+     the moment the model loaded, not a subtle bug. Renamed to `guardUser()`.
+  2. The `date` column, despite being declared `DATE` in the migration,
+     stores a full `"YYYY-MM-DD 00:00:00"` value on SQLite - every plain
+     string `where('date', ...)`/`whereIn('date', [...])` silently matched
+     nothing, so the overlap-prevention check let every overlapping
+     assignment through. Fixed by using `whereDate()` everywhere a date
+     column is compared (portable across SQLite and MySQL, unlike a raw
+     `DATE()` SQL function call).
+  3. `Shift`/`GuardShiftService` type-hinted `Illuminate\Support\Carbon`,
+     but `SocietyClock` (the project's own established timezone helper)
+     returns the base `Carbon\Carbon` - a `TypeError` on every call until
+     both files were changed to type-hint the base class, matching
+     `SocietyClock`'s own convention.
+- Tests: `GateManagementTest` (5), `ShiftManagementTest` (6),
+  `GuardShiftAssignmentTest` (6), `GuardShiftAttendanceTest` (8),
+  `GuardHandoverTest` (6), `GuardReplacementTest` (5) - **36 new tests, all
+  exercising the real HTTP route or the service directly, not just unit
+  calls to formatting helpers.**
+- **Not attempted this round, stated honestly**: multi-gate *authorization*
+  (a guard is not actually restricted to their assigned gate's scan/
+  visitor actions yet - the data model supports it, the enforcement does
+  not); patrol/checkpoints; vehicle registry + hardware webhook; delivery
+  tracking; household help; material/gate pass; overstay detection;
+  Security Center; emergency/SOS; child-exit protection; move-in/out; the
+  full UI/UX "Rangoli" redesign; Flutter guard-shift screens. Each is its
+  own scoped piece of work - see `docs/TODO.md`.
+
+## Push notifications removed entirely — 2026-10-08
+
+Push was explicitly ruled out of SocietyFlow's approved communication scope
+(Email/SMS/WhatsApp only). Removed completely, not just hidden from the UI -
+confirmed by a repository-wide reference search before and after.
+
+- **Deleted outright** (zero remaining references after removal, confirmed
+  by a final `grep -rli` sweep across `app/`, `routes/`, `resources/`,
+  `database/`, `config/`, `tests/`, and `societyflowmob/`):
+  `app/Services/{PushNotificationService,FirebaseService}.php`,
+  `app/Http/Controllers/Admin/PushNotificationController.php`,
+  `app/Http/Controllers/PushSubscriptionController.php`,
+  `app/Jobs/SendPushNotificationJob.php`,
+  `app/Console/Commands/{TestPushNotification,CleanupPushSubscriptions}.php`,
+  `app/Models/{PushNotificationLog,PushNotificationSetting,PushNotificationTemplate,PushSubscription}.php`,
+  `database/seeders/PushNotificationTemplateSeeder.php`,
+  4 admin Blade views (`admin/push-notifications/*`), the super-admin
+  settings `push` partial, `tests/Feature/PushNotificationTemplateTest.php`.
+- **Removed from live code**: the two real push call sites
+  (`GuardController::notifyOccupants()`, `VisitorApiController::notifyResident()`
+  - both sent a "visitor at the gate" push with no other channel behind
+  it, so the notification itself is simply gone now, not stubbed), every
+  `push-notifications.*`/`push.*` route, the Settings push tab (both the
+  per-society and Super Admin screens - the Super Admin one had a live
+  nav entry pointing at a `route()` call that would otherwise now throw),
+  `SettingsController`/`SuperAdmin\SettingsController`'s push
+  settings/array entries, the `enablePushNotifications` Flutter flag
+  (zero readers even before removal), and the push seed rows in
+  `SystemSettingsSeeder`/`TwoAdminSampleDataSeeder`.
+- **Updated**: `NotificationConfigIntegrityTest` and the Communication
+  Center view no longer list `push` as a valid/offerable channel -
+  `NotificationEvents::all()` never declared it on any event to begin
+  with, so this closes the door rather than fixing a live defect.
+- **Deliberately left alone**: the applied migration
+  (`2026_02_05_create_push_notification_tables.php`) and its 4 tables
+  (`push_subscriptions`, `push_notification_logs`,
+  `push_notification_settings`, `push_notification_templates`) - per
+  CLAUDE.md §12, an applied migration is not edited; the tables remain as
+  harmless orphans, the same category as the already-documented
+  `flats_old` table. No code anywhere reads or writes them anymore.
+- **Untouched, confirmed working**: Email, SMS, WhatsApp - none of their
+  code, routes, settings, or tests were touched by this removal.
+- Full regression after the removal: see the run this entry was written
+  alongside.
+
+## Sidebar icon fix + a real Access Pass timezone bug — 2026-10-08
+
+- **Sidebar**: "Property & Occupancy" rendered with no icon - `fa-people-roof`
+  does not exist in the Font Awesome 6.0.0 build this app loads (added in a
+  later FA6 point release), so it silently rendered nothing rather than a
+  broken-icon glyph. Replaced with `fa-building` (present since FA5/6's
+  first release); label shortened to **"Property"** per direct feedback.
+- **Real bug, caught by its own regression test failing at the exact
+  moment it manifests**: `AccessPass::blockToday()`/`unblockToday()` used
+  the server's raw `now()` (`APP_TIMEZONE=UTC`), while `isBlockedToday()`
+  (what the gate-scan path actually checks) converts to the society's
+  local clock first (`SocietyClock::local()`, Asia/Kolkata by default).
+  For roughly 5.5 hours every day - UTC evening, already past midnight in
+  IST - the two disagree on what "today" is: an admin blocking a pass
+  during that window wrote the wrong calendar date, and the block silently
+  never took effect. `AccessPassViewRenderTest` failed on exactly this
+  because the suite happened to run during that window - not a flake, a
+  real timing-dependent defect. Fixed by routing both writes through the
+  same society-local date `isBlockedToday()` already reads.
+  `tests/Feature/AccessPassTest::test_scan_rejects_a_pass_on_a_day_it_is_not_allowed`
+  had the identical bug in its own fixture (built "today" from the
+  server's raw day-of-week instead of the society's) and was fixed the
+  same way, with the same reasoning documented inline.
+- **Found, not yet fixed** - the same unguarded `now()->toDateString()`
+  pattern exists in 5 more places, confirmed by grep, each a candidate for
+  the identical class of bug (silently wrong during the UTC/IST overlap
+  window): `FacilityBooking::scopeUpcoming()`, `Staff::todaysAttendance()`-
+  style lookups, `UtilityBill`'s overdue scope/accessor,
+  `Visitor::scopeToday()`, and `AccessPassController::store()`'s
+  `$validFrom` on create. None has a failing test proving the actual
+  impact the way the two fixed instances did; flagged rather than
+  blind-fixed.
+- Full regression after all of the above: **921 tests, 3341 assertions,
+  0 failures** - a single, fully-current run (no stale state), confirmed
+  twice.
+
+## Admin dashboard "Needs Attention" panel — 2026-10-08
+
+A "final product excellence" brief asked for a sweeping design-system
+overhaul, new Gate modules (vehicle registry, delivery, household help,
+patrol, SOS), a Notification Center, Activity Timelines and Smart Search
+in one pass. Scoped honestly: that is multi-week product and design work,
+not achievable for real in one turn, and several of the named modules
+(vehicle registry, delivery, household help, patrol, SOS, child-exit) do
+not exist in this codebase and were explicitly declined pending product
+sign-off in multiple earlier sessions - "complete" implied they already
+existed. Building a fraction of any of this and presenting it as finished
+would be exactly the kind of fake completion this project's own history
+has repeatedly had to correct. Delivered instead the one concretely-specified,
+achievable piece from the brief:
+
+- **Admin dashboard, action-first panel** (`DashboardController::needsAttention()`):
+  five live counts - pending visitor approvals, open complaints, pending
+  service requests, overdue bills, pending facility bookings - each a
+  single `count()` query (5 queries total, fixed regardless of data
+  volume), each linking straight to the already-filtered list, not the
+  module's unfiltered home page. Rendered above the existing 8 KPI cards
+  (`admin/dashboard.blade.php`), inside the existing Tailwind idiom - not
+  a new design system. A real empty state ("Nothing needs your attention
+  right now") when every count is zero, not a row of cards reading "0".
+  Society-scoped like everything else on that dashboard.
+- Tests: `AdminNeedsAttentionPanelTest` (3: empty state, every module
+  counted and linked, cross-society isolation) +
+  `QueryPerformanceTest::test_admin_dashboard_needs_attention_panel_is_a_fixed_number_of_queries`
+  (1). Existing `AdminDashboardKpiTest` (5) re-confirmed unaffected.
+- **Not attempted, stated honestly**: a design-system overhaul of any
+  screen; a Notification Center UI; Smart Search; Activity Timelines;
+  Security Center; Guard/Resident quick-action redesign (the Guard
+  dashboard already has SCAN/New Visitor as its two primary actions,
+  matching the achievable subset of what the brief asked for - re-verified,
+  not rebuilt); vehicle registry, delivery tracking, household help,
+  patrol/checkpoints, SOS incidents, child-exit protection, multi-gate -
+  none exist and building any of them is net-new feature engineering, not
+  a "completion" of existing work.
+
+## Final production certification pass — 2026-10-07
+
+A "final certification" brief asked for a full-system inventory, security
+sweep, notification-matrix validation, Flutter build, performance pass and
+dead-code cleanup in one go. Scoped honestly: this was a targeted,
+evidence-based audit on top of the existing 917-test suite and the two
+prior P1-61/P0-12 rounds below, not a re-walk of every screen by hand.
+Full report given to the user in the requested 12-section format; summary:
+
+- **API IDOR sweep** (every parameterized route in `routes/api.php`):
+  checked `VisitorApiController`, `AccessPassApiController`,
+  `ComplaintApiController`, `NoticeApiController`, `FacilityApiController`,
+  `ServiceApiController`, `EventApiController`, `PaymentApiController`
+  against the full entity list the brief named. **Clean** - every route
+  already scopes by society_id/user_id/host_user_id correctly, or (Access
+  Pass) delegates to `AccessPassEditService::assertMayManage()`, which both
+  web and API already share. No new IDOR found.
+- **Fresh-install integrity, verified not assumed**: ran every migration +
+  the default `db:seed` path against a brand-new throwaway SQLite file (not
+  the dev database). Every one of the 15 registered notification templates
+  existed and was active; 9 roles / 36 permissions seeded correctly.
+  Confirms P0-12's registry work actually survives a clean install.
+- **Performance - two real, measured fixes**:
+  - `CommunicationCenterController::index()` (this session's own new code)
+    called `NotificationRules::isEnabled()` in a nested loop over every
+    registered event's channels - a query per channel per event. Fixed
+    with `NotificationRules::allFor()` (one query); added
+    `QueryPerformanceTest::test_communication_center_rules_tab_...`,
+    calibrated against this app's own measured per-page baseline (~27
+    queries for a comparable existing admin page), not an arbitrary number.
+  - `Admin\RentController::index()` called `Schema::hasColumn('maintenance_bills',
+    'bill_type')` on every page load - exactly the runtime schema
+    introspection CLAUDE.md §9 rules out. The column has existed since
+    migration `2026_02_02`; removed the check.
+- **Found, documented, deliberately not fixed**: `PushNotificationService`'s
+  Web Push (VAPID) path - `computeECDH()` is a placeholder
+  (`hash('sha256', $privateKey . $publicKey, true)`), not real
+  elliptic-curve Diffie-Hellman. `docs/PRODUCTION_CHECKLIST.md` previously
+  (incorrectly) called Web Push "the only working channel" - corrected.
+  Not rewritten this round: a spec-correct implementation (RFC 8291) can
+  only be proven correct against a real subscribed browser, and no browser
+  automation is available here - a blind rewrite would be exactly the
+  "claim PASS from a mocked delivery" this brief explicitly rules out.
+  Recommended path: `minishlink/web-push` (or equivalent maintained
+  library) rather than hand-rolled crypto.
+- **Flutter**: `flutter analyze` - 2 pre-existing info-level deprecations,
+  0 new. `flutter test` - 69/69 passing. `flutter build apk --release` -
+  succeeds (103.2MB). Still debug-signed, still `com.example.societyflow` -
+  both pre-existing, documented operator decisions (P0-7/P0-8), correctly
+  left untouched. No physical device or emulator connected in this
+  environment (`flutter devices` lists only Windows desktop + browsers) -
+  device-level E2E is **BLOCKED**, not claimed as passing.
+- **Not reattempted, cited instead**: a full manual walkthrough of every
+  business module (visitors, bills, complaints, facilities, events,
+  notices, guard flows) - the existing 917-test suite already encodes this
+  validation across many prior sessions; re-walking it by hand would
+  duplicate, not add, coverage. Live SMS/WhatsApp/email provider delivery
+  and browser-automation click-throughs remain BLOCKED - no live
+  credentials or browser automation exist in this environment, consistent
+  with every prior session's own finding.
+- Full backend regression after all of the above: **917 tests, 3326
+  assertions, 0 failures** (up from 916/3320 - the one new query-count
+  test).
+
+## P1-61: Communication Center + Access Pass / Bill / Facility Booking notifications — 2026-10-07
+
+Built directly on the canonical registry below (not a rebuild): extended
+`NotificationEvents` with 4 new real events, built the Communication Center
+admin UI on top of it, added WhatsApp approved-template sync, and found 2
+more real bugs (one cross-society IDOR, one validation crash) purely as a
+byproduct of writing feature tests for the new wiring - the same pattern
+that kept paying off throughout this registry work.
+
+- **4 new registered events, each a real, previously-unwired business
+  action** (confirmed by grep before writing any code - Access Pass and
+  Facility Booking had *zero* notification call sites of any kind):
+  - `access_pass.created` - `AccessPassController::store()` now dispatches
+    `AccessPassCreated` -> confirmation email to whoever created the pass.
+  - `access_pass.revoked` - `AccessPassController::revoke()` now dispatches
+    `AccessPassRevoked` -> email + SMS + WhatsApp to the pass's creator.
+    Security-group and three-channel because Admin/Super Admin can revoke a
+    pass a *resident* created - the resident who lost their staff's gate
+    access may not be the one who revoked it. First event in the registry
+    proving all three channels fire off one real dispatch.
+  - `bill.generated` - **reactivated**, not new: `BillGenerated`/
+    `SendBillGeneratedEmail`/its template already existed (seeded by
+    2026_10_07_000002) but nothing ever dispatched the event (documented in
+    `knownDeadEventClasses()`'s own history). `Admin\RentController::store()`
+    - the one real bill-creation call site in the codebase - now fires it.
+  - `facility_booking.status_updated` - `FacilityBookingController::updateStatus()`
+    (Admin-only; approve/reject/cancel/complete) now dispatches
+    `FacilityBookingStatusUpdated` -> email to the resident who booked it.
+  - Payment and Society Event were **not** duplicated - `payment.received`
+    and `event.created`/`event.updated` (already registered) already cover
+    those domains from a real dispatch site each.
+- **2 real bugs found while writing the feature tests for the above, both
+  fixed**:
+  - **Cross-society IDOR**: `FacilityBookingController::updateStatus()`
+    checked only `can('manage_facilities')` (a bare permission, no model) -
+    unlike every sibling method in that controller, it never called
+    `authorizeSocietyAccess()`. Any Admin, in any society, could approve/
+    reject/cancel another society's booking by id. Fixed; regression in
+    `FacilityBookingNotificationTest::test_an_admin_cannot_update_another_societys_booking`.
+  - **Validation crash**: `admin_notes` is `nullable`, so Laravel's
+    `validate()` omits the key entirely when the field is absent from the
+    request rather than returning null for it - the exact same shape as the
+    `EventController::update()` bug already fixed and documented in
+    `docs/TODO.md` (P1-25). Approving/cancelling a booking with no notes
+    threw an undefined-array-key error instead of saving. Fixed with
+    `?? $facilityBooking->admin_notes`.
+- **`NotificationRules`** (`app/Support/NotificationRules.php`): the on/off
+  switch behind "Rules & Notifications", opt-out by design - every
+  event/channel is enabled unless a row explicitly disables it, so
+  introducing this table can never silently stop a notification that was
+  already working. Enforced centrally in
+  `DispatchEventNotification::handle()` for every trigger_event-based
+  event (11 of 15 registered events); slug-based events are shown
+  read-only in the UI - they go through `shouldReceiveEmail()`'s existing
+  role-permission map instead, a different, pre-existing mechanism this
+  round did not rewire.
+- **Communication Center** (`/admin/communication-center`, linked in the
+  sidebar for Admin/Super Admin): 4 tabs. Providers links to the existing
+  Settings Email/SMS/WhatsApp tabs (no secret ever duplicated here). Rules
+  & Notifications lists every registered event under exactly the 5
+  requested business groups, with a per-channel checkbox, a Save, and a
+  Test button that **only ever messages the acting admin's own email/
+  phone** - never a resident, never "everyone in this group". Templates
+  links to the existing Email Templates screen and adds the new WhatsApp
+  template list. Delivery Logs links to the existing, already multi-channel
+  Email Logs screen.
+- **WhatsApp approved-template sync** (`WhatsAppTemplateSyncService`,
+  `whatsapp_templates` table): calls the real, documented Fast2SMS endpoint
+  (`GET /dev/whatsapp/{version}/{waba_id}/message_templates`, confirmed
+  against docs.fast2sms.com/reference/get-all-templates, not guessed).
+  Needs a new `whatsapp_waba_id` setting (added to Settings → WhatsApp,
+  separate from the `whatsapp_phone_number_id` already used for sending).
+  Friendly names are purely local - Meta's template object has no such
+  field - defaulting to a humanised version of the technical name on first
+  sync and never overwritten by a re-sync. The raw Meta/Fast2SMS id is
+  never rendered in the Rules view. **Not verified against a live
+  account** - no WhatsApp Business Account ID or API key is available in
+  this environment; tested via the same `$transportOverride` seam
+  `WhatsAppService`/`SmsService` already use.
+- **WhatsApp delivery logging**: `WhatsAppService::sendNotification()` now
+  writes an `email_logs` row (`channel=whatsapp`) the same way
+  `SmsService::sendDltNotification()` already does - a WhatsApp send is
+  now visible on the Delivery Logs screen, not just in the application log.
+  Not logged when nothing was actually attempted (no template configured,
+  or WhatsApp disabled) - same convention SMS already follows.
+- Tests: `AccessPassNotificationTest` (4), `BillGeneratedNotificationTest`
+  (3), `FacilityBookingNotificationTest` (4), `NotificationRulesTest` (7),
+  `WhatsAppTemplateSyncTest` (6) - 24 new, all green, all exercising the
+  real controller route, not just the service layer. Email-channel
+  assertions use `Queue::fake()` + inspect the pushed
+  `DispatchEventNotification` job rather than `email_logs` directly -
+  `->afterCommit()` never fires inside `RefreshDatabase`'s own
+  test-wrapping transaction (confirmed by hitting it again this round), the
+  same gotcha `DispatchEventNotificationTest`/`NoticePublishedEmailE2ETest`
+  already document.
+- Full backend regression: see the run this entry was written alongside.
+  Flutter untouched this round - no backend/API contract change required
+  one.
+- **Not attempted this round, stated honestly**:
+  - **Push**: `PushNotificationService`/`FirebaseService` are untouched.
+    Per CLAUDE.md §11, no Flutter client registers an FCM device token at
+    all (`firebase_messaging` absent) - wiring a new event to push would
+    call a real service that has literally no device to deliver to for any
+    user, which is indistinguishable from faking it. Not wired until a real
+    mobile push client exists.
+  - Security/Important beyond `access_pass.revoked` (e.g. failed-login
+    alerts, account lockout notices) - audited, found no existing real
+    dispatch point to wire; inventing one with no business action behind
+    it is exactly what this registry exists to prevent.
+  - A generic rule-toggle for slug-based events (bill-due-reminder,
+    service-request-*, ticket-created, event-updated, visitor-denied) -
+    they stay controlled by the pre-existing role-permission map, shown
+    read-only in the Rules UI rather than half-wired to a second mechanism.
+
+## Canonical notification-config registry + 3 more missing-template bugs found — 2026-10-07
+
+A "final communication architecture" brief asked for one canonical event
+registry + an automated integrity test so a missing template/permission can
+never again go silently undetected (this session already hit that exact bug
+three times: Notice, `bill-due-reminder`, `service-request-*`), plus the
+remaining business events wired, a full Communication Center UI, WhatsApp
+template sync, and unified multi-channel Delivery Logs. Scoped honestly: the
+registry + integrity test (the actual structural fix) and the Delivery Logs
+unification were built for real; the admin UI, WhatsApp template sync, and
+wiring further business domains (Access Pass/Bill/Payment/Facility/Society
+Event/Security beyond what already existed) were **not** — each is its own
+multi-day scope, not a continuation of this fix.
+
+- **`app/Support/NotificationEvents.php`** — the canonical registry: every
+  real, dispatched notification event in the codebase, keyed by a canonical
+  name, each declaring its business group, which of the two existing lookup
+  systems it goes through (`trigger_event` via `DynamicEmailService`, or
+  `slug` via `EmailNotificationService::shouldReceiveEmail`), its
+  template(s), channels, and real dispatch call site. 15 events registered:
+  the 7 `DynamicEmailService` ones, now including `user.password_reset`
+  (confirmed live — `AuthController::reset` really does dispatch
+  `PasswordReset`, contradicting this file's own 2026-10-07 "root-cause"
+  entry below which called it dead; corrected), plus 8 slug-based ones
+  (`bill.due_reminder`, `complaint.created`, `event.updated`,
+  `visitor.denied`, the 4 `service_request.*`). Also documents
+  `knownOrphanTemplateKeys()` (active templates nothing reaches, with the
+  reasoning per row) and `knownDeadEventClasses()` (`BillGenerated`,
+  `PaymentOverdue`, `ReportGenerated` — listeners registered in
+  `EventServiceProvider`, confirmed zero dispatch call sites anywhere).
+- **`tests/Feature/NotificationConfigIntegrityTest.php`** (8 tests) —
+  iterates the registry and asserts: no duplicate keys; every event has an
+  active global template matching its own lookup column; every template
+  declares variables; every slug-based event is reachable by at least one
+  resident role in `shouldReceiveEmail()` (reflection — no public API
+  exists for "would this role get this email", which is itself why this bug
+  kept recurring); no active template is an unexplained orphan; no listener
+  in `EventServiceProvider::$listen` is dead without being documented as
+  such (and the inverse — a documented-dead class must still actually be
+  undispatched). **Running this test immediately found 3 more real bugs**,
+  all the same shape as the already-fixed Notice/bill-reminder ones —
+  confirming the brief's premise that the registry approach surfaces more
+  than ad-hoc patching:
+  - `ticket-created`, `new-event` (slug, used by
+    `EventController::update`'s "event updated" email — not the
+    underscore `event_created` trigger_event row, a different row
+    entirely), and `visitor-denied` each existed **only in this project's
+    dev `database.sqlite`**, inserted by hand at some point with no
+    migration behind them. A fresh install or the MySQL production
+    database has never had any of the three rows, so "complaint
+    submitted", "event updated", and "visitor denied" emails have been
+    silently skipped there since each feature shipped. Fixed with three
+    migrations (`2026_10_07_000007/8/9`) reusing the exact dev-DB content.
+  - `visitor-denied` *and* `visitor-approved` were also missing from
+    `shouldReceiveEmail()`'s resident-role allowlist entirely (added
+    alongside the existing `visitor-entry-created`/`visitor-status-updated`
+    entries for all 4 resident roles).
+- **Delivery Logs are now genuinely multi-channel.** `email_logs` widened
+  (SQLite table rebuild, 382 existing rows verified preserved byte-for-byte,
+  row count checked before the swap) — `email_template_id`/`recipient_email`
+  nullable, `recipient_phone` added. `SmsService::sendDltNotification` now
+  writes a log row (`channel=sms`) alongside the SMS send; the admin
+  `/admin/email-logs` screen shows a channel badge, phone fallback and a
+  channel filter. `DeliveryLogsMultiChannelTest` (4).
+- **`ServiceRequestNotificationTest`** (3) proves the `service-request-*`
+  fix end-to-end, including through the real `POST .../assign` route — not
+  just at `sendByTrigger()`.
+- Full backend regression: **892 tests, 3235 assertions, 0 failures**
+  (up from 877/3082 before this round). Flutter untouched this round
+  (no Dart files edited) — not re-run, no reason to expect a change.
+- **Not attempted this round** (stated honestly, not implied done):
+  Communication Center admin UI (Providers/Rules & Notifications/
+  Templates/Delivery Logs reorganisation with 5 fixed business groups),
+  WhatsApp template friendly-name sync, per-event Email/SMS/WhatsApp/Push
+  ON/OFF toggles with Test buttons, wiring Access Pass/Bill/Payment/
+  Facility Booking/Society Event/Security notifications that don't already
+  exist above. Each is separately scoped, multi-day work.
+
+## Production audit round 4: Service Request lifecycle, Service Provider IDOR, OTP/Guard fixes — 2026-10-07
+
+- **Security fix — real cross-society IDOR:** `ServiceProviderController`
+  authorized edit/update/destroy/quickUpdate/toggleAvailability with
+  `authorize('manage_services')`, a plain role permission with no model
+  attached. Any Admin, in any society, could edit or delete another
+  society's service provider by id. `ServiceProviderPolicy::update()`/
+  `delete()` already had the correct same-society check; the controller
+  never called it. Fixed by routing those five actions through
+  `authorize('update'|'delete', $serviceProvider)`.
+  `ServiceProviderCrossSocietyAccessTest` (6).
+- **Gap closed — Service Request lifecycle.** `service_requests` could be
+  created (`ServiceApiController::requestService`) but never listed,
+  assigned, progressed or completed anywhere, web or mobile. Added:
+  `ServiceRequest` model, a migration adding `assigned_provider_id`,
+  `assigned_by`, `assigned_at`, `started_at`, `completed_at`, `cancelled_at`,
+  `cancellation_reason`; `ServiceController::requests/assignRequest/
+  updateRequestStatus` (web, `resources/views/services/requests.blade.php`);
+  `ServiceApiController::myRequests/cancelRequest` (mobile, list + cancel
+  only — assign/progress stays a web admin action for now). Status flow:
+  pending → assigned → in_progress → completed, or cancelled from any open
+  state. A resident may only cancel their own open request; assign/progress
+  is Admin/Super Admin only (same boundary as `service-providers`, matching
+  the existing "Staff can view services but not manage providers" rule).
+  Email hook added (`EmailNotificationService::sendServiceRequestNotification`)
+  — safely no-ops until an admin creates `service-request-*` templates via
+  Settings; never claims a delivery that did not happen.
+  `ServiceRequestLifecycleTest` (9).
+- **Gap closed — untested Complaints lifecycle/isolation.** No test file had
+  ever covered it. Read the controller: already correctly scoped (no bug
+  found). `ComplaintLifecycleAndIsolationTest` (6) pins the full lifecycle
+  and five isolation boundaries.
+- **Security fix — OTP guessing.** `OtpAuthController::verifyOtp` allowed 5
+  attempts per phone per 15 minutes, a window that resets on its own -
+  roughly 480 guesses/day against one number, non-trivial against a 4-digit
+  code over time. Added a 20-per-day ceiling per phone that failed guesses
+  do not clear. `OtpDailyGuessLimitTest` (2).
+- **Data-consistency bug fixed — web Guard "Waiting" tile.** Counted only
+  today's pending visitors, while the list beneath it and the mobile
+  "Pending Approval" figure counted every pending visitor regardless of
+  day - the tile could read 3 while its own list showed 11.
+  `GuardController::todaysStats()` waiting count now matches both.
+  `GuardWaitingCountConsistencyTest` (2).
+- **Mobile session tokens moved to secure storage.** `flutter_secure_storage`
+  (Keystore/Keychain), replacing a SharedPreferences plaintext file.
+  `api_service.dart` no longer keeps its own duplicate copy of the token key.
+  `storage_service_test.dart` (6). `android:allowBackup="false"` added.
+- **Release build hardened against a local-address footgun.** A release APK
+  could previously be pointed at `127.0.0.1`/a LAN address via
+  `--dart-define=API_BASE_URL=`, and `ServerDiscovery` bypassed the same
+  check. `ApiConfig.resolveBaseUrl()` is now the one place this is decided;
+  a release build never resolves to a local address regardless of what is
+  passed. `api_config_test.dart` (19 incl. `ServerDiscovery` candidates).
+  Verified against a real device: `societyflow.joboapps.com` reached
+  directly with the USB tunnel removed; `127.0.0.1` refused.
+- **Guard document scanner (Smart Visitor) implemented and device-verified**
+  (see the section below this one) - was previously only designed, never
+  built.
+- **Fast2SMS OTP route implemented** against the real `/dev/otp/send`
+  endpoint with the saved `fast2sms_otp_id` (see the section below).
+- Backend regression after all of the above: **835 tests, 2967 assertions,
+  0 failures** (full suite, exit 0).
+- **Audited, not changed:** `FacilityController` already uses a dedicated
+  society-aware authorization method (not the vulnerable pattern above).
+  WhatsApp: confirmed **not implemented anywhere** in the codebase - nothing
+  to configure or test. Email settings: masked-secret handling correct,
+  password never logged.
+- **Declined without product sign-off:** multi-gate, gate-wise guard
+  assignment, patrol/checkpoints, SOS incidents, child exit protection,
+  move-in/out, offline-safe gate operation, an automation rules engine,
+  cross-gate visibility. Each is a new data model and a real UX decision,
+  not a bug fix - building them unilaterally in an autonomous pass is
+  exactly what CLAUDE.md's "do not replace working functionality with a new
+  architecture unnecessarily" warns against.
+## Fast2SMS DLT completion + WhatsApp (Fast2SMS WABA) — 2026-10-07
+
+- **Fast2SMS**: added `fast2sms_entity_id` (DLT compliance record, plain -
+  not sent to the API, Fast2SMS has no such parameter), three per-purpose
+  toggles (`visitor_sms_enabled`, `access_pass_sms_enabled`,
+  `notification_sms_enabled`), and independent "Test OTP"/"Test DLT SMS"
+  buttons (`SmsService::sendOtp()` gained a `$forceRoute` param so a test
+  can exercise either path regardless of the saved Route). New generic
+  `SmsService::sendDltNotification($purpose, ...)`, gated by its toggle -
+  **built and tested, not yet called from any visitor/access-pass/notice
+  event**; the toggles exist but nothing fires them yet.
+- **WhatsApp implemented** (`app/Services/WhatsAppService.php`) against
+  Fast2SMS's own published API reference
+  (docs.fast2sms.com/reference/send{authentication,text}template,
+  sendsessionmessage) - not guessed. Template messages via
+  `POST /dev/whatsapp/{version}/{phone_number_id}/messages`; session
+  (free-text, 24h-window) messages via `POST /dev/whatsapp-session`.
+  Settings tab: enable toggle, API key (encrypted/masked), API version,
+  Phone Number ID, template language, and seven named templates (OTP +
+  six notification purposes). Test button sends a real request against
+  whichever template is configured. **Not wired into OTP login** - the
+  capability exists (`WhatsAppService::sendOtp`) but `OtpAuthController`
+  still only uses SMS, left untouched deliberately.
+- Declined (see the prior round's entry and the chat record): the
+  fifteen-subsystem MyGate-style gate buildout (multi-gate, delivery,
+  household help, vehicle registry, overstay, gate pass, SOS, child-exit
+  protection, patrol, guard comms, utility vehicles, move-in/out). Each
+  needs a real data-model and UX decision, not an autonomous pass.
+- Tests: `WhatsAppSettingsTest` (15), `Fast2SmsDltSeparationTest` (10).
+  Full backend regression: **860 tests, 3050 assertions, 0 failures**.
+  Flutter unaffected by this round (admin-web-only feature): analyze 2
+  pre-existing notices, test 69 passing, unchanged.
+## Root-cause fix: real events were not emailing anyone — 2026-10-07
+
+Reported defect: "Test Email works, but a published Notice email does not
+reach configured users." Verified true, root-caused, fixed with real
+end-to-end test proof (not just code inspection).
+
+- **The dispatch pipeline was already correct.** `NoticeController::store()`
+  fires `NoticePublished`, `EventServiceProvider` maps it to
+  `SendNoticePublishedEmail`, which calls
+  `DynamicEmailService::sendByEvent('notice_published', ...)`. The same
+  pattern already existed, wired, for 10 other events.
+- **Root cause 1:** no *active* `EmailTemplate` row had `trigger_event =
+  'notice_published'` (or any of the other 10 events' keys).
+  `EmailTemplate::getTemplateForEvent()` requires an exact match on that
+  column and silently returns null - `sendByEvent` then logs "No email
+  template configured" and sends nothing. Settings → Test Email never hits
+  this lookup at all (`Mail::raw()`, no template), which is exactly why it
+  "worked" while real notices did not.
+- A near-complete set of templates already existed in
+  `AutoEmailTriggerTemplatesSeeder`, but (a) it is never called from
+  `DatabaseSeeder` - CLAUDE.md's documented default `db:seed` path
+  deliberately excludes email content - and (b) its rows never set
+  `trigger_event`, only `slug`, so even running it would not have fixed the
+  lookup. Fixed with a **migration**, not that seeder: migrations run
+  exactly once in every environment including production, so this does not
+  depend on anyone remembering an extra seed command.
+  `database/migrations/2026_10_07_000002_seed_default_email_templates_for_wired_events.php`
+  seeds one global (`society_id = null`) active template per event, with
+  the correct `trigger_event`, reusing the orphaned seeder's content where
+  the variable set matched. Idempotent - never touches a row that already
+  exists, so a society's own customised template is never overwritten.
+- **Root cause 2 (Notice only):** `SendNoticePublishedEmail`'s recipient
+  resolution could leave `$users` unset and throw on an undefined variable
+  for a `target_audience` array with no overlap in its allowed roles -
+  caught and logged as a quiet failure. Now defaults to an empty collection.
+- **Confirmed by real request → event → listener → Mail::send → EmailLog
+  test**, not by inspection: `NoticePublishedEmailE2ETest` (4) - a
+  published notice reaches Tenant/Owner/Admin, excludes Guard/Staff, a
+  draft sends nothing, and another society's resident never appears in the
+  logs.
+- **Scope, stated honestly:** of the 11 events with this dispatch+listener
+  pattern, only 7 are actually fired anywhere in the codebase
+  (UserCreated, PaymentReceived, NoticePublished, EventCreated,
+  TicketUpdated, TenantOwnerAdded, VisitorApproved) - the template fix
+  unblocks all 7. Four more (`BillGenerated`, `PaymentOverdue`,
+  `PasswordReset`, `ReportGenerated`) have a listener and now a template,
+  but nothing in the codebase ever dispatches them - **not fixed this
+  round**, left as found. `PasswordReset` in particular looks like dead
+  code: the live forgot-password flow goes through a different path,
+  already covered by `AuthSecurityTest`.
+- **Not attempted this round:** the "Communication Center" admin UI
+  (providers/rules/templates/delivery-logs reorganisation), per-event
+  Email/SMS/WhatsApp/Push channel toggles, a central recipient-resolver/
+  rule-resolver/queue framework, WhatsApp template sync, and the P0-P2
+  gate/security feature list (multi-gate, delivery, household help,
+  vehicle registry, overstay, gate pass, SOS, child-exit protection,
+  patrol, utility vehicles, move-in/out). Each is substantial, separately
+  scoped work - see the two prior entries' reasoning, which still applies.
+- Tests: `NoticePublishedEmailE2ETest` (4). Full backend regression: see
+  the run this entry was written alongside.
+## Queued/idempotent notification pipeline + two more real bugs found and fixed — 2026-10-07
+
+Built on the Notice root-cause fix above. Scope: make the 7 already-dispatched
+events (not the full ~35-event/communication-center spec) queued, retried,
+idempotent and after-commit, and investigate the 4 never-dispatched events.
+The full admin "Communication Center" UI, event-channel matrix, and the
+15-feature MyGate gate/security list are still not attempted - see the two
+prior entries' reasoning.
+
+- **`app/Jobs/DispatchEventNotification.php`** - `ShouldQueue` +
+  `ShouldBeUnique` (keyed on a deterministic `notification_key`, e.g.
+  `notice_published:42:owner@example.com`), `tries=3`, `backoff=[10,30,60]`.
+  Checks `email_logs` for an already-`sent` row with the same key before
+  sending (idempotent across retries); a per-recipient send failure (logged
+  as a `failed` row by the existing `DynamicEmailService`) makes the job
+  throw, so the queue retries it - a true `sent` is never retried.
+  `QUEUE_CONNECTION` is still `sync` (not changed - no worker process runs
+  in this environment, and switching without one would silently stop every
+  notification). Under `sync`, `ShouldQueue` jobs still run, just inline;
+  the retry/backoff/afterCommit semantics are real and need no code change
+  the moment a worker environment is configured.
+- All 7 listeners (`SendUserWelcomeEmail`, `SendPaymentConfirmationEmail`,
+  `SendNoticePublishedEmail`, `SendEventCreatedEmail`,
+  `SendTicketUpdatedEmail`, `SendTenantOwnerAddedEmail`,
+  `SendVisitorApprovedEmail`) now `DispatchEventNotification::dispatch(...)
+  ->afterCommit()` instead of calling `DynamicEmailService::sendByEvent()`
+  directly. Their recipient-resolution and variable-building logic is
+  untouched. `ticket_updated`'s key includes the complaint's current
+  status, not just its id, so open→in_progress→resolved→closed still
+  notifies at each step rather than being deduped into one.
+- **`email_logs`** gained `channel`, `notification_key`, `provider_reference`
+  - this table already *was* the delivery log (recipient, status, error,
+    timestamp per attempt); widening it keeps one delivery log instead of
+    a second parallel one. Standard `jobs`/`job_batches`/`failed_jobs`
+    tables were also added, ready for the day `QUEUE_CONNECTION` changes.
+- **Missing-dispatch investigation (the 4 events nothing ever fires):**
+  - `PasswordReset` - dead. The real forgot-password flow uses Laravel's
+    native `Password::sendResetLink()`, never this custom event. Left as
+    found.
+  - `ReportGenerated` - dead. Reports (`ReportController`) are synchronous
+    PDF downloads in the same request; there is no async "your report is
+    ready" use case for it to serve. Left as found.
+  - `BillGenerated` / `PaymentOverdue` - dead as *events*, but investigating
+    them surfaced that the **real** bill-reminder mechanism
+    (`bills:send-reminders`, scheduled daily at 09:00 and 18:00) was
+    **completely broken**, independently of anything above:
+    1. It called `EmailNotificationService::send(...)` - a method that does
+       not exist on that class. Every attempt threw an uncaught `Error`
+       (not `Exception`, so the command's own `catch` never saw it) - no
+       bill reminder has ever sent, for any society, since this command
+       shipped. Fixed: calls `sendByTrigger()`, the method that actually
+       exists, with variables matching the template's own placeholders.
+    2. `shouldReceiveEmail()`'s per-role permission allowlist listed
+       `bill-overdue` for every resident role but never `bill-due-reminder`
+       - the trigger this command actually sends - so no recipient was ever
+       permitted to receive it even after fix #1. Added the missing entry
+       for Owner/Villa Owner/Apartment Owner/Tenant.
+    3. No migration ever created the `bill-due-reminder` `EmailTemplate` row
+       - it only existed in this project's dev database from some earlier,
+       undocumented, non-migration seeding. A fresh install (or any test)
+       had nothing to find. New migration
+       (`2026_10_07_000004_seed_bill_due_reminder_email_template.php`)
+       seeds it, content matching the dev-DB row, not newly invented copy.
+    **Not audited:** `EmailNotificationService`'s other slug-keyed call
+    sites (`welcome-user`, `reset-password`, `new-bill-generated`,
+    `payment-received`, `ticket-*`, `new-notice`, `new-event`,
+    `visitor-*`) may have the same missing-template gap. Flagged, not
+    checked.
+- **Notice is now two independent channels.** `SendNoticePublishedSms` (new,
+  separate listener, not a branch inside the email one - Laravel stops
+  calling an event's remaining listeners if an earlier one throws, so two
+  decoupled listeners is what actually makes "email failing doesn't stop
+  SMS" true, not a shared try/catch) sends via the already-built
+  `SmsService::sendDltNotification('notification', ...)`, gated by the
+  existing `notification_sms_enabled` Settings toggle. Off by default.
+- **Delivery Logs: already existed.** `Admin\EmailLogController` +
+  `/email-logs` (index with stats/filters/pagination, show, retry) was
+  already a complete, routed, society-scoped admin screen - nothing built
+  here. It currently shows email only: making SMS/WhatsApp sends also write
+  to `email_logs` (now that it has a `channel` column) needs `recipient_email`
+  and `email_template_id` to become nullable, which SQLite cannot do without
+  a full table rebuild (CLAUDE.md §5's documented pattern for this). Not
+  attempted this pass - judged too risky to rush against real dev data at
+  the end of an already large change set. SMS sends remain logged via
+  `Log::info`/`Log::warning` with the phone masked, just not in this
+  queryable table yet.
+- Tests: `DispatchEventNotificationTest` (7, calls `handle()` directly -
+  `afterCommit()` jobs never fire inside `RefreshDatabase`'s own
+  test-wrapping transaction, which rolls back rather than truly commits),
+  `NoticePublishedEmailE2ETest` (4, rewritten to assert at the dispatch
+  boundary via `Queue::fake()` for the same reason), `BillReminderCommandTest`
+  (2), `NoticeMultiChannelTest` (3). Full regression: see the run this
+  entry was written alongside.
+## Production APK (royalprime) — BLOCKED, 2026-10-05
+
+- **`https://royalprime.joboapps.com` is not a working API.** `/api/v1/health`
+  and `/` both answer `301` to the same URL, so the redirect never ends (curl
+  stops with error 47 after 5 redirects). Cloudflare terminates TLS
+  (`server: cloudflare`); the pattern fits an origin that forces HTTPS behind
+  Cloudflare "Flexible" SSL. Not confirmed on the server.
+- `https://societyflow.joboapps.com/api/v1/health` answers 200 with
+  `application: societyflow`. It is the current `ApiConfig.prodUrl` and was
+  left unchanged. Switching the release to royalprime waits on the redirect fix.
+- **Not built, installed or tested against a live login.** No live test
+  account is available in this session. Per the release rules, no APK is
+  claimed production-ready.
+- Release-safety fixes made: a release build never uses a local address
+  (`ApiConfig.resolveBaseUrl`, tests in `test/api_config_test.dart`); discovery
+  goes through the same rule; logged request lines carry only the path, never
+  the query string; `android:allowBackup="false"` keeps stored sessions out of
+  Android backups (manifest change not yet compiled).
+- Still open: the session token sits in SharedPreferences inside app storage.
+  `flutter_secure_storage` is the fix, but it adds a dependency and needs approval.
+
+## Guard document scanner (Smart Visitor) — 2026-10-05
+
+The feature was **not implemented before this session** — a search for
+`document_scan`, `mlkit`, `ocr`, `aadhaar` or `smart_visitor` across
+`societyflowmob/lib` and `test` returned zero files. Earlier sessions had
+designed it in `docs/` only. It is now built:
+
+- **Guard UI location:** Visitors tab → `Add Visitor` FAB → the
+  `_AddVisitorSheet` in `lib/features/visitors/screens/visitors_screen.dart`.
+  It now opens with **`Scan ID / Document`** and **`Enter Manually`**
+  (staff/guard only — a resident inviting their own guest sees neither).
+- **Scanner:** `google_mlkit_document_scanner` (Play-services document
+  scanner activity: edge detection, crop, retake) in
+  `lib/core/services/document_scan_service.dart`. **Android only** — there is
+  no iOS implementation, so `isSupported` gates every call and the UI falls
+  through to manual entry. This is separate from `mobile_scanner`, which is
+  untouched and still reads access-pass QR codes.
+- **OCR:** `google_mlkit_text_recognition`, on-device, over the captured JPEG.
+- **Review before save:** `document_scan_screen.dart` — document type
+  (Aadhaar / Driving Licence / PAN / Passport / Other), the captured page,
+  editable fields, and `Continue` / `Retake` / `Enter Manually`. When OCR
+  reads nothing it says so and offers empty fields; it never invents data.
+- **Aadhaar:** only the last four digits are ever kept
+  (`XXXX XXXX 1234`). Redacted at parse time in `id_document.dart`, again if
+  the guard types a full number, and **again server-side** in
+  `app/Support/IdProof.php` — a client is not a security boundary. Raw OCR
+  text is never a model field, never logged, never uploaded. The captured
+  image stays in the app cache and is deleted when the flow ends.
+- **Stored fields:** `visitors.visitor_id_proof` and `visitor_id_number`
+  (both pre-existing columns). The address read off a card is shown to the
+  guard for their check and deliberately **not** transmitted — a visitor
+  record has no address column.
+- **Duplicate prevention:** `POST /api/v1/visitors/lookup (JSON body `phone`)` (gate staff
+  only, society-scoped, never returns a pass token) → the sheet shows
+  "Existing visitor found" with `Use Existing` / `Update Details` /
+  `Check In`.
+- **Property context:** the guard never picks a society, building or owner;
+  only the visit destination, which the backend re-validates against the
+  guard's own society.
+- Tests: `test/id_document_parser_test.dart` (17, incl. the Aadhaar-redaction
+  and no-invented-data cases) and `tests/Feature/VisitorIdProofTest.php` (14).
+- **Verified on a real device** (Realme RMX3660, Android 15 / SDK 35, Google
+  Play services present; release APK built with
+  `--dart-define=API_BASE_URL=http://127.0.0.1:8000/api/v1` over
+  `adb reverse`, guard account society 6):
+  Guard Panel → Visitors → `+ New Entry` → **`Scan ID / Document`** →
+  document-type chips → `Open Scanner` → **the real Play-services scanner
+  opened with a live camera UI** → captured a page → crop editor (`Apply`) →
+  `Next` → **back into the app's `Check the details` review screen** with
+  `Continue` / `Retake` / `Enter Manually`. OCR ran and, on a non-ID target,
+  said so: "Nothing could be read off this document." Typing a known number
+  showed **"Existing visitor found — Suraj Suman • guest • last visited 158"**
+  with `Use Existing` / `Update Details` / `Check In`, and `Check In` moved
+  visitor 44 to `entry_status=entered`, `actual_entry_time=13:41:20`.
+- **Not verified on-device:** a successful field extraction from a genuine
+  Aadhaar/DL/PAN card — no physical ID was available to photograph, so only
+  the "OCR read nothing" path was exercised live. The extraction and
+  redaction rules are covered by the 17 unit tests instead.
+- `flutter build apk --release` succeeds (102.1MB, up from 75.6MB: ML Kit's
+  bundled OCR model). Pre-existing Gradle/AGP/Kotlin deprecation warnings
+  are unchanged.
+## SMS (Fast2SMS) and Guard containment — 2026-10-05
+
+- **Fast2SMS OTP route** now calls `POST https://www.fast2sms.com/dev/otp/send`
+  with `mobile`, `otp_id`, `otp`, `otp_expiry` and the saved key in the
+  `authorization` header. The approved OTP ID is the plain setting
+  `fast2sms_otp_id` (not encrypted, shown as "OTP ID" on the form). Its
+  default in the test helper is `6fd92db0ae`.
+- **Fast2SMS DLT route** is unchanged in behaviour and keeps its own request
+  (`/dev/bulkV2`, `route=dlt`, `sender_id`, `message`). It never uses the OTP ID.
+- The API key save path is unchanged: encrypted at rest, masked, preserved on
+  re-save. Provider errors are sanitised, and logs carry no key, header, OTP
+  or full phone.
+- **Not verified live.** No real Fast2SMS call has been made from this
+  environment: a live Test SMS needs a mobile number to send to, and the
+  key and OTP ID need confirming on the provider side.
+- Guard containment: `RestrictGuardAccess` returns 403 for Guard on
+  `/notices*`. `NoticeIsolationTest` now asserts that, rather than 200.
+- Regression: `tests/Feature/Fast2SmsSettingsTest.php` (23),
+  `NoticeIsolationTest`, `GuardRoleContainmentTest`, `SettingSecretMaskingTest` green.
 
 ## Branch and commit
 
@@ -35,7 +1082,71 @@ Update this after every major task. Keep it short; link, don't paste.
 
 ## Flutter
 
-- `flutter analyze`: 4 informational (intentional deprecations); `test` 21/21
+- `flutter analyze`: 2 informational (intentional deprecations); `test` 24/24
+- **Android dev API over USB works end to end** (2026-10-05). Run
+  [`scripts/run_android_usb.ps1`](../scripts/run_android_usb.ps1): it checks
+  adb, finds the device, sets `adb reverse tcp:8000 tcp:8000`, starts
+  `php artisan serve --host=127.0.0.1 --port=8000` if nothing healthy is on
+  the port, probes `/api/v1/health` from the phone, then launches the app
+  with `--dart-define=API_BASE_URL=http://127.0.0.1:8000/api/v1`.
+  The PC's LAN IP is never used, so no file is edited per machine.
+  Login verified on a real device as `admin@societyflow.com`
+  (Urban Heights) — dashboard, notices and complaints all loaded.
+  `START-DEV.bat` / `start-server.ps1` still rewrite `devFallbackUrl` with
+  the LAN IP; the USB script deliberately bypasses that path.
+- Apache on `:80` serves the **web** app only. The **mobile API** is served
+  by `artisan serve` on `:8000`; the phone reaches it through the USB
+  tunnel, not over WiFi.
+- **Guard QR scan verified on the real device** (2026-10-05): guard login →
+  Guard Panel → SCAN QR → camera permission → scanner → token submitted →
+  `ENTRY ALLOWED` → visitor row created → repeat scan `ALREADY INSIDE`.
+  Optically scanning a QR off a screen is the one step that needs a human
+  holding the phone; everything either side of the lens is covered.
+
+## Gate / access-pass integrity
+
+- **Duplicate check-ins are now impossible by construction.** `verify()`
+  and `checkIn()` used to be two unsynchronised statements in both gates,
+  so a double-tap or retry could insert two `entered` rows for one pass.
+  `AccessPassService::verifyAndCheckIn()` / `checkInGuest()` now hold the
+  pass (or guest) row with `lockForUpdate()` inside a transaction and
+  re-read the open-visit state under that lock. Both
+  `GuardController::scan` and `AccessPassApiController::scan` call them.
+  Regression: `tests/Feature/AccessPassDuplicateEntryTest.php`.
+- **Passes can now be edited and extended** (web + API + Flutter), which
+  did not exist before: `AccessPassController` had only
+  index/create/store/show/block/revoke. All three clients go through
+  `app/Services/AccessPassEditService.php`, so the rules exist once.
+  The **token is never reissued** on an edit or extend - a printed QR keeps
+  working and the gate honours the new window on the very next scan.
+  A **revoked pass is terminal**: every write path refuses it and the UI
+  offers a new pass instead. An **expired** pass *is* editable - repairing
+  it is the point. Changes are audited via `ActivityLog::recordFor()`
+  (who/when/old/new, never the token).
+  Regression: `tests/Feature/AccessPassEditExtendTest.php`,
+  `AccessPassViewRenderTest.php`.
+- **Property scoping / IDOR verified, not just reviewed.**
+  `tests/Feature/AccessPassPropertyScopeTest.php` (13 tests) changes ids in
+  URLs and request bodies across web *and* API and asserts the server
+  refuses — list scoping, read, edit, extend, block, unblock, revoke,
+  create-with-forged-`flat_id`, cross-society, and society-wide passes a
+  resident must not manage. The existing implementation was already
+  correct; it is now pinned.
+- **Fixed: Super Admin saw an empty pass list.** `getSocietyId()` returns
+  null for a Super Admin, so `bySociety(null)` matched `society_id IS NULL`
+  — which no pass is. Scoping now exempts Super Admin explicitly
+  (CLAUDE.md §3) on both the web and API list. Fails-closed bug, not a leak.
+- **Fixed: saved provider credentials were rendered into the settings
+  page.** They are encrypted at rest, but `SettingsController::index`
+  decrypted them into `value="..."`; `type="password"` hides a value on
+  screen only, and `instamojo_api_key` was `type="text"`. `app/Support/SettingSecrets.php`
+  now masks them, and posting the mask back means "unchanged" so pressing
+  Save without edits no longer overwrites live gateway secrets with
+  asterisks. Regression: `tests/Feature/SettingsSecretMaskingTest.php`.
+- The gate dashboard's **Inside counter** was bounded to today by
+  `expected_entry_time` while the *Visitors Inside list* was not, so an
+  overnight visitor was listed but not counted. The counter now matches
+  the list. Regression: `tests/Feature/GuardDashboardCountersTest.php`.
 - Release **APK 52.3 MB** / **AAB 42.3 MB** last built 2026-09-09; builds are
   **currently blocked** by an incomplete Android JDK (P0-9)
 - **Not publishable**: `com.example.*` applicationId, debug-signed (P0-7, P0-8)
@@ -1417,3 +2528,65 @@ owner/tenant, draft/pending excluded, future-dated excluded, cross-society
 excluded, API field shape matches the Flutter model, the expired-but-
 published case proven against both endpoints and cross-checked against the
 rendered web page). Full suite re-run clean afterward (see below).
+
+### Earlier gate (2026-10-10, superseded by "Master finalization" below)
+
+| Check | Result |
+|---|---|
+| Laravel, SQLite, 8 shards, 144 classes | **1391 tests, 5914 assertions, 0 failures, 0 errors, 4 skipped** (engine-specific by design) |
+| Laravel, MariaDB 10.4.32 (throwaway, port 3307), 6 shards | **1391 tests, 5912 assertions, 0 failures, 0 errors, 2 skipped** (engine-specific) |
+| Reconciled with `phpunit --list-tests` | 1391 = 1391 on both engines |
+| Flutter | `flutter test` 162 passed; `flutter analyze` 2 info (known `value:` deprecations); `flutter build apk --debug` compiles |
+| Browser (Playwright-core + system Chrome, isolated copy DB, mail=log) | 16/16 checks |
+| PHP lint of every changed file | 0 failures |
+
+The SQLite run preceded one MySQL-only migration `down()` fix; the full MariaDB suite was re-run after it. A first MariaDB run had exactly that one error.
+
+**Release status: READY FOR STAGING, NOT READY FOR PRODUCTION.** Blockers: operator decisions on the Piyus repair and Suraj's link; real-device Android run; real email/WhatsApp/payment delivery (not authorised/no keys); MariaDB on the original XAMPP data directory (deliberately not touched).
+
+## Master finalization — test-data reset, Royal Eden seeding, notification fixes (2026-10-10, evening)
+
+Full record of what was modified, with ids, row counts, backups and rollback values:
+**[TEST_DATA_2026-10-10.md](TEST_DATA_2026-10-10.md)**. Target: the local dev SQLite DB only.
+
+- **Data:** Piyus residency row closed; Suraj Suman linked to villa 160 (flat 123); one mismatched user/owner photo aligned; four junk "T" societies (#8-#11) and their 8 dependent rows removed; Royal Eden demo dataset seeded (idempotent seeder); migrations 000001-000004 applied. Urban Heights (#1) and the other named societies were **not** deleted (no conflicts found; they hold real-looking accounts).
+- **Safety:** this DB stores real provider credentials, and `MAIL_MAILER=log` does not stop a real send (per-society SMTP overrides it). One earlier browser run attempted a welcome email to an `example.test` address via Royal Eden's stored SMTP login; it failed authentication, nothing was delivered. Fixed with `EXTERNAL_MESSAGING_ENABLED` (see CLAUDE.md §7). **Rotate the stored credentials.**
+- **Defects found and fixed this round:** tenant rent page/pay/receipt and mobile complaints used the stale legacy residency (wrong unit shown/payable); web booking form notified nobody; events announced when cancelled and re-sent "new event" on every save; `/my/bookings` printed raw datetimes; demo document with an invalid category was hidden from Society Info; two broken migration rollbacks (earlier).
+- **Final gate, latest code:**
+
+| Check | Result |
+|---|---|
+| Laravel, SQLite, 8 shards, 149 classes | **PASS** 1445 tests / 6193 assertions, 0 failures, 4 skipped (engine-specific) |
+| Laravel, MariaDB 10.4.32 (throwaway, :3307), 6 shards | **PASS** 1445 tests / 6191 assertions, 0 failures, 2 skipped (engine-specific) |
+| `phpunit --list-tests` | 1445 = 1445 on both engines |
+| Flutter | **PASS** `flutter test` 162; `flutter analyze` 2 info (known); no Flutter file changed this round |
+| Browser (real Chrome, isolated copy DB, credentials blanked, kill switch on) | **PASS** 39/39, run twice |
+| Android debug APK | compiled earlier today; Flutter source unchanged since. **Device run: NOT TESTED** (no device/emulator) |
+| Real email / SMS / WhatsApp / payment delivery | **NOT TESTED** by design |
+| Original XAMPP MariaDB data dir | untouched |
+
+**Release status: READY FOR STAGING, NOT READY FOR PRODUCTION.** Blockers: rotate the credentials in this DB; real-device Android run; real delivery checks with approved recipients; MariaDB on the original XAMPP data dir; operator decisions in TODO (P2-31, P2-32).
+
+## Credential security, booking conflicts, event WhatsApp (2026-10-10, night)
+
+- **Kill switch verified and hardened.** `EXTERNAL_MESSAGING_ENABLED=false` now also cancels any outgoing mail whose transport is not `log`/`array` at `MessageSending` (so a society's SMTP override, or any future path that sets its own mailer, cannot send); the test-email buttons say "Not sent" instead of claiming success; `phpunit.xml` runs the whole suite with it off. All mail paths were enumerated: they funnel through `applyMailConfiguration` (guarded) or the default mailer. SMS/Fast2SMS/WhatsApp have exactly three curl sites, all guarded.
+- **Credentials: NOT ROTATED (BLOCKED on provider dashboards).** All 10 stored secrets are encrypted; none plaintext; `.env` is untracked. No stored secret value appears in the application log. The society-1 Fast2SMS key is duplicated in `.env`; WhatsApp runs through Fast2SMS so SMS and WhatsApp share one key by design. Checklist + baseline fingerprints: [CREDENTIAL_ROTATION.md](CREDENTIAL_ROTATION.md); verify later with `php artisan credentials:audit` (read-only, never prints a secret). Scratch DB copies holding credentials were deleted; the 7 backup snapshots still contain the old encrypted values.
+- **Booking conflicts.** Dev bookings 23/30 (and 22/28) are February pending requests overlapping approved ones, filed before create/edit conflict checks existed. They are kept as history. The *approval* step had no check at all: web and API now refuse to approve or reopen a booking onto a held slot (`FacilityBookingService::transitionConflict`).
+- **Event WhatsApp** is wired through the existing `WhatsAppPurposes` registry (new `event` purpose), sent only when a manager has attached an approved template and WhatsApp is on. **Event SMS was deliberately not implemented** (generic DLT template + existing toggles would start texting owners about every event). Live delivery NOT TESTED.
+- **Test-data state re-verified** against the live dev DB (30 checks, ids/counts only): Piyus -> villa 159 only, villa 160 -> Suraj, #8-#11 absent, other societies' row counts identical to the original inventory, no duplicate identities, orphans, invalid categories or cross-society links.
+- **A flaky test found and fixed:** `SocietyDocumentTest` listed every file on a fake disk whose directory is shared by all PHPUnit processes, so sharded runs could see another shard's file. Scoped to its own society folder.
+
+### Final gate (latest code)
+
+| Check | Result |
+|---|---|
+| Laravel, SQLite, 8 shards | **PASS** 1473 tests / 6317 assertions, 0 failures, 4 skipped (engine-specific) |
+| Laravel, MariaDB 10.4.32 (throwaway :3307), 6 shards | **PASS** 1473 tests / 6315 assertions, 0 failures, 2 skipped (engine-specific) |
+| `phpunit --list-tests` | 1473 = 1473 on both engines |
+| Flutter | **PASS** 162 tests; analyze 2 info; no Flutter file changed this session |
+| Android debug APK | not rebuilt (no Flutter change since the last successful build). **Device run: NOT TESTED** |
+| Real email / SMS / WhatsApp delivery | **NOT TESTED** (no rotated credentials, no approved recipients) |
+| Original XAMPP MariaDB data dir | untouched |
+
+**Release status: READY FOR STAGING, NOT READY FOR PRODUCTION.** Critical blockers: credential rotation (P1-89/P2-33), real-device Android run, delivery checks with approved recipients, MariaDB on the original XAMPP data dir.
+

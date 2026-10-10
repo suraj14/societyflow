@@ -48,7 +48,11 @@ residents. They are the things this codebase cannot do for itself.
 - [ ] `CORS_ALLOWED_ORIGINS` set to the real origins. It defaults to `*`.
 - [ ] `DB_CONNECTION=mysql` with production credentials.
 - [ ] `QUEUE_CONNECTION` set to a real driver and a worker running.
-      It is `sync`, so every email and push send blocks the HTTP response.
+      It is `sync`, so every email/SMS/WhatsApp send blocks the HTTP response.
+      `config/queue.php` must exist (it was missing until 2026-10-08, which
+      made every queued email silently vanish into `NullQueue`); verify with
+      `php artisan tinker --execute="echo get_class(app('queue')->connection());"`
+      - it must not print `NullQueue`.
       Worker (keep alive with systemd/supervisor):
 
       ```bash
@@ -130,7 +134,10 @@ Settings → Time Zone).
       "All invariants hold."
 - [ ] Confirm `storage/` and `bootstrap/cache/` are writable and that
       `storage/app/private/` is **not** web-reachable (Firebase
-      credentials live there).
+      credentials live there). The same applies to
+      `storage/app/society-documents/` (society rules PDFs, served only
+      through the authorising `/society-rules/{id}/file` routes) - include it
+      in backups.
 
 ## Known gaps at time of writing
 
@@ -147,7 +154,22 @@ work and are not closed by it.
   the Flutter app has no `firebase_messaging` dependency and
   `AppFeatures.enablePushNotifications` is `false`. A guard registering a
   visitor notifies nobody on mobile — the resident must open the app to
-  see a pending approval. Web Push (VAPID) is the only working channel.
+  see a pending approval.
+- **Web Push (VAPID) is not actually working, found during the 2026-10-07
+  certification pass — this line previously (incorrectly) called it "the
+  only working channel".** `PushNotificationService::computeECDH()` is a
+  placeholder (`hash('sha256', $privateKey . $publicKey, true)`), not real
+  elliptic-curve Diffie-Hellman key agreement — the AES-128-GCM key it
+  derives is wrong, so a subscribed browser can never decrypt the payload,
+  regardless of how correctly VAPID keys are configured. No test covers
+  this path and no `minishlink/web-push`-equivalent dependency is
+  installed. Not fixed this round: a correct implementation (real
+  `openssl_pkey_derive()` ECDH + RFC 8291 HKDF + the spec's padding
+  delimiter byte) can only be proven correct against a real subscribed
+  browser receiving and decrypting a real notification - no browser
+  automation was available to verify a blind rewrite. Recommended fix:
+  install `minishlink/web-push` (a maintained, spec-correct library)
+  rather than hand-rolling the crypto again.
 - **Ownership resolution is partly heuristic.** `flats.owner_id` is unset
   on most rows (108 of 121 in development), so `UserFlatResolver` falls
   back to matching the owner record's recorded building/flat or villa

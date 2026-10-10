@@ -129,6 +129,7 @@ Regression suites: `tests/Feature/WebTenantIsolationTest.php`,
 - Don't weaken `VerifyCsrfToken` (the `tokensMatch` override was removed deliberately).
 - CORS origins come from `CORS_ALLOWED_ORIGINS`; default `*` is for local dev only.
 - Push: FCM **v1** via `FirebaseService` only. The legacy `fcm/send` endpoint is dead.
+- **Never seed, QA, or browser-test against a DB with real provider credentials without EXTERNAL_MESSAGING_ENABLED=false.** Per-society SMTP/SMS/WhatsApp settings are stored in system_settings, and the mail layer applies them over MAIL_MAILER at send time - MAIL_MAILER=log alone does not stop a real send. The flag (config/messaging.php) forces mail to log and suppresses SMS/WhatsApp calls; RoyalEdenDemoSeeder refuses to run without it. Test copies should also blank credentials.
 
 ## 8. Testing requirements
 
@@ -150,6 +151,11 @@ cd societyflowmob && flutter test && flutter analyze
   are MySQL-only; `"sent"` is an identifier in MySQL. Use bound params and
   driver checks in raw SQL.
 - Do not edit a test to make it pass. Fix the app, or explain why the test is wrong.
+- `Bus::fake()`/`Event::fake()` only prove a dispatch. Every notification
+  also needs a test that runs the real job and asserts a `sent` `EmailLog`
+  row — faked tests hid a missing `config/queue.php` (NullQueue dropped every
+  email) and `EmailEvent` gaps. See `QueueConfigurationTest`,
+  `EmailEventWhitelistTest`.
 
 ## 9. Performance requirements
 
