@@ -377,8 +377,15 @@ Route::middleware(['auth'])->group(function () {
 // Settings Routes (Super Admin & Admin - Unified) - RESTRICTED FOR STAFF
 Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(function () {
     Route::get('settings', [App\Http\Controllers\SettingsController::class, 'index'])->name('settings.index');
-    // One catalogue of SMS / WhatsApp / Email templates (links to the Settings and Email Templates pages to act).
+    // Message Templates: SMS | WhatsApp | Email tabs. SMS templates are created and edited here; WhatsApp ones come from
+    // Fast2SMS; email templates keep their own editor (linked from the Email tab).
     Route::get('message-templates', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'index'])->name('admin.message-templates.index');
+    Route::get('message-templates/sms/create', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'createSms'])->name('admin.message-templates.sms.create');
+    Route::post('message-templates/sms', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'storeSms'])->name('admin.message-templates.sms.store');
+    Route::get('message-templates/sms/{smsTemplate}/edit', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'editSms'])->name('admin.message-templates.sms.edit');
+    Route::put('message-templates/sms/{smsTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'updateSms'])->name('admin.message-templates.sms.update');
+    Route::post('message-templates/sms/{smsTemplate}/toggle', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'toggleSms'])->name('admin.message-templates.sms.toggle');
+    Route::delete('message-templates/sms/{smsTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'destroySms'])->name('admin.message-templates.sms.destroy');
     Route::post('settings/society', [App\Http\Controllers\SettingsController::class, 'updateSociety'])->name('settings.society.update');
     Route::post('settings/app', [App\Http\Controllers\SettingsController::class, 'updateApp'])->name('settings.app.update');
     Route::post('settings/language', [App\Http\Controllers\SettingsController::class, 'updateLanguage'])->name('settings.language.update');

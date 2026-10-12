@@ -1,10 +1,8 @@
-{{-- WhatsApp templates: what is sent for which notification, and the approved catalog. Used on the Message Templates page; nothing here is duplicated on Settings -> WhatsApp. --}}
+{{-- Message Templates -> WhatsApp. The templates come from Fast2SMS (Refresh): their wording is fixed by the provider's
+     approval, so you choose which approved template each notification uses - you do not edit its text. --}}
 @php
     $sfWa = $settings['whatsapp'] ?? [];
     $sfWaSociety = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
-    $sfWaStatus = \App\Support\ChannelStatus::get('whatsapp', $sfWaSociety);
-    $sfWaHasKey = !empty($sfWa['whatsapp_api_key']);
-    $sfWaConfigured = $sfWaHasKey && !empty($sfWa['whatsapp_phone_number_id']);
     $sfWaTemplates = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->orderByRaw("CASE WHEN upper(status) = 'APPROVED' THEN 0 ELSE 1 END")->orderBy('name')->get();
     $sfWaPurposes = \App\Support\WhatsAppPurposes::all();
     $sfWaByName = $sfWaTemplates->keyBy('name');
@@ -25,15 +23,22 @@
 @endphp
 
 <div class="space-y-6" x-data="sfWhatsApp(@js($sfJsTemplates), @js($sfJsPurposes))">
-    <div class="flex justify-end">
-        <button type="button" @click="call(@js(route('settings.whatsapp.sync')))" :disabled="busy" class="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"><i class="fas fa-rotate mr-1"></i> Refresh from Fast2SMS</button>
+    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+        <p class="flex-1 text-sm text-gray-600">Approved templates are read from your Fast2SMS WhatsApp account. Press Refresh after you add or change one there.</p>
+        <button type="button" @click="call(@js(route('settings.whatsapp.sync')))" :disabled="busy" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"><i class="fas fa-rotate text-xs"></i> Refresh from Fast2SMS</button>
     </div>
     <div x-show="msg" x-cloak class="rounded-xl px-4 py-3 text-sm" role="status" :class="skipped ? 'bg-blue-50 text-blue-900' : (ok ? 'bg-green-50 text-green-900' : 'bg-red-50 text-red-900')">
-        <p x-text="(skipped ? '' : (ok ? '\u2713 ' : '\u2715 ')) + msg"></p>
-        <template x-if="details"><details class="mt-1 text-xs"><summary class="cursor-pointer">View technical details</summary><p class="font-mono break-words mt-1" x-text="details"></p></details></template>
+        <p x-text="(skipped ? '' : (ok ? '✓ ' : '✕ ')) + msg"></p>
+        <template x-if="details"><p class="font-mono text-xs break-words mt-1" x-text="details"></p></template>
     </div>
 
-    {{-- What is sent on WhatsApp --}}
+    @if ($unmappedWhatsApp)
+        <p class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900" role="status">
+            <i class="fas fa-triangle-exclamation mr-1"></i> No WhatsApp template is chosen for: <strong>{{ implode(', ', $unmappedWhatsApp) }}</strong>. Those notifications are not sent on WhatsApp.
+        </p>
+    @endif
+
+    {{-- Which template each notification uses --}}
     <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
         <div class="px-5 sm:px-6 py-4 border-b border-gray-100">
             <h3 class="font-semibold text-gray-900">Notifications on WhatsApp</h3>
@@ -71,7 +76,7 @@
     <div x-show="panel" x-cloak class="bg-white rounded-2xl border-2 border-green-300 p-5 sm:p-6 space-y-4" x-ref="panel">
         <div class="flex items-center justify-between">
             <h3 class="font-semibold text-gray-900">Use a template</h3>
-            <button type="button" @click="panel = false" class="text-gray-400 hover:text-gray-600"><i class="fas fa-xmark"></i></button>
+            <button type="button" @click="panel = false" class="text-gray-400 hover:text-gray-600" aria-label="Close"><i class="fas fa-xmark"></i></button>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -110,42 +115,46 @@
         </div>
     </div>
 
-    {{-- Approved templates --}}
-    <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        <div class="px-5 sm:px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h3 class="font-semibold text-gray-900">Approved templates</h3>
-            <span class="text-xs text-gray-500">{{ $sfWaTemplates->count() }} synced</span>
+    {{-- The templates, as cards --}}
+    @if ($sfWaTemplates->isEmpty())
+        <div class="bg-white rounded-2xl border border-gray-200 px-6 py-12 text-center">
+            <p class="text-gray-600">No WhatsApp templates yet.</p>
+            <p class="text-sm text-gray-500 mt-1">Save your API key and Phone Number ID in <a href="{{ route('settings.index', ['tab' => 'whatsapp']) }}" class="underline">WhatsApp settings</a>, then press Refresh from Fast2SMS.</p>
         </div>
-        @if ($sfWaTemplates->isEmpty())
-            <p class="px-6 py-8 text-sm text-gray-500 text-center">No templates yet. Press "Refresh from Fast2SMS" to fetch your approved templates.</p>
-        @else
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead class="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
-                        <tr><th class="px-5 py-2.5">Template</th><th class="px-3 py-2.5">Language</th><th class="px-3 py-2.5">Status</th><th class="px-3 py-2.5">Category</th><th class="px-3 py-2.5">Variables</th><th class="px-3 py-2.5">Used for</th><th class="px-5 py-2.5"></th></tr>
-                    </thead>
-                    <tbody class="divide-y divide-gray-100">
-                        @foreach ($sfWaTemplates as $t)
-                            <tr class="{{ $t->isApproved() ? '' : 'text-gray-400' }}">
-                                <td class="px-5 py-2.5 font-medium {{ $t->isApproved() ? 'text-gray-900' : '' }}" title="{{ \Illuminate\Support\Str::limit($t->body_text, 200) }}">{{ $t->displayName() }}</td>
-                                <td class="px-3 py-2.5">{{ $t->language }}</td>
-                                <td class="px-3 py-2.5">
-                                    <span class="px-2 py-0.5 rounded-full text-xs font-semibold {{ $t->isApproved() ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500' }}">{{ ucfirst(strtolower($t->status)) }}</span>
-                                </td>
-                                <td class="px-3 py-2.5">{{ ucfirst(strtolower((string) $t->category)) }}</td>
-                                <td class="px-3 py-2.5">{{ $t->var_count }}</td>
-                                <td class="px-3 py-2.5 text-xs">{{ implode(', ', $sfUsedFor[$t->id] ?? []) ?: '-' }}</td>
-                                <td class="px-5 py-2.5 text-right">
-                                    @if ($t->isApproved())
-                                        <button type="button" @click="open(null, {{ $t->id }})" class="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold">Use</button>
-                                    @endif
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-        @endif
-    </div>
+    @else
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="whatsapp-templates">
+            @foreach ($sfWaTemplates as $t)
+                <article class="bg-white rounded-2xl border border-gray-200 p-5 flex flex-col gap-3 {{ $t->isApproved() ? '' : 'opacity-75' }}" data-template-id="{{ $t->id }}">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <h3 class="font-semibold text-gray-900 break-words">{{ $t->displayName() }}</h3>
+                            <div class="mt-1.5 flex flex-wrap gap-1.5 text-xs font-semibold">
+                                <span class="px-2 py-0.5 rounded-full {{ $t->isApproved() ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500' }}">{{ ucfirst(strtolower((string) $t->status)) }}</span>
+                                @if ($t->message_id)
+                                    <span class="px-2 py-0.5 rounded-full bg-green-50 text-green-700">WA: {{ $t->message_id }}</span>
+                                @else
+                                    <span class="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800" title="Sending needs the Fast2SMS message ID. Refresh to fetch it.">No message ID - refresh</span>
+                                @endif
+                                @if ($t->language)<span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{{ $t->language }}</span>@endif
+                                @if ($t->category)<span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{{ ucfirst(strtolower((string) $t->category)) }}</span>@endif
+                                <span class="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700" title="Read from your Fast2SMS account">From Fast2SMS</span>
+                            </div>
+                        </div>
+                        @if ($t->isApproved())
+                            <button type="button" @click="open(null, {{ $t->id }})" class="shrink-0 px-3 py-1.5 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700">Use</button>
+                        @endif
+                    </div>
 
+                    <p class="text-sm text-gray-800 bg-gray-50 rounded-xl px-3 py-2.5 whitespace-pre-line break-words">{{ $t->body_text ?: '(no body text)' }}</p>
+
+                    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                        <span>{{ $t->var_count }} {{ \Illuminate\Support\Str::plural('variable', $t->var_count) }}</span>
+                        <span>Used for: <strong class="text-gray-700">{{ implode(', ', $sfUsedFor[$t->id] ?? []) ?: 'nothing yet' }}</strong></span>
+                    </div>
+                </article>
+            @endforeach
+        </div>
+    @endif
 </div>
+
+@include('admin.message-templates.partials.whatsapp-js')

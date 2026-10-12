@@ -125,28 +125,34 @@ class Fast2SmsService
 
     /**
      * Fill a template's {{name}} / {{1}} placeholders, in the order they appear, from a named or listed set of values.
-     * Returns the rendered text and the ordered variable list (what goes into variables_values).
+     * Returns the rendered text, the ordered variable list (what goes into variables_values) and the names that had no
+     * value - a message with a missing value must never be sent with the placeholder (or a blank) in its place.
      *
      * @param array<string|int,string> $values
-     * @return array{text: string, variables: list<string>}
+     * @return array{text: string, variables: list<string>, missing: list<string>}
      */
     public static function render(string $body, array $values): array
     {
         $variables = [];
+        $missing = [];
         $position = 0;
-        $text = preg_replace_callback('/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/', function ($m) use ($values, &$variables, &$position) {
+        $text = preg_replace_callback('/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/', function ($m) use ($values, &$variables, &$missing, &$position) {
             $name = $m[1];
             // {{1}}, {{2}}: position in a list of values; {{name}}: the named value, else the next listed one.
             $value = ctype_digit($name)
                 ? ($values[(int) $name - 1] ?? '')
                 : ($values[$name] ?? ($values[$position] ?? ''));
+            $value = trim((string) $value);
+            if ($value === '') {
+                $missing[] = $name;
+            }
             $position++;
-            $variables[] = (string) $value;
+            $variables[] = $value;
 
-            return (string) $value;
+            return $value;
         }, $body) ?? $body;
 
-        return ['text' => $text, 'variables' => $variables];
+        return ['text' => $text, 'variables' => $variables, 'missing' => array_values(array_unique($missing))];
     }
 
     // ── Logging (key, content and recipients never reach the log) ───────────

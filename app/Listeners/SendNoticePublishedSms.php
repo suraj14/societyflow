@@ -40,13 +40,18 @@ class SendNoticePublishedSms
                 return;
             }
 
-            // One DLT template, one variable slot (see SmsService::sendDltNotification) -
-            // the title is what fits; the body itself is what the approved
-            // template already says.
+            // A Message Templates -> SMS template for notices is filled from the named values below (see
+            // App\Support\TemplateVariables). Without one, the legacy single DLT slot takes the title (see
+            // SmsService::sendDltNotification) - the body itself is what the approved template already says.
             $message = \Illuminate\Support\Str::limit($notice->title ?? 'New notice published', 60, '');
+            $societyName = (string) ($notice->society?->name ?? '');
 
             foreach ($users as $user) {
-                SmsService::sendDltNotification('notification', $user->phone, $message, $societyId);
+                SmsService::sendDltNotification('notification', $user->phone, $message, $societyId, false, 'notice', [
+                    'resident_name' => (string) $user->name,
+                    'notice_title'  => (string) ($notice->title ?? ''),
+                    'society_name'  => $societyName,
+                ]);
             }
         } catch (\Throwable $e) {
             Log::error('Failed to send notice published SMS', [

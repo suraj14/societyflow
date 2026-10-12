@@ -893,6 +893,12 @@ class SettingsController extends Controller
         // header value are stripped; the service never puts them in its text,
         // but this keeps that guarantee in one place.
         $provider = \App\Services\SmsService::safeProviderMessage($result['message'] ?? '');
+
+        // Problems SocietyFlow itself found before any request was made: say exactly that, in its own plain words.
+        if (in_array($result['error_code'] ?? '', ['sender_missing', 'invalid_message_id', 'missing_variables', 'invalid_number'], true)) {
+            return response()->json(['success' => false, 'message' => 'Not sent: ' . preg_replace('/^Not sent:\s*/', '', (string) $result['message']), 'details' => null, 'raw' => null]);
+        }
+
         \App\Support\ChannelStatus::record('sms', $societyId, false, 'Test SMS failed', $provider);
         $p = strtolower($provider);
         $reason = match (true) {

@@ -71,8 +71,11 @@ class NoticeMultiChannelTest extends TestCase
         ])->assertRedirect();
 
         $this->assertNotNull($sent, 'the SMS channel must fire independently of the queued email job');
-        $this->assertSame('https://www.fast2sms.com/dev/bulkV2', $sent['url']);
-        $this->assertSame('9876543210', $sent['data']['numbers']);
+        // Fast2SMS DLT SMS is a documented GET: every value is in the query string
+        $this->assertStringStartsWith('https://www.fast2sms.com/dev/bulkV2?', $sent['url']);
+        parse_str((string) parse_url($sent['url'], PHP_URL_QUERY), $q);
+        $this->assertSame('9876543210', $q['numbers']);
+        $this->assertSame('dlt', $q['route']);
     }
 
     public function test_sms_is_not_sent_when_the_toggle_is_off(): void

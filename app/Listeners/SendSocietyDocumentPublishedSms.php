@@ -28,7 +28,12 @@ class SendSocietyDocumentPublishedSms
 
             foreach ($event->recipients() as $user) {
                 if ($user->phone) {
-                    SmsService::sendDltNotification('notification', $user->phone, $message, $doc->society_id);
+                    SmsService::sendDltNotification('notification', $user->phone, $message, $doc->society_id, false, 'document', [
+                        'resident_name'    => (string) $user->name,
+                        'document_title'   => (string) $doc->title,
+                        'document_version' => (string) $doc->version,
+                        'society_name'     => (string) ($doc->society?->name ?? ''),
+                    ]);
                 }
             }
         } catch (\Throwable $e) {

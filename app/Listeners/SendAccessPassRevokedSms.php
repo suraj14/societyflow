@@ -40,7 +40,12 @@ class SendAccessPassRevokedSms
                 ''
             );
 
-            SmsService::sendDltNotification('notification', $user->phone, $message, $pass->society_id);
+            SmsService::sendDltNotification('notification', $user->phone, $message, $pass->society_id, false, 'gate_pass', [
+                'resident_name' => (string) $user->name,
+                'person_name'   => (string) $pass->person_name,
+                'pass_status'   => 'revoked',
+                'society_name'  => (string) ($pass->society?->name ?? ''),
+            ]);
         } catch (\Throwable $e) {
             Log::error('Failed to send access pass revoked SMS', [
                 'pass_id' => $event->accessPass->id ?? 'unknown',

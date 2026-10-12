@@ -134,8 +134,15 @@ class SmsService
      * a single variable slot (see sendViaFast2SmsDlt) - $message fills that
      * slot, so it must already match the wording the registered template
      * expects, not an arbitrary sentence.
+     *
+     * When the society has an active Message Templates -> SMS template for the notification
+     * ($templatePurpose: notice | gate_pass | document), that template is rendered from $values (the named values the
+     * event supplies - see App\Support\TemplateVariables) and $message is only the legacy single-slot text, used when no
+     * such template exists.
+     *
+     * @param array<string,string> $values
      */
-    public static function sendDltNotification(string $purpose, string $phone, string $message, ?int $societyId = null, bool $force = false): array
+    public static function sendDltNotification(string $purpose, string $phone, string $message, ?int $societyId = null, bool $force = false, ?string $templatePurpose = null, array $values = []): array
     {
         $phone = self::normalizePhone($phone);
 
@@ -158,9 +165,10 @@ class SmsService
         // otherwise the one DLT template saved for OTP (the original
         // single-template behaviour, kept so nothing that worked stops).
         // A Message Templates -> SMS template for this purpose wins; its Message ID decides DLT or Quick SMS.
-        $smsTemplate = \App\Models\SmsTemplate::forPurpose($societyId, self::templatePurpose($purpose));
+        $templatePurpose ??= self::templatePurpose($purpose);
+        $smsTemplate = \App\Models\SmsTemplate::forPurpose($societyId, $templatePurpose);
         $result = $smsTemplate
-            ? self::sendByTemplate(self::templatePurpose($purpose), $phone, ['message' => $message], $societyId, $message)
+            ? self::sendByTemplate($templatePurpose, $phone, $values, $societyId, $message)
             : self::sendViaFast2SmsDlt(
                 $phone, $message, $apiKey, $societyId,
                 self::getSetting('fast2sms_notification_template_id', null, $societyId),
@@ -205,6 +213,21 @@ class SmsService
 
         return $result;
     }
+    /**
+     * What the SMS settings give every send (for Message Templates, to say how each template will go out). Never the key.
+     *
+     * @return array{has_key: bool, sender_id: string, default_message_id: string, enabled: bool}
+     */
+    public static function routing(?int $societyId): array
+    {
+        return [
+            'has_key'            => self::apiKey($societyId) !== '',
+            'sender_id'          => (string) self::getSetting('fast2sms_sender_id', '', $societyId),
+            'default_message_id' => (string) self::getSetting('fast2sms_template_id', '', $societyId),
+            'enabled'            => (bool) self::getSetting('sms_enabled', false, $societyId),
+        ];
+    }
+
     /** The saved Fast2SMS API key for a society (falling back to the platform key); '' when none. Never logged. */
     public static function apiKey(?int $societyId): string
     {
@@ -313,15 +336,34 @@ class SmsService
         }
 
         $template = \App\Models\SmsTemplate::forPurpose($societyId, $purpose);
+        // The template's own Message ID wins; the default from SMS settings is only the fallback for a template without one.
         $messageId = (string) ($template?->dlt_message_id ?: self::getSetting('fast2sms_template_id', '', $societyId));
         $senderId = (string) self::getSetting('fast2sms_sender_id', '', $societyId);
 
-        $rendered = $template ? Fast2SmsService::render((string) $template->body, $values) : ['text' => $fallbackText, 'variables' => array_values($values)];
+        if ($template) {
+            // every template can use the society's name; the event supplies the rest
+            if ($societyId && !array_key_exists('society_name', $values)) {
+                $values['society_name'] = (string) \App\Models\Society::whereKey($societyId)->value('name');
+            }
+            $rendered = Fast2SmsService::render((string) $template->body, $values);
+        } else {
+            $rendered = ['text' => $fallbackText, 'variables' => array_values($values), 'missing' => []];
+        }
 
-        if ($messageId !== '' && $senderId !== '') {
+        // A placeholder with no value is never sent as a placeholder or a blank.
+        if ($rendered['missing']) {
+            return self::failedSend('Not sent: there is no value for ' . implode(', ', array_map(fn ($n) => '{{' . $n . '}}', $rendered['missing'])) . '.', 'missing_variables');
+        }
+
+        if ($messageId !== '') {
+            // A Message ID means this message must go out as that approved DLT text. It is never quietly downgraded to
+            // Quick SMS: if the DLT settings are incomplete, say so.
             // 15+ digits is the telecom DLT Template ID, which Fast2SMS rejects here.
             if (strlen(preg_replace('/\D+/', '', $messageId)) >= 15) {
-                return ['success' => false, 'message' => 'The saved SMS template is a DLT Template ID, but Fast2SMS needs its Message ID. Choose the template again in Settings > SMS / OTP.'];
+                return self::failedSend('The saved SMS template is a DLT Template ID, but Fast2SMS needs its Message ID. Choose the template again in Settings > SMS / OTP.', 'invalid_message_id');
+            }
+            if ($senderId === '') {
+                return self::failedSend('Not sent: a Message ID is set, so this goes out as a DLT SMS, but there is no Sender ID. Add the Sender ID in SMS settings.', 'sender_missing');
             }
 
             return self::fast2smsGet(Fast2SmsService::dltUrl($senderId, $messageId, $rendered['variables'], $phone), $apiKey,
@@ -355,12 +397,25 @@ class SmsService
         $messageId = (string) self::getSetting('fast2sms_template_id', '', $societyId);
         $senderId = (string) self::getSetting('fast2sms_sender_id', '', $societyId);
 
-        if ($messageId !== '' && $senderId !== '') {
+        if ($messageId !== '') {
+            // A saved Message ID means a DLT SMS; an incomplete DLT setup is reported, never sent as Quick SMS instead.
+            if (strlen(preg_replace('/\D+/', '', $messageId)) >= 15) {
+                return self::stamp(self::failedSend('The saved Message ID is a DLT Template ID, but Fast2SMS needs its Message ID (for example 223577).', 'invalid_message_id'));
+            }
+            if ($senderId === '') {
+                return self::stamp(self::failedSend('Not sent: a Message ID is saved, so this goes out as a DLT SMS, but there is no Sender ID. Add the Sender ID and save.', 'sender_missing'));
+            }
+
             return self::stamp(self::fast2smsGet(Fast2SmsService::dltUrl($senderId, $messageId, array_values(array_filter(array_map('trim', explode('|', $text)), fn ($v) => $v !== '')), $phone), $apiKey,
                 self::fast2smsResponseHandler($phone, 'dlt', $apiKey)));
         }
 
         return self::stamp(self::sendViaFast2SmsQuick($phone, $text, $apiKey));
+    }
+
+    private static function failedSend(string $message, string $code): array
+    {
+        return ['success' => false, 'message' => $message, 'status' => self::STATUS_FAILED, 'sent' => false, 'error_code' => $code];
     }
 
     /**
