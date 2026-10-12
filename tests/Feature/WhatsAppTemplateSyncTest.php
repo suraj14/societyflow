@@ -53,6 +53,42 @@ class WhatsAppTemplateSyncTest extends TestCase
         $this->assertDatabaseHas('whatsapp_templates', ['external_id' => 'tpl_2', 'status' => 'PENDING']);
     }
 
+    public function test_sync_through_the_account_client_stores_message_id_variables_and_body_and_filters_by_number(): void
+    {
+        config(['messaging.enabled' => true]);
+        $society = $this->makeSociety();
+        $this->configureWaba($society);
+        SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '1209719742234591', 'string', $society->id);
+
+        $urls = [];
+        \App\Services\Fast2SmsAccount::$transportOverride = function (string $method, string $url) use (&$urls) {
+            $urls[] = [$method, $url];
+
+            return [['success' => true, 'data' => [[
+                'waba_id' => 'w1', 'phone_number_id' => '1209719742234591',
+                'templates' => [
+                    ['message_id' => 8340, 'template_id' => '2012345678901234', 'template_name' => 'visitor_arrived', 'phone_number_id' => '1209719742234591', 'category' => 'UTILITY', 'status' => 'APPROVED', 'language' => 'en', 'var_count' => 2,
+                     'components' => [['type' => 'HEADER', 'text' => 'ignored'], ['type' => 'BODY', 'text' => 'Hi {{1}}, {{2}} is at the gate']]],
+                    // var_count absent: counted from the body instead of showing 0
+                    ['message_id' => 8341, 'template_id' => '2012345678905555', 'template_name' => 'bill_due', 'phone_number_id' => '1209719742234591', 'category' => 'UTILITY', 'status' => 'APPROVED', 'language' => 'en',
+                     'components' => [['type' => 'BODY', 'text' => 'Bill {{1}} due {{2}} amount {{3}}']]],
+                ],
+            ]]], 200];
+        };
+
+        try {
+            $result = WhatsAppTemplateSyncService::sync($society->id);
+        } finally {
+            \App\Services\Fast2SmsAccount::$transportOverride = null;
+        }
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('GET', $urls[0][0]);
+        $this->assertStringContainsString('/dev/dlt_manager/whatsapp?type=template&phone_number_id=1209719742234591', $urls[0][1]);
+        $this->assertDatabaseHas('whatsapp_templates', ['society_id' => $society->id, 'name' => 'visitor_arrived', 'message_id' => '8340', 'external_id' => '2012345678901234', 'var_count' => 2, 'body_text' => 'Hi {{1}}, {{2}} is at the gate', 'category' => 'UTILITY', 'language' => 'en', 'status' => 'APPROVED']);
+        $this->assertDatabaseHas('whatsapp_templates', ['name' => 'bill_due', 'message_id' => '8341', 'var_count' => 3]);
+    }
+
     public function test_friendly_name_defaults_to_a_humanized_technical_name(): void
     {
         $society = $this->makeSociety();

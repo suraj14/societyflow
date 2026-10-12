@@ -104,7 +104,7 @@ class Fast2SmsAccount
      */
     public static function whatsappTemplates(string $apiKey, ?string $phoneNumberId = null): array
     {
-        $r = self::whatsapp($apiKey, 'template');
+        $r = self::whatsapp($apiKey, 'template', $phoneNumberId);
         if (!$r['ok']) {
             return $r;
         }
@@ -124,7 +124,10 @@ class Fast2SmsAccount
                     'language'        => (string) ($t['language'] ?? ''),
                     'status'          => (string) ($t['status'] ?? ''),
                     'category'        => (string) ($t['category'] ?? ''),
-                    'var_count'       => (int) ($t['var_count'] ?? 0),
+                    // var_count is documented; if it is missing, count the {{n}} placeholders in the body instead of showing 0.
+                    'var_count'       => isset($t['var_count']) && is_numeric($t['var_count'])
+                        ? (int) $t['var_count']
+                        : (int) preg_match_all('/\{\{\d+\}\}/', (string) ($body['text'] ?? '')),
                     'body_text'       => (string) ($body['text'] ?? ''),
                     'phone_number_id' => $pnid,
                 ];
@@ -135,9 +138,11 @@ class Fast2SmsAccount
     }
 
     /** @return array{ok: bool, message: string, data?: array, detail?: ?string} */
-    private static function whatsapp(string $apiKey, string $type): array
+    private static function whatsapp(string $apiKey, string $type, ?string $phoneNumberId = null): array
     {
-        [$body, $code] = self::request('GET', self::BASE . '/dlt_manager/whatsapp?type=' . $type, $apiKey);
+        // phone_number_id is the documented filter: only this number's templates come back.
+        $query = http_build_query(array_filter(['type' => $type, 'phone_number_id' => $phoneNumberId], fn ($v) => $v !== null && $v !== ''));
+        [$body, $code] = self::request('GET', self::BASE . '/dlt_manager/whatsapp?' . $query, $apiKey);
 
         if ($code !== 200 || !filter_var($body['success'] ?? false, FILTER_VALIDATE_BOOLEAN) || !is_array($body['data'] ?? null)) {
             return self::failure($body, $code, $apiKey);

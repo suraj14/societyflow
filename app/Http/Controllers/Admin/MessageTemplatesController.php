@@ -103,7 +103,7 @@ class MessageTemplatesController extends Controller
             $rows[] = [
                 'channel' => 'whatsapp', 'purpose' => $uses ? $this->group($uses[0]['key']) : 'other', 'name' => $t->displayName(),
                 'usage' => $uses ? implode(', ', array_column($uses, 'label')) : 'Not used yet',
-                'identifier' => (string) ($t->external_id ?: $t->message_id), 'identifier_label' => $t->external_id ? 'Template ID' : 'Message ID',
+                'identifier' => (string) ($t->message_id ?: $t->external_id), 'identifier_label' => $t->message_id ? 'Message ID' : 'Template ID',
                 'text' => (string) $t->body_text, 'status' => $t->isApproved() ? 'approved' : 'not_approved',
                 'status_text' => ucfirst(strtolower((string) $t->status)), 'language' => $t->language, 'variables' => (string) $t->var_count,
                 'enabled' => $uses !== [] && (bool) ($wa['whatsapp_enabled'] ?? false), 'action' => null,
