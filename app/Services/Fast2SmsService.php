@@ -167,7 +167,8 @@ class Fast2SmsService
             'path'     => parse_url($url, PHP_URL_PATH),
             'query'    => $safeQuery,
             'http'     => $code,
-            'response' => SmsService::rawResponse($body, $apiKey),
+            // only the provider's status words, never a whole payload (a profile reply carries business details)
+            'response' => SmsService::rawResponse(array_intersect_key($body, array_flip(['return', 'status', 'success', 'status_code', 'request_id', 'message', 'error'])), $apiKey),
         ]);
     }
 }

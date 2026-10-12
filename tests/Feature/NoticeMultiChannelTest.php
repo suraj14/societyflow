@@ -48,6 +48,7 @@ class NoticeMultiChannelTest extends TestCase
         $tenant   = $this->makeUserWithRole($society, 'Tenant', ['phone' => '9876543210']);
 
         SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $society->id);
+        SystemSetting::set('sms', 'sms_enabled', true, 'boolean', $society->id);
         SystemSetting::set('sms', 'fast2sms_api_key', 'TEST-KEY-1234567890', 'encrypted', $society->id);
         SystemSetting::set('sms', 'fast2sms_route', 'dlt', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'DISP24', 'string', $society->id);
@@ -119,6 +120,7 @@ class NoticeMultiChannelTest extends TestCase
         $this->makeUserWithRole($society, 'Tenant', ['phone' => '9876543210']);
 
         SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $society->id);
+        SystemSetting::set('sms', 'sms_enabled', true, 'boolean', $society->id);
         SystemSetting::set('sms', 'fast2sms_api_key', 'TEST-KEY-1234567890', 'encrypted', $society->id);
         SystemSetting::set('sms', 'fast2sms_route', 'dlt', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'DISP24', 'string', $society->id);

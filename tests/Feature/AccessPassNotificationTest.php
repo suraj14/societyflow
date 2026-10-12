@@ -115,6 +115,7 @@ class AccessPassNotificationTest extends TestCase
         $pass = $this->makePass($society, $resident);
 
         SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $society->id);
+        SystemSetting::set('sms', 'sms_enabled', true, 'boolean', $society->id);
         SystemSetting::set('sms', 'fast2sms_api_key', 'TEST-KEY', 'encrypted', $society->id);
         SystemSetting::set('sms', 'fast2sms_route', 'dlt', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'DISP24', 'string', $society->id);

@@ -165,6 +165,20 @@ class SmsTemplateNotificationTest extends TestCase
         $this->assertSame('223577', $this->sentTo('9876543210')[0]['q']['message']);
     }
 
+    public function test_turning_the_integration_off_stops_notifications_too_and_keeps_their_settings(): void
+    {
+        $this->set('sms_enabled', false, 'boolean');             // the master "Integration active" switch
+        $this->set('fast2sms_sender_id', 'BOOKMZ');
+        $this->template('notice', '{{notice_title}}');
+        $this->makeUserWithRole($this->society, 'Tenant', ['phone' => '9876543210']);
+
+        $this->publishNotice();
+
+        $this->assertSame([], $this->requests, 'integration off means nothing is sent, even with notifications switched on');
+        $this->assertTrue((bool) SystemSetting::get('sms', 'notification_sms_enabled', null, $this->society->id), 'the notification choice is kept');
+        $this->assertSame(1, SmsTemplate::count());
+    }
+
     public function test_notifications_stay_off_until_the_sms_notification_switch_is_on(): void
     {
         $this->set('notification_sms_enabled', false, 'boolean');

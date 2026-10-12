@@ -155,6 +155,14 @@ class SmsService
             return self::skipped(self::STATUS_SKIPPED_DISABLED);
         }
 
+        // "Integration active" is the master switch: with it off, nothing goes out - notifications included - and every
+        // saved setting stays as it is.
+        if (!self::getSetting('sms_enabled', false, $societyId)) {
+            Log::info("SMS integration is off - {$purpose} notification not sent", ['purpose' => $purpose, 'phone' => self::maskPhone($phone)]);
+
+            return self::skipped(self::STATUS_SKIPPED_DISABLED);
+        }
+
         $apiKey = self::getSetting('fast2sms_api_key', null, $societyId);
         if (empty($apiKey)) {
             Log::info('Fast2SMS not configured - notification not sent', ['purpose' => $purpose, 'phone' => self::maskPhone($phone)]);

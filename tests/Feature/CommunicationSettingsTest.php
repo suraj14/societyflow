@@ -169,6 +169,7 @@ class CommunicationSettingsTest extends TestCase
     {
         $this->saveSmsKey();
         SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $this->society);
+        SystemSetting::set('sms', 'sms_enabled', true, 'boolean', $this->society);
         SystemSetting::set('sms', 'fast2sms_template_id', '1707168880000012345', 'string', $this->society);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'ROYALE', 'string', $this->society);
         $called = false;
@@ -367,6 +368,7 @@ class CommunicationSettingsTest extends TestCase
     {
         $this->saveSmsKey();
         SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $this->society);
+        SystemSetting::set('sms', 'sms_enabled', true, 'boolean', $this->society);
         // Legacy shape: only the (single) OTP template exists.
         SystemSetting::set('sms', 'fast2sms_template_id', '182001', 'string', $this->society);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'ROYALE', 'string', $this->society);

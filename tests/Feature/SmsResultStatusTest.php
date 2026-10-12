@@ -107,6 +107,7 @@ class SmsResultStatusTest extends TestCase
 
     public function test_a_missing_api_key_is_skipped_not_configured_and_shows_as_skipped_in_the_log(): void
     {
+        $this->set('sms_enabled', true, 'boolean');
         $this->set('notification_sms_enabled', true, 'boolean');
         $this->mockProvider(['return' => true]);
 
@@ -269,6 +270,7 @@ class SmsResultStatusTest extends TestCase
     public function test_the_delivery_log_screen_labels_skipped_rows_and_does_not_count_them_as_failures(): void
     {
         $admin = $this->makeUserWithRole($this->society, 'Admin');
+        $this->set('sms_enabled', true, 'boolean');
         $this->set('notification_sms_enabled', true, 'boolean');
         SmsService::sendDltNotification('notification', '9876543210', 'Water off', $this->society->id);   // skipped: no key
         EmailLog::create(['society_id' => $this->society->id, 'channel' => 'sms', 'recipient_phone' => '9876543211', 'trigger_action' => 'notification',
