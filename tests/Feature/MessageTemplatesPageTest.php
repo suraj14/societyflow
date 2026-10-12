@@ -68,6 +68,21 @@ class MessageTemplatesPageTest extends TestCase
 
     // ── access ──────────────────────────────────────────────────────────────
 
+    public function test_a_failed_save_re_renders_the_form_with_an_empty_string_body_not_null(): void
+    {
+        // The page script calls body.matchAll()/replace(): a null body (an emptied box comes back as null) threw in the browser
+        // right after a rejected save and froze the counter and preview. Found by the browser run, invisible to server tests.
+        $this->actingAs($this->admin)->from(route('admin.message-templates.sms.create'))
+            ->post(route('admin.message-templates.sms.store'), ['name' => '', 'body' => '', 'purpose' => 'notice', 'audience' => 'resident'])
+            ->assertSessionHasErrors(['name', 'body']);
+
+        $html = $this->actingAs($this->admin)->withSession(['errors' => session('errors'), '_old_input' => ['name' => '', 'body' => null]])
+            ->get(route('admin.message-templates.sms.create'))->assertOk()->getContent();
+
+        $this->assertStringContainsString('\u0022body\u0022:\u0022\u0022', $html);
+        $this->assertStringNotContainsString('\u0022body\u0022:null', $html);
+    }
+
     public function test_only_admins_reach_the_page_and_the_sms_actions(): void
     {
         $this->page()->assertOk()->assertSee('Message Templates');

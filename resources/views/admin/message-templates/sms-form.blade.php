@@ -20,7 +20,7 @@
     $config = [
         'purposes' => $purposes,
         'purpose'  => old('purpose', $template->purpose ?: 'notice'),
-        'body'     => old('body', (string) $template->body),
+        'body'     => (string) old('body', (string) $template->body),
         'max'      => \App\Models\SmsTemplate::MAX_BODY,
     ];
     $bodyErrors = $errors->get('body');
@@ -141,7 +141,8 @@ function sfSmsTemplateForm(cfg) {
     // matches a placeholder; built from a string so Blade never sees two opening braces in a row
     const re = () => new RegExp('\\{\\{\\s*([A-Za-z0-9_]+)\\s*\\}\\}', 'g');
     return {
-        purposes: cfg.purposes, purpose: cfg.purpose, body: cfg.body, max: cfg.max,
+        // an empty box comes back from a failed save as null (empty strings are converted), which broke the counter/preview
+        purposes: cfg.purposes, purpose: cfg.purpose, body: cfg.body ?? '', max: cfg.max,
         current() { return this.purposes.find(p => p.key === this.purpose) || { variables: [], help: '' }; },
         insert(name) {
             const el = this.$refs.body, token = '{' + '{' + name + '}' + '}';
