@@ -230,4 +230,88 @@ class FacilityBookingWebNotificationTest extends TestCase
         $this->assertSame('pending', $booking->fresh()->status);
         $this->assertSame([], $this->titles($this->resident));
     }
+    // ---------------------------------------------------------------- cancellation, every route
+
+    public function test_the_office_cancelling_a_booking_tells_the_resident_once(): void
+    {
+        $this->book($this->resident, $this->facility(false));   // instant: approved
+        $booking = FacilityBooking::firstOrFail();
+        $this->resident->notifications()->delete();
+        $this->admin->notifications()->delete();
+        EmailLog::query()->delete();
+
+        $cancel = fn () => $this->actingAs($this->admin)->put(route('facility-bookings.update-status', $booking), ['status' => 'cancelled', 'admin_notes' => 'Maintenance']);
+        $cancel()->assertRedirect(route('facility-bookings.index'));
+        $cancel();   // the same decision again
+
+        $this->assertSame(['Booking Cancelled'], $this->titles($this->resident));
+        $this->assertSame(1, EmailLog::where('recipient_email', $this->resident->email)->where('trigger_action', 'facility_booking_status_updated')->where('status', 'sent')->count());
+        $this->assertSame([], $this->titles($this->admin), 'the office does not notify itself');
+    }
+
+    public function test_the_office_deleting_an_upcoming_booking_is_a_cancellation_to_its_requester(): void
+    {
+        foreach (['pending' => true, 'approved' => false] as $status => $needsApproval) {
+            FacilityBooking::query()->delete();
+            $this->book($this->resident, $this->facility($needsApproval, 'Hall ' . $status));
+            $booking = FacilityBooking::firstOrFail();
+            $this->resident->notifications()->delete();
+            EmailLog::query()->delete();
+            $this->assertSame($status, $booking->status);
+
+            $this->actingAs($this->admin)->delete(route('facility-bookings.destroy', $booking))->assertRedirect(route('facility-bookings.index'));
+
+            $this->assertSame(0, FacilityBooking::count());
+            $this->assertSame(['Booking Cancelled'], $this->titles($this->resident), $status);
+            $this->assertSame(route('facility-bookings.index'), $this->resident->notifications()->first()->data['url'], 'no link to a deleted record');
+            $this->assertSame(1, EmailLog::where('recipient_email', $this->resident->email)->where('status', 'sent')->count(), $status);
+        }
+    }
+
+    public function test_deleting_what_nobody_is_waiting_for_tells_nobody(): void
+    {
+        $facility = $this->facility(true);
+        $make = fn (array $over) => FacilityBooking::create($over + ['society_id' => $this->society->id, 'facility_id' => $facility->id, 'user_id' => $this->resident->id, 'flat_id' => $this->flat->id,
+            'booking_date' => now()->addDays(5)->toDateString(), 'start_time' => '10:00:00', 'end_time' => '11:00:00', 'status' => 'pending']);
+
+        $cases = ['already cancelled' => $make(['status' => 'cancelled']), 'rejected' => $make(['status' => 'rejected']),
+            'in the past' => $make(['booking_date' => now()->subDays(3)->toDateString(), 'status' => 'approved']),
+            'the admin\'s own' => $make(['user_id' => $this->admin->id])];
+
+        foreach ($cases as $label => $booking) {
+            $this->actingAs($this->admin)->delete(route('facility-bookings.destroy', $booking))->assertRedirect();
+            $this->assertSame([], $this->titles($this->resident), $label);
+            $this->assertSame([], $this->titles($this->admin), $label);
+        }
+        $this->assertSame(0, EmailLog::where('trigger_action', 'facility_booking_status_updated')->count());
+    }
+
+    public function test_another_societys_admin_cannot_delete_it_and_nobody_is_told(): void
+    {
+        Permission::firstOrCreate(['name' => 'manage_facilities', 'guard_name' => 'web']);
+        $this->otherAdmin->givePermissionTo('manage_facilities');
+        $this->book($this->resident, $this->facility(true));
+        $booking = FacilityBooking::firstOrFail();
+        $this->resident->notifications()->delete();
+
+        $this->actingAs($this->otherAdmin)->delete(route('facility-bookings.destroy', $booking))->assertForbidden();
+
+        $this->assertSame(1, FacilityBooking::count());
+        $this->assertSame([], $this->titles($this->resident));
+    }
+
+    public function test_a_resident_cancelling_over_the_api_tells_the_office_once(): void
+    {
+        $this->book($this->resident, $this->facility(false));
+        $booking = FacilityBooking::firstOrFail();
+        $this->admin->notifications()->delete();
+
+        \Laravel\Sanctum\Sanctum::actingAs($this->resident);
+        $this->postJson("/api/v1/facility-bookings/{$booking->id}/cancel", ['reason' => 'Plans changed'])->assertOk();
+        $this->postJson("/api/v1/facility-bookings/{$booking->id}/cancel")->assertStatus(422);
+
+        $this->assertSame('cancelled', $booking->fresh()->status);
+        $this->assertSame(['Facility booking cancelled'], $this->titles($this->admin));
+        $this->assertSame([], $this->titles($this->otherAdmin), 'never another society');
+    }
 }

@@ -156,7 +156,7 @@ class GuardShiftService
 
         $this->ensureNoConflict($guard, $shift, $data['date'], 'guard_user_id');
 
-        return ShiftAssignment::create([
+        $created = ShiftAssignment::create([
             'society_id'    => $data['society_id'],
             'shift_id'      => $shift->id,
             'gate_id'       => $gate->id,
@@ -165,6 +165,16 @@ class GuardShiftService
             'status'        => ShiftAssignment::STATUS_SCHEDULED,
             'created_by'    => $data['created_by'] ?? null,
         ]);
+
+        $this->tellGuard($created, 'assigned', null, $data['created_by'] ?? null);
+
+        return $created;
+    }
+
+    /** The guard hears of a roster change only once it is committed (a rolled-back change tells nobody). */
+    private function tellGuard(ShiftAssignment $assignment, string $kind, ?int $guardId, ?int $actorId): void
+    {
+        DB::afterCommit(fn () => \App\Support\BusinessNotifications::guardShiftChanged($assignment, $kind, $guardId, $actorId));
     }
 
     /** @throws ShiftAssignmentException unless $condition holds */
@@ -269,7 +279,9 @@ class GuardShiftService
         $assignment->loadMissing('shift');
         $this->ensureNoConflict($replacement, $assignment->shift, $assignment->date, 'replacement_guard_id');
 
-        return DB::transaction(function () use ($assignment, $replacement, $admin, $reason) {
+        $outgoingId = (int) $assignment->guard_user_id;
+
+        $created = DB::transaction(function () use ($assignment, $replacement, $admin, $reason) {
             $old = $assignment->only(['status', 'replaced_by_user_id', 'replacement_reason']);
 
             $assignment->update([
@@ -295,6 +307,11 @@ class GuardShiftService
                 'created_by'    => $admin->id,
             ]);
         });
+
+        $this->tellGuard($assignment, 'replaced', $outgoingId, $admin->id);
+        $this->tellGuard($created, 'assigned', null, $admin->id);
+
+        return $created;
     }
 
     /**
@@ -319,7 +336,10 @@ class GuardShiftService
             'removed_by'    => $admin->id,
         ], $assignment->only(['status']));
 
+        $assignment->loadMissing('shift', 'gate');
         $assignment->delete();
+
+        $this->tellGuard($assignment, 'removed', null, $admin->id);
     }
 
     /**
@@ -344,6 +364,8 @@ class GuardShiftService
         $assignment->update(['status' => ShiftAssignment::STATUS_ABSENT]);
 
         ActivityLog::recordFor($assignment, 'guard_shift_absent', ['marked_by' => $admin->id], $old);
+
+        $this->tellGuard($assignment, 'absent', null, $admin->id);
 
         return $assignment->refresh();
     }

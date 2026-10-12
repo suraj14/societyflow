@@ -846,8 +846,21 @@ class FacilityBookingController extends Controller
 
         $facilityBooking->loadMissing('facility');
         $withdrawnByResident = !auth()->user()->can('manage_facilities');
+        $previousStatus = $facilityBooking->status;
+        // The office removing a booking that someone else still expects to use is, to that person, a cancellation.
+        $cancelsSomeoneElsesBooking = !$withdrawnByResident
+            && in_array($previousStatus, ['pending', 'approved'], true)
+            && $facilityBooking->user_id && (int) $facilityBooking->user_id !== (int) auth()->id()
+            && !\App\Support\SocietyClock::dateHasPassed($facilityBooking->booking_date, $facilityBooking->society_id);
 
         $facilityBooking->delete();
+
+        if ($cancelsSomeoneElsesBooking) {
+            // Tell the requester it was cancelled (email through the usual rules + in-app). The row is gone, so the
+            // in-memory copy carries the new status and the links point at the list.
+            $facilityBooking->status = 'cancelled';
+            \App\Events\FacilityBookingStatusUpdated::dispatch($facilityBooking, $previousStatus);
+        }
 
         // A resident withdrawing their own request is a cancellation the
         // office should hear about; the office deleting a record is not.

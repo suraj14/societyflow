@@ -33,7 +33,8 @@ class SendFacilityBookingStatusUpdatedEmail
                 'booking_date'    => optional($booking->booking_date)->format('d M Y') ?? '',
                 'booking_status'  => ucfirst($booking->status),
                 'admin_notes'     => $booking->admin_notes ?? '',
-                'view_url'        => route('facility-bookings.show', $booking),
+                // A booking the office removed no longer has a page.
+                'view_url'        => $booking->exists ? route('facility-bookings.show', $booking) : route('facility-bookings.index'),
             ];
 
             DispatchEventNotification::dispatch(

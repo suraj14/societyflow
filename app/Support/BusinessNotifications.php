@@ -300,11 +300,42 @@ class BusinessNotifications
         });
     }
 
+    /**
+     * A roster change that concerns one guard: they were given a shift (`assigned`), lost one (`removed`), were replaced
+     * on one (`replaced`) or were marked absent for one (`absent`). Goes only to that guard, only when their account is
+     * still active in the assignment's own society, and never to the admin who made the change. In-app only: there is
+     * no approved email / SMS / WhatsApp template for rosters, so nothing external can be sent (and the kill switch is
+     * irrelevant). Never throws into the roster action.
+     */
+    public static function guardShiftChanged(\App\Models\ShiftAssignment $assignment, string $kind, ?int $guardId = null, ?int $actorId = null): void
+    {
+        self::guard(function () use ($assignment, $kind, $guardId, $actorId) {
+            $guard = User::query()->whereKey($guardId ?? $assignment->guard_user_id)
+                ->where('society_id', $assignment->society_id)->where('status', 'active')->first();
+            if (!$guard || ($actorId !== null && (int) $guard->id === (int) $actorId)) {
+                return;
+            }
+
+            $assignment->loadMissing('shift', 'gate');
+            $date = $assignment->date ? Carbon::parse($assignment->date)->format('d M Y') : '';
+            $what = trim(($assignment->shift?->name ?? 'Shift') . ($assignment->gate?->name ? ' at ' . $assignment->gate->name : '') . ($date ? " on {$date}" : ''));
+
+            [$title, $body, $icon] = match ($kind) {
+                'assigned' => ['New shift assigned', "You are on {$what}.", 'fa-user-shield'],
+                'removed'  => ['Shift cancelled', "You are no longer on {$what}.", 'fa-calendar-xmark'],
+                'replaced' => ['Shift reassigned', "You have been replaced on {$what}.", 'fa-people-arrows'],
+                'absent'   => ['Marked absent', "You were marked absent for {$what}.", 'fa-user-xmark'],
+            };
+
+            InAppNotifier::send([$guard], 'shift', $title, $body, self::url('shift.current'), $icon);
+        });
+    }
+
     public static function facilityBookingUpdated(object $booking): void
     {
         $status = ucfirst((string) $booking->status);
         $date = $booking->booking_date ? Carbon::parse($booking->booking_date)->format('d M Y') : '';
-        InAppNotifier::send([$booking->user], 'facility', "Booking {$status}", ($booking->facility?->name ?? 'Your booking') . ($date ? " on {$date}" : '') . " is {$status}.", self::url('facility-bookings.show', $booking->id), 'fa-calendar-check');
+        InAppNotifier::send([$booking->user], 'facility', "Booking {$status}", ($booking->facility?->name ?? 'Your booking') . ($date ? " on {$date}" : '') . " is {$status}.", ($booking->exists ?? true) ? self::url('facility-bookings.show', $booking->id) : self::url('facility-bookings.index'), 'fa-calendar-check');
     }
 
     public static function societyDocumentPublished(object $document, Collection $recipients): void
