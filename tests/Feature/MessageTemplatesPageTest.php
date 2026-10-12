@@ -151,19 +151,17 @@ class MessageTemplatesPageTest extends TestCase
         $this->wa(['name' => 'visitor_ok', 'friendly_name' => 'Visitor approved']);
 
         $settings = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertOk();
-        $settings->assertDontSee('Notifications on WhatsApp')->assertDontSee('Use this template')->assertSee('Manage templates');
+        $settings->assertDontSee('Notifications on WhatsApp')->assertDontSee('Use this template')->assertSee('Message Templates');
         $settings->assertSee(route('admin.message-templates.index', ['channel' => 'whatsapp']), false);
 
-        $this->page(['channel' => 'whatsapp'])->assertOk()->assertSee('Use a template')->assertSee('Sync approved templates');
+        $this->page(['channel' => 'whatsapp'])->assertOk()->assertSee('Use a template')->assertSee('Refresh from Fast2SMS');
     }
 
-    public function test_the_sms_template_picker_lives_here_and_the_settings_page_only_links_to_it(): void
+    public function test_the_sms_settings_page_only_links_to_the_templates(): void
     {
         $settings = $this->actingAs($this->admin)->get('/settings?tab=sms')->assertOk();
         $settings->assertDontSee('Use for notifications')->assertDontSee('Fetch from Fast2SMS')->assertSee('Manage approved templates');
         $settings->assertSee(route('admin.message-templates.index', ['channel' => 'sms']), false);
-
-        $this->page(['channel' => 'sms'])->assertOk()->assertSee('Use for OTP')->assertSee('Use for notifications', false)->assertSee('Fetch from Fast2SMS');
     }
 
     // ── Email ───────────────────────────────────────────────────────────────

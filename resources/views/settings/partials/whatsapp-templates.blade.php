@@ -25,12 +25,8 @@
 @endphp
 
 <div class="space-y-6" x-data="sfWhatsApp(@js($sfJsTemplates), @js($sfJsPurposes))">
-    <div class="flex flex-col sm:flex-row gap-2">
-        <form @submit.prevent="verify()" class="flex flex-1 flex-col sm:flex-row gap-2">
-            <input type="text" x-model="ref" placeholder="Have a template ID or name? Paste it to verify" class="flex-1 {{ $sfInput }}">
-            <button type="submit" :disabled="busy || !ref" class="px-4 py-2.5 rounded-xl border border-green-300 text-green-700 text-sm font-semibold hover:bg-green-50 disabled:opacity-60">Verify template</button>
-        </form>
-        <button type="button" @click="call(@js(route('settings.whatsapp.sync')))" :disabled="busy" class="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"><i class="fas fa-rotate mr-1"></i> Sync approved templates</button>
+    <div class="flex justify-end">
+        <button type="button" @click="call(@js(route('settings.whatsapp.sync')))" :disabled="busy" class="px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"><i class="fas fa-rotate mr-1"></i> Refresh from Fast2SMS</button>
     </div>
     <div x-show="msg" x-cloak class="rounded-xl px-4 py-3 text-sm" role="status" :class="skipped ? 'bg-blue-50 text-blue-900' : (ok ? 'bg-green-50 text-green-900' : 'bg-red-50 text-red-900')">
         <p x-text="(skipped ? '' : (ok ? '\u2713 ' : '\u2715 ')) + msg"></p>
@@ -121,7 +117,7 @@
             <span class="text-xs text-gray-500">{{ $sfWaTemplates->count() }} synced</span>
         </div>
         @if ($sfWaTemplates->isEmpty())
-            <p class="px-6 py-8 text-sm text-gray-500 text-center">No templates yet. Click "Connect &amp; Verify" to fetch your approved templates.</p>
+            <p class="px-6 py-8 text-sm text-gray-500 text-center">No templates yet. Press "Refresh from Fast2SMS" to fetch your approved templates.</p>
         @else
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">

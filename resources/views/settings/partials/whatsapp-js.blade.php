@@ -1,4 +1,4 @@
-{{-- Alpine component shared by Settings -> WhatsApp (connect / sync / test) and Message Templates (verify / assign). --}}
+{{-- Alpine component for Message Templates -> WhatsApp: refresh templates from Fast2SMS, choose a template for a notification. --}}
 @once
 @push('scripts')
 <script>
@@ -11,19 +11,10 @@ function sfWhatsApp(templates, purposes) {
     };
     return {
         templates, purposes,
-        busy: false, ok: false, skipped: false, msg: '', details: null, ref: '', numbers: [], numberId: '',
+        busy: false, ok: false, skipped: false, msg: '', details: null,
         panel: false, purpose: (purposes[0] || { key: '' }).key, templateId: '', vars: [],
         show(d) { this.ok = !!d.success; this.skipped = !!d.skipped; this.msg = d.message || 'Something went wrong.'; this.details = d.details || null; if (d.success && d.reload) setTimeout(() => location.reload(), 1000); },
         async call(url, body) { this.busy = true; const d = await post(url, body); this.show(d); this.busy = false; return d; },
-        async connect(numberId) {
-            const d = await this.call(@js(route('settings.whatsapp.connect')), numberId ? { phone_number_id: numberId } : {});
-            this.numbers = d.choose ? d.numbers : [];
-            if (d.choose && this.numbers.length) this.numberId = this.numbers[0].phone_number_id;
-        },
-        async verify() {
-            const d = await this.call(@js(route('settings.whatsapp.verify-template')), { template_ref: this.ref });
-            if (d.success && d.template) this.open(null, d.template.id);
-        },
         async unassign(purpose) { if (confirm('Stop sending this notification on WhatsApp?')) await this.call(@js(route('settings.whatsapp.unassign')), { purpose }); },
         async assign() { await this.call(@js(route('settings.whatsapp.assign')), { purpose: this.purpose, template_id: this.templateId, variables: this.vars }); },
         open(purpose, templateId) {

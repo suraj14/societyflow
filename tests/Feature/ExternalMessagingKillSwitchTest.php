@@ -154,15 +154,25 @@ class ExternalMessagingKillSwitchTest extends TestCase
         config(['messaging.enabled' => false]);
         $society = $this->makeSociety();
         $admin = $this->makeUserWithRole($society, 'Admin');
+        \App\Models\SystemSetting::set('sms', 'sms_enabled', true, 'boolean', $society->id);
         \App\Models\SystemSetting::set('sms', 'fast2sms_api_key', 'fake-key', 'encrypted', $society->id);
-        \App\Models\SystemSetting::set('whatsapp', 'whatsapp_api_key', 'fake-key', 'encrypted', $society->id);
+        \App\Models\SystemSetting::set('whatsapp', 'whatsapp_enabled', true, 'boolean', $society->id);
+        \App\Models\SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '1209719742234591', 'string', $society->id);
+        $template = \App\Models\WhatsAppTemplate::create(['society_id' => $society->id, 'external_id' => 'ext-1', 'message_id' => '8340', 'name' => 'visitor_arrived', 'status' => 'APPROVED', 'language' => 'en', 'var_count' => 0]);
         $this->assertNull(SmsService::$transportOverride);
+        $this->assertNull(WhatsAppService::$transportOverride);
+        $this->assertNull(Fast2SmsAccount::$transportOverride);
 
-        foreach (['settings.sms.test', 'settings.whatsapp.test'] as $route) {
-            $r = $this->actingAs($admin)->postJson(route($route), ['phone' => '9876543210'])->assertOk();
-            $this->assertFalse($r->json('success'), $route);
-            $this->assertStringNotContainsStringIgnoringCase('delivered', (string) $r->json('message'), $route);
+        $sms = $this->actingAs($admin)->postJson(route('settings.sms.test'), ['phone' => '9876543210', 'message' => 'Hello'])->assertOk();
+        $wa = $this->actingAs($admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $template->id])->assertOk();
+
+        foreach ([$sms, $wa] as $r) {
+            $this->assertFalse($r->json('success'));
+            $this->assertTrue($r->json('skipped'), 'messaging is off, so nothing was attempted');
+            $this->assertStringContainsString('Not sent', (string) $r->json('message'));
+            $this->assertStringNotContainsStringIgnoringCase('delivered', (string) $r->json('message'));
         }
+        $this->assertDatabaseMissing('email_logs', ['channel' => 'whatsapp', 'trigger_action' => 'test']);
     }
 
     public function test_the_test_email_button_never_claims_a_send_that_was_only_logged(): void

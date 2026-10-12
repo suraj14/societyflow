@@ -19,6 +19,13 @@
                             <option value="{{ $value }}">{{ $label }}</option>
                         @endforeach
                     </select>
+                @elseif (($f['type'] ?? 'text') === 'textarea')
+                    <div x-data="{ n: {{ mb_strlen($f['value'] ?? '') }} }">
+                        <textarea name="{{ $f['name'] }}" rows="3" @if (!empty($f['maxlength'])) maxlength="{{ $f['maxlength'] }}" @endif
+                                  @input="n = $event.target.value.length" @if ($f['required'] ?? true) required @endif
+                                  class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-green-500">{{ $f['value'] ?? '' }}</textarea>
+                        @if (!empty($f['counter']))<p class="text-xs text-gray-500 mt-1 text-right"><span x-text="n"></span>/{{ $f['counter'] }}</p>@endif
+                    </div>
                 @else
                     <input type="{{ $f['type'] ?? 'text' }}" name="{{ $f['name'] }}" value="{{ $f['value'] ?? '' }}" placeholder="{{ $f['placeholder'] ?? '' }}"
                            @if (!empty($f['maxlength'])) maxlength="{{ $f['maxlength'] }}" @endif

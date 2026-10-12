@@ -392,14 +392,8 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     Route::post('settings/sms', [App\Http\Controllers\SettingsController::class, 'updateSms'])->name('settings.sms.update');
     Route::post('settings/sms/test', [App\Http\Controllers\SettingsController::class, 'testSms'])->name('settings.sms.test');
     Route::post('settings/whatsapp', [App\Http\Controllers\SettingsController::class, 'updateWhatsApp'])->name('settings.whatsapp.update');
-    Route::post('settings/whatsapp/test', [App\Http\Controllers\SettingsController::class, 'testWhatsApp'])->name('settings.whatsapp.test');
-    // Verify-and-pick actions for SMS / WhatsApp (read the saved key, ask Fast2SMS).
-    Route::post('settings/sms/connect', [App\Http\Controllers\CommunicationSettingsController::class, 'smsConnect'])->name('settings.sms.connect');
-    Route::post('settings/sms/verify', [App\Http\Controllers\CommunicationSettingsController::class, 'smsVerify'])->name('settings.sms.verify');
-    Route::post('settings/sms/use-template', [App\Http\Controllers\CommunicationSettingsController::class, 'smsUseTemplate'])->name('settings.sms.use-template');
-    Route::post('settings/whatsapp/connect', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappConnect'])->name('settings.whatsapp.connect');
+    // WhatsApp templates come from Fast2SMS: refresh them, choose what each notification uses, and send a test.
     Route::post('settings/whatsapp/sync', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappSync'])->name('settings.whatsapp.sync');
-    Route::post('settings/whatsapp/verify-template', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappVerifyTemplate'])->name('settings.whatsapp.verify-template');
     Route::post('settings/whatsapp/assign', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappAssign'])->name('settings.whatsapp.assign');
     Route::post('settings/whatsapp/unassign', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappUnassign'])->name('settings.whatsapp.unassign');
     Route::post('settings/whatsapp/test-template', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappTest'])->name('settings.whatsapp.test-template');

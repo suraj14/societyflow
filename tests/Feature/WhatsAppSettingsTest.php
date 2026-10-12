@@ -257,39 +257,49 @@ class WhatsAppSettingsTest extends TestCase
 
     // ── Settings → Test WhatsApp button ─────────────────────────────────────
 
+    private function approvedTemplate($admin, array $over = []): \App\Models\WhatsAppTemplate
+    {
+        return \App\Models\WhatsAppTemplate::create($over + ['society_id' => $admin->society_id, 'external_id' => '2012345678901234', 'message_id' => '8340', 'name' => 'visitor_arrived', 'status' => 'APPROVED', 'language' => 'en', 'var_count' => 1, 'body_text' => 'Hi {{1}}']);
+    }
+
     public function test_test_button_reports_disabled_rather_than_success(): void
     {
         $admin = $this->admin();
         $this->save($admin, ['whatsapp_api_key' => self::KEY, 'whatsapp_enabled' => '0']);
+        $tpl = $this->approvedTemplate($admin);
 
-        $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test'), ['phone' => '9876543210'])->assertOk();
+        $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id])->assertOk();
 
         $this->assertFalse($resp->json('success'));
         $this->assertStringContainsString('turned off', $resp->json('message'));
     }
 
-    public function test_test_button_reports_missing_template_rather_than_success(): void
-    {
-        $admin = $this->admin();
-        $this->save($admin, ['whatsapp_api_key' => self::KEY, 'whatsapp_otp_template_name' => '']);
-
-        $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test'), ['phone' => '9876543210'])->assertOk();
-
-        $this->assertFalse($resp->json('success'));
-        $this->assertStringContainsString('No WhatsApp template', $resp->json('message'));
-    }
-
-    public function test_test_button_uses_the_saved_otp_template_and_reports_real_success(): void
+    public function test_test_button_reports_a_missing_template_rather_than_success(): void
     {
         $admin = $this->admin();
         $this->save($admin, ['whatsapp_api_key' => self::KEY]);
 
-        $this->fakeTransport(['messages' => [['id' => 'wamid.test']]], 200, $sent);
+        $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => 999999])->assertOk();
 
-        $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test'), ['phone' => '9876543210'])->assertOk();
+        $this->assertFalse($resp->json('success'));
+        $this->assertStringContainsString('Choose an approved template', $resp->json('message'));
+    }
+
+    public function test_test_button_sends_the_chosen_template_by_message_id_and_reports_the_provider_reply(): void
+    {
+        $admin = $this->admin();
+        $this->save($admin, ['whatsapp_api_key' => self::KEY]);
+        $tpl = $this->approvedTemplate($admin);
+
+        $this->fakeTransport(['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'abc123'], 200, $sent);
+
+        $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id, 'variables' => 'Asha'])->assertOk();
 
         $this->assertTrue($resp->json('success'));
-        $this->assertSame('auth_template', $sent['data']['template']['name']);
+        parse_str((string) parse_url($sent['url'], PHP_URL_QUERY), $q);
+        $this->assertSame('8340', $q['message_id'], 'the integer Fast2SMS message_id, never the long template_id');
+        $this->assertSame('Asha', $q['variables_values']);
+        $this->assertStringContainsString('abc123', (string) $resp->json('raw'));
         $this->assertStringNotContainsString(self::KEY, $resp->getContent());
     }
 

@@ -5,28 +5,17 @@ namespace App\Services;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Read-only Fast2SMS account lookups used by Settings to verify and
- * auto-fill configuration, so a manager never has to copy technical IDs by
- * hand. Nothing here sends a message or costs credit.
+ * Read-only Fast2SMS WhatsApp account lookups: the approved-template list (Message Templates -> WhatsApp refresh) and
+ * the business profile check that runs when WhatsApp settings are saved. Nothing here sends a message.
  *
- * Endpoints and response shapes were confirmed against a live Fast2SMS
- * account on 2026-10-08 (not only the docs, which omit some fields):
+ *   GET /dev/dlt_manager/whatsapp?type=template[&phone_number_id=]
+ *        -> {success, data: [{waba_id, phone_number_id, ..., templates: [{message_id (int), template_id,
+ *           template_name, phone_number_id, category, status, language, var_count, components: [{type, text}]}]}]}
+ *        (docs.fast2sms.com/reference/get-waba-template-details; confirmed against a live account on 2026-10-08)
+ *   GET /dev/whatsapp/{version}/{phone_number_id}/whatsapp_business_profile?fields=...
+ *        -> {data: [{about, description, vertical, ...}]}   (docs.fast2sms.com/reference/get-whatsapp-business-profile)
  *
- *   POST /dev/wallet                              -> {return: true, wallet: "123.45", sms_count: 1234}
- *        bad key: HTTP 401 {return: false, status_code: 412, message: "Invalid Authentication, ..."}
- *   GET  /dev/dlt_manager?type=template           -> {success, data: [{sender_id, entity_id, entity_name,
- *                                                     entity_status, templates: [{message_id (int), message (text),
- *                                                     status, var_count}]}]}
- *        - note: NO telecom DLT Template ID is returned, only Fast2SMS's own message_id,
- *          which is what /dev/bulkV2 needs in its `message` field.
- *   GET  /dev/dlt_manager/whatsapp?type=number    -> {success, data: [{waba_id, phone_number_id, number,
- *                                                     verified_name, connection_status, ...}]}
- *   GET  /dev/dlt_manager/whatsapp?type=template  -> same, plus templates: [{message_id, template_id,
- *                                                     template_name, phone_number_id, category, status,
- *                                                     language, var_count, components: [{type, text}]}]}
- *
- * The API key travels only in the Authorization header and is scrubbed
- * from anything returned or logged.
+ * The API key travels only in the Authorization header and is scrubbed from anything returned or logged.
  */
 class Fast2SmsAccount
 {
@@ -35,68 +24,22 @@ class Fast2SmsAccount
     /** Tests swap this in: fn (string $method, string $url) => [array $body, int $httpCode]. */
     public static ?\Closure $transportOverride = null;
 
-    /** @return array{ok: bool, message: string, balance?: string, detail?: ?string} */
-    public static function wallet(string $apiKey): array
+    /**
+     * Read-only profile of one WhatsApp number (docs.fast2sms.com/reference/get-whatsapp-business-profile). It succeeds
+     * only when the API key and the Phone Number ID belong together, which is exactly what Settings needs to confirm.
+     * Says nothing about whether any message was or will be delivered.
+     *
+     * @return array{ok: bool, message: string, profile?: array, detail?: ?string, skipped?: bool}
+     */
+    public static function whatsappProfile(string $apiKey, string $phoneNumberId, string $version = 'v26.0'): array
     {
-        [$body, $code] = self::request('POST', self::BASE . '/wallet', $apiKey);
+        [$body, $code] = self::request('GET', Fast2SmsService::whatsappProfileUrl($version, $phoneNumberId), $apiKey);
 
-        if ($code === 200 && filter_var($body['return'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
-            return ['ok' => true, 'message' => 'Fast2SMS accepted the API key.', 'balance' => (string) ($body['wallet'] ?? '')];
+        if ($code === 200 && is_array($body['data'] ?? null)) {
+            return ['ok' => true, 'message' => 'Fast2SMS accepted the API key and Phone Number ID.', 'profile' => (array) ($body['data'][0] ?? [])];
         }
 
         return self::failure($body, $code, $apiKey);
-    }
-
-    /**
-     * Approved DLT SMS templates, flattened across entities/senders.
-     *
-     * @return array{ok: bool, message: string, templates?: list<array{message_id: string, text: string, var_count: int, status: string, sender_id: string, entity_name: string}>, detail?: ?string}
-     */
-    public static function smsTemplates(string $apiKey): array
-    {
-        [$body, $code] = self::request('GET', self::BASE . '/dlt_manager?type=template', $apiKey);
-
-        if ($code !== 200 || !filter_var($body['success'] ?? false, FILTER_VALIDATE_BOOLEAN) || !is_array($body['data'] ?? null)) {
-            return self::failure($body, $code, $apiKey);
-        }
-
-        $templates = [];
-        foreach ($body['data'] as $entity) {
-            foreach (($entity['templates'] ?? []) as $t) {
-                if (!isset($t['message_id'])) {
-                    continue;
-                }
-                $templates[] = [
-                    'message_id'  => (string) $t['message_id'],
-                    'text'        => (string) ($t['message'] ?? ''),
-                    'var_count'   => (int) ($t['var_count'] ?? 0),
-                    'status'      => (string) ($t['status'] ?? ''),
-                    'sender_id'   => (string) ($entity['sender_id'] ?? ''),
-                    'entity_name' => (string) ($entity['entity_name'] ?? ''),
-                ];
-            }
-        }
-
-        return ['ok' => true, 'message' => count($templates) . ' SMS template(s) found.', 'templates' => $templates];
-    }
-
-    /** @return array{ok: bool, message: string, numbers?: list<array{waba_id: string, phone_number_id: string, number: string, name: string, connected: bool}>, detail?: ?string} */
-    public static function whatsappNumbers(string $apiKey): array
-    {
-        $r = self::whatsapp($apiKey, 'number');
-        if (!$r['ok']) {
-            return $r;
-        }
-
-        $numbers = array_map(fn ($n) => [
-            'waba_id'         => (string) ($n['waba_id'] ?? ''),
-            'phone_number_id' => (string) ($n['phone_number_id'] ?? ''),
-            'number'          => (string) ($n['number'] ?? ''),
-            'name'            => (string) ($n['verified_name'] ?? ''),
-            'connected'       => strtoupper((string) ($n['connection_status'] ?? '')) === 'CONNECTED',
-        ], $r['data']);
-
-        return ['ok' => true, 'message' => count($numbers) . ' WhatsApp number(s) found.', 'numbers' => $numbers];
     }
 
     /**

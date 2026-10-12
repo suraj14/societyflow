@@ -36,6 +36,8 @@ class Fast2SmsService
             return [['transport_error' => ExternalMessaging::SUPPRESSED_MESSAGE, 'skipped' => true], 0];
         }
 
+        ExternalMessaging::beforeOutbound('Fast2SMS', 'www.fast2sms.com');
+
         try {
             $ch = curl_init($url);
             $options = [
@@ -106,6 +108,13 @@ class Fast2SmsService
         }
 
         return self::BASE . '/whatsapp?' . http_build_query($q, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    /** Read-only profile of a WhatsApp number: the documented way to confirm a key + Phone Number ID belong together. */
+    public static function whatsappProfileUrl(string $version, string $phoneNumberId): string
+    {
+        return self::BASE . '/whatsapp/' . rawurlencode($version) . '/' . rawurlencode($phoneNumberId) . '/whatsapp_business_profile?'
+            . http_build_query(['fields' => 'about,address,description,email,profile_picture_url,websites,vertical'], '', '&', PHP_QUERY_RFC3986);
     }
 
     /** Values joined by the documented `|` separator; a pipe inside a value would split it, so it becomes `/`. */

@@ -127,15 +127,19 @@ class WhatsAppService
     }
 
     /**
-     * Settings -> WhatsApp "Send Test WhatsApp": one synced, approved
-     * template, filled with sample values, so the manager can see a real
-     * message arrive. Returns dev_mode when WhatsApp is off or incomplete.
+     * Settings -> WhatsApp "Send Test": one synced, approved template filled with the values the manager typed (or sample
+     * values), so a real message can arrive. Returns dev_mode when WhatsApp is off or incomplete. The caller checks that
+     * the number of values matches the template's variable count.
+     *
+     * @param list<string>|null $values
      */
-    public static function sendTestTemplate(\App\Models\WhatsAppTemplate $template, string $phone, ?int $societyId): array
+    public static function sendTestTemplate(\App\Models\WhatsAppTemplate $template, string $phone, ?int $societyId, ?array $values = null): array
     {
-        $params = [];
-        for ($i = 1; $i <= $template->var_count; $i++) {
-            $params[] = "Test {$i}";
+        $params = $values !== null ? array_values($values) : [];
+        if ($values === null) {
+            for ($i = 1; $i <= $template->var_count; $i++) {
+                $params[] = "Test {$i}";
+            }
         }
         $components = $params ? [[
             'type'       => 'body',
@@ -145,7 +149,7 @@ class WhatsAppService
         $result = $template->message_id
             ? self::sendByMessageId($phone, $template, $params, $societyId, ['purpose' => 'test'])
             : self::sendTemplateMessage($phone, $template->name, $components, $societyId, logContext: ['purpose' => 'test'], language: $template->language ?: null);
-        if (($result['message'] ?? null) !== 'dev_mode') {
+        if (($result['message'] ?? null) !== 'dev_mode' && empty($result['skipped'])) {
             self::recordDelivery('test', $phone, $societyId, $result);
         }
 
@@ -193,7 +197,7 @@ class WhatsAppService
             return ['success' => true, 'message' => 'dev_mode'];
         }
 
-        $apiKey = self::getSetting('whatsapp_api_key', null, $societyId);
+        $apiKey = self::apiKey($societyId);
         $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
 
         if (empty($apiKey) || empty($phoneNumberId)) {
@@ -258,7 +262,7 @@ class WhatsAppService
             return ['success' => true, 'message' => 'dev_mode'];
         }
 
-        $apiKey = self::getSetting('whatsapp_api_key', null, $societyId);
+        $apiKey = self::apiKey($societyId);
         $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
         if (empty($apiKey) || empty($phoneNumberId)) {
             Log::info('WhatsApp not configured - message not sent', array_merge($logContext, ['phone' => SmsService::maskPhone($phone)]));
@@ -270,7 +274,7 @@ class WhatsAppService
 
         $handler = function ($body, $httpCode) use ($phone, $apiKey, $logContext) {
             if ($httpCode === 200 && filter_var($body['status'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
-                return ['success' => true, 'message' => 'WhatsApp message sent', 'request_id' => $body['request_id'] ?? null];
+                return ['success' => true, 'message' => 'WhatsApp message sent', 'request_id' => $body['request_id'] ?? null, 'raw' => SmsService::rawResponse($body, $apiKey)];
             }
 
             $error = $body['error']['message']
@@ -280,7 +284,7 @@ class WhatsAppService
                 'phone' => SmsService::maskPhone($phone), 'provider_msg' => SmsService::safeProviderMessage((string) $error, $apiKey),
             ]));
 
-            return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey), 'http_status' => $httpCode];
+            return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey), 'http_status' => $httpCode, 'raw' => SmsService::rawResponse($body, $apiKey)];
         };
 
         if (self::$transportOverride !== null) {
@@ -294,7 +298,7 @@ class WhatsAppService
             if (!empty($body['skipped'])) {
                 Log::notice('WhatsApp suppressed', ['host' => 'www.fast2sms.com']);
 
-                return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+                return ['success' => false, 'skipped' => true, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
             }
 
             return ['success' => false, 'message' => 'WhatsApp service unavailable: ' . ($body['transport_error'] ?? 'no response')];
@@ -309,7 +313,7 @@ class WhatsAppService
             return ['success' => true, 'message' => 'dev_mode'];
         }
 
-        $apiKey = self::getSetting('whatsapp_api_key', null, $societyId);
+        $apiKey = self::apiKey($societyId);
         $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
         $version = self::getSetting('whatsapp_api_version', 'v26.0', $societyId);
         // A synced template's own language wins: Meta matches name AND
@@ -379,6 +383,42 @@ class WhatsAppService
         return (bool) self::getSetting('whatsapp_enabled', false, $societyId);
     }
 
+    /**
+     * The key WhatsApp sends with: its own, or - when that field was left empty - the Fast2SMS key saved in SMS settings
+     * (one Fast2SMS account serves both). Never logged or returned to a page.
+     */
+    public static function apiKey(?int $societyId): string
+    {
+        $own = (string) self::getSetting('whatsapp_api_key', '', $societyId);
+
+        return $own !== '' ? $own : SmsService::apiKey($societyId);
+    }
+
+    /** True when WhatsApp is using the SMS key because no key of its own is saved (for the settings page wording). */
+    public static function usesSmsKey(?int $societyId): bool
+    {
+        return (string) self::getSetting('whatsapp_api_key', '', $societyId) === '' && SmsService::apiKey($societyId) !== '';
+    }
+
+    /**
+     * Confirms the saved key and Phone Number ID belong together, using the documented read-only business-profile
+     * request. Reports "skipped" when messaging is switched off (nothing was contacted). Proves nothing about delivery.
+     *
+     * @return array{ok: bool, message: string, detail?: ?string, skipped?: bool}
+     */
+    public static function checkConnection(?int $societyId): array
+    {
+        $apiKey = self::apiKey($societyId);
+        $phoneNumberId = (string) self::getSetting('whatsapp_phone_number_id', '', $societyId);
+        if ($apiKey === '' || $phoneNumberId === '') {
+            return ['ok' => false, 'message' => 'Save the API key and the Phone Number ID first.'];
+        }
+
+        $version = (string) (self::getSetting('whatsapp_api_version', 'v26.0', $societyId) ?: 'v26.0');
+
+        return Fast2SmsAccount::whatsappProfile($apiKey, $phoneNumberId, $version);
+    }
+
     /** Meta's API wants a country-coded number with no leading '+'. India default. */
     private static function toE164(string $phone, ?int $societyId = null): string
     {
@@ -410,8 +450,10 @@ class WhatsAppService
         if (!\App\Support\ExternalMessaging::enabled()) {
             Log::notice('WhatsApp suppressed', ['host' => parse_url($url, PHP_URL_HOST)]);
 
-            return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+            return ['success' => false, 'skipped' => true, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
         }
+
+        \App\Support\ExternalMessaging::beforeOutbound('WhatsApp', (string) parse_url($url, PHP_URL_HOST));
 
         try {
             $ch = curl_init($url);

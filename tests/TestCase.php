@@ -7,12 +7,49 @@ use App\Models\Flat;
 use App\Models\Resident;
 use App\Models\Society;
 use App\Models\User;
+use App\Support\ExternalMessaging;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Spatie\Permission\Models\Role;
 
 abstract class TestCase extends BaseTestCase
 {
     use CreatesApplication;
+
+    /** @var list<string> real provider requests a test tried to make (they are blocked) */
+    private array $blockedOutbound = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // No automated test may reach a real SMS / WhatsApp provider. Tests mock the transport; anything that gets as far
+        // as a real request is blocked here, recorded, and fails the test in tearDown() even if the app swallowed the error.
+        $this->blockedOutbound = [];
+        ExternalMessaging::$outboundGuard = function (string $channel, string $host) {
+            $this->blockedOutbound[] = "{$channel} -> {$host}";
+
+            throw new \RuntimeException("Blocked: a test tried to make a real {$channel} request to {$host}. Mock the transport.");
+        };
+    }
+
+    /** For the guard's own test: return the blocked requests so far and forget them. */
+    protected function consumeBlockedOutbound(): array
+    {
+        $blocked = $this->blockedOutbound;
+        $this->blockedOutbound = [];
+
+        return $blocked;
+    }
+
+    protected function tearDown(): void
+    {
+        ExternalMessaging::$outboundGuard = null;
+        $blocked = $this->blockedOutbound;
+
+        parent::tearDown();
+
+        $this->assertSame([], $blocked, 'No automated test may reach a real SMS / WhatsApp provider.');
+    }
 
     /**
      * Ensure a role exists on the web guard and return it.

@@ -33,7 +33,7 @@ class WhatsAppTemplateSyncService
     /** @return array{success: bool, message: string, count?: int, detail?: ?string, repaired?: int} */
     public static function sync(?int $societyId): array
     {
-        $apiKey = self::getSetting('whatsapp_api_key', null, $societyId);
+        $apiKey = WhatsAppService::apiKey($societyId);
         $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
 
         if (empty($apiKey)) {

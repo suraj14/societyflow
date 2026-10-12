@@ -760,7 +760,12 @@ class SettingsController extends Controller
         if ($request->filled('fast2sms_api_key') && !\App\Support\SettingSecrets::isMask($request->fast2sms_api_key)) {
             SystemSetting::set('sms', 'fast2sms_api_key', $request->fast2sms_api_key, 'encrypted', $societyId);
         }
-        SystemSetting::set('sms', 'fast2sms_route', $request->fast2sms_route ?? 'dlt', 'string', $societyId);
+        // Routing between DLT and Quick SMS is automatic. The only saved choice is the Advanced OTP-service option
+        // ('fast2sms_use_otp_service'); an explicit 'fast2sms_route' from older clients is still honoured.
+        $route = $request->has('fast2sms_route')
+            ? $request->fast2sms_route
+            : ($request->boolean('fast2sms_use_otp_service') ? 'otp' : 'dlt');
+        SystemSetting::set('sms', 'fast2sms_route', $route ?: 'dlt', 'string', $societyId);
         if ($request->filled('fast2sms_sender_id')) {
             SystemSetting::set('sms', 'fast2sms_sender_id', $request->fast2sms_sender_id, 'string', $societyId);
         }
@@ -818,6 +823,8 @@ class SettingsController extends Controller
             'test_value' => 'nullable|string|max:30',
             // pipe-separated values for the template's variables, e.g. "1234|Alpha Heights"
             'variables' => 'nullable|string|max:200',
+            // free text from the Test SMS box; routed automatically (DLT when a Sender ID + Message ID are saved, else Quick SMS)
+            'message' => 'nullable|string|max:320',
         ]);
 
         $user      = auth()->user();
@@ -825,9 +832,14 @@ class SettingsController extends Controller
         $value     = trim((string) $request->input('variables', '')) ?: (trim((string) $request->input('test_value', '')) ?: '1234');
 
         try {
-            $result = $request->input('template') === 'notification'
-                ? \App\Services\SmsService::sendDltNotification('notification', $request->phone, $value, $societyId, force: true)
-                : \App\Services\SmsService::sendOtp($request->phone, $value, $societyId, $request->route);
+            $result = match (true) {
+                $request->input('template') === 'notification'
+                    => \App\Services\SmsService::sendDltNotification('notification', $request->phone, $value, $societyId, force: true),
+                $request->filled('message') && !$request->filled('route')
+                    => \App\Services\SmsService::sendTest($request->phone, (string) $request->input('message'), $societyId),
+                default
+                    => \App\Services\SmsService::sendOtp($request->phone, $value, $societyId, $request->route),
+            };
         } catch (\Throwable $e) {
             // Never a 500 for the admin, and never the exception text: it can
             // carry request detail. The class is enough to diagnose.
@@ -865,7 +877,7 @@ class SettingsController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Test SMS sent to ' . \App\Services\SmsService::maskPhone($request->phone) . '. Fast2SMS accepted it for delivery.',
+                'message' => 'Fast2SMS accepted the test SMS for ' . \App\Services\SmsService::maskPhone($request->phone) . '. That means it was handed over for sending - it is not a delivery confirmation.',
                 'raw'     => $result['raw'] ?? null,
             ]);
         }
@@ -919,7 +931,16 @@ class SettingsController extends Controller
             'whatsapp_enabled'                      => 'nullable|boolean',
             'whatsapp_api_key'                       => 'nullable|string|max:500',
             'whatsapp_api_version'                    => 'nullable|string|max:20',
-            'whatsapp_phone_number_id'                => 'nullable|string|max:40',
+            'whatsapp_phone_number_id'                => ['nullable', 'string', 'max:40', function ($attribute, $value, $fail) {
+                $digits = preg_replace('/\s+/', '', (string) $value);
+                // The ID Fast2SMS shows for the WhatsApp number is a long numeric ID (about 15 digits). A 10-digit
+                // value, or 91 + 10 digits, is the mobile number itself - the mistake this field invites.
+                if ($digits !== '' && (!ctype_digit($digits) || strlen($digits) < 8 || preg_match('/^(91)?[6-9][0-9]{9}$/', $digits))) {
+                    $fail('Phone Number ID is the long numeric ID from Fast2SMS (WhatsApp), not a mobile number.');
+                }
+            }],
+            // Added in front of 10-digit recipient numbers (91 for India).
+            'whatsapp_country_code'                   => ['nullable', 'regex:/^[0-9]{1,4}$/'],
             // WhatsApp Business Account ID - needed only for the approved-template
             // sync (GET .../message_templates reads it from the URL), not for
             // sending; sending uses whatsapp_phone_number_id instead.
@@ -933,11 +954,17 @@ class SettingsController extends Controller
             'whatsapp_service_request_template_name'  => 'nullable|string|max:255',
             'whatsapp_emergency_template_name'        => 'nullable|string|max:255',
             'whatsapp_document_template_name'         => 'nullable|string|max:255',
+        ], [
+            'whatsapp_country_code.regex' => 'Country code is digits only, for example 91.',
         ]);
 
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
 
         SystemSetting::set('whatsapp', 'whatsapp_enabled', $request->boolean('whatsapp_enabled'), 'boolean', $societyId);
+
+        if ($request->has('whatsapp_country_code')) {
+            SystemSetting::set('whatsapp', 'whatsapp_country_code', trim((string) ($validated['whatsapp_country_code'] ?? '')) ?: '91', 'string', $societyId);
+        }
 
         if ($request->filled('whatsapp_api_key') && !\App\Support\SettingSecrets::isMask($request->whatsapp_api_key)) {
             SystemSetting::set('whatsapp', 'whatsapp_api_key', $request->whatsapp_api_key, 'encrypted', $societyId);
@@ -966,74 +993,37 @@ class SettingsController extends Controller
 
         \App\Support\ChannelStatus::clear('whatsapp', $societyId);
 
-        return redirect()->route('settings.index', ['tab' => 'whatsapp'])->with('success', 'WhatsApp settings saved. Use "Connect & Verify" to check them.');
+        return redirect()->route('settings.index', ['tab' => 'whatsapp'])->with('success', 'WhatsApp settings saved. ' . $this->checkWhatsAppAfterSave($societyId));
     }
 
     /**
-     * Sends a real WhatsApp message through whichever template is actually
-     * configured - the OTP/authentication one if set, otherwise the first
-     * notification template found - using a test value in its variable
-     * slot. Never claims success without a provider acceptance.
+     * When WhatsApp is switched on with a key and a Phone Number ID, confirm they belong together using the read-only
+     * business-profile request, and say so plainly. The settings are saved either way. A skipped check (messaging is
+     * switched off on this server) is not recorded as a result, and nothing here claims a message was delivered.
      */
-    public function testWhatsApp(Request $request)
+    private function checkWhatsAppAfterSave(?int $societyId): string
     {
-        $request->validate(['phone' => 'required|string|min:10|max:15']);
-
-        $user      = auth()->user();
-        $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
-
         if (!\App\Services\WhatsAppService::isEnabled($societyId)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'WhatsApp is turned off for this society. Tick "Enable WhatsApp", save, then test again.',
-            ]);
+            return 'WhatsApp is switched off.';
+        }
+        if (\App\Services\WhatsAppService::apiKey($societyId) === '' || (string) SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', '', $societyId) === '') {
+            return 'Add the API key and the Phone Number ID to start sending.';
         }
 
-        $otpTemplate = SystemSetting::get('whatsapp', 'whatsapp_otp_template_name', null, $societyId);
+        $check = \App\Services\WhatsAppService::checkConnection($societyId);
 
-        try {
-            if (!empty($otpTemplate)) {
-                $result = \App\Services\WhatsAppService::sendOtp($request->phone, '123456', $societyId);
-            } else {
-                $purpose = collect(['visitor', 'access_pass', 'complaint', 'payment', 'service_request', 'emergency', 'document'])
-                    ->first(fn ($p) => !empty(SystemSetting::get('whatsapp', "whatsapp_{$p}_template_name", null, $societyId)));
+        if (!empty($check['skipped'])) {
+            return 'Not checked with Fast2SMS: real messaging is switched off on this server.';
+        }
+        if ($check['ok']) {
+            \App\Support\ChannelStatus::record('whatsapp', $societyId, true, 'Fast2SMS accepted the API key and Phone Number ID');
 
-                if (!$purpose) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'No WhatsApp template is configured yet. Add at least one template name and save.',
-                    ]);
-                }
-
-                $result = \App\Services\WhatsAppService::sendNotification($purpose, $request->phone, ['This is a test message from SocietyFlow.'], $societyId);
-            }
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Test WhatsApp failed', ['class' => get_class($e), 'society_id' => $societyId]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'WhatsApp request failed: the service could not be reached. Try again.',
-            ]);
+            return 'Fast2SMS accepted the API key and Phone Number ID.';
         }
 
-        if ($result['success'] && $result['message'] !== 'dev_mode') {
-            return response()->json([
-                'success' => true,
-                'message' => 'Test WhatsApp message sent to ' . \App\Services\SmsService::maskPhone($request->phone) . '.',
-            ]);
-        }
+        \App\Support\ChannelStatus::record('whatsapp', $societyId, false, $check['message'], $check['detail'] ?? null);
 
-        if ($result['message'] === 'dev_mode') {
-            return response()->json([
-                'success' => false,
-                'message' => 'WhatsApp is not fully configured (API key or Phone Number ID missing).',
-            ]);
-        }
-
-        return response()->json([
-            'success' => false,
-            'message' => 'WhatsApp request failed: ' . $result['message'],
-        ]);
+        return 'Fast2SMS did not accept them - see the message at the top of this page.';
     }
 
     public function updateSecurity(Request $request)

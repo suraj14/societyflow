@@ -15,10 +15,9 @@ use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 /**
- * Settings -> Email / SMS / OTP / WhatsApp: configure once, verify against
- * the provider, pick templates instead of typing IDs. Provider HTTP is
- * faked with the response shapes confirmed against a live Fast2SMS account
- * (see Fast2SmsAccount's docblock); nothing here touches the network.
+ * Settings -> Email / SMS / OTP / WhatsApp: configure once, test with the saved values. Provider HTTP is faked with the
+ * response shapes confirmed against a live Fast2SMS account (see Fast2SmsAccount's docblock); nothing here touches the
+ * network.
  */
 class CommunicationSettingsTest extends TestCase
 {
@@ -62,21 +61,6 @@ class CommunicationSettingsTest extends TestCase
         };
     }
 
-    private function smsTemplatesResponse(): array
-    {
-        return [[
-            'success' => true,
-            'data' => [
-                ['sender_id' => 'ROYALE', 'entity_id' => '1701111111111111111', 'entity_name' => 'Royal Eden RWA', 'entity_status' => 'Approved', 'templates' => [
-                    ['message_id' => 182001, 'message' => 'Your Royal Eden login OTP is {#var#}. Do not share it.', 'status' => 'Approved', 'var_count' => 1],
-                    ['message_id' => 182002, 'message' => 'Royal Eden: {#var#}', 'status' => 'Approved', 'var_count' => 1],
-                    ['message_id' => 182003, 'message' => 'Dear {#var#}, your bill of {#var#} is due.', 'status' => 'Approved', 'var_count' => 2],
-                    ['message_id' => 182004, 'message' => 'Pending one {#var#}', 'status' => 'Pending', 'var_count' => 1],
-                ]],
-            ],
-        ], 200];
-    }
-
     private function waNumber(string $pnid, string $number = '+919000000001', array $templates = []): array
     {
         return ['waba_id' => 4001001001001001, 'phone_number_id' => (int) $pnid, 'number' => $number, 'verified_name' => 'Royal Eden',
@@ -97,15 +81,13 @@ class CommunicationSettingsTest extends TestCase
         SystemSetting::set('whatsapp', 'whatsapp_enabled', true, 'boolean', $this->society);
     }
 
-    private function connectWhatsApp(array $templates): void
+    /** Key + Phone Number ID saved, then "Refresh from Fast2SMS" with these templates on the number. */
+    private function syncWhatsApp(array $templates): void
     {
         $this->saveWhatsAppKey();
-        $number = $this->waNumber('7001001001001001', '+919000000001', $templates);
-        $this->fakeAccount([
-            'whatsapp?type=number'   => [['success' => true, 'data' => [array_diff_key($number, ['templates' => 1])]], 200],
-            'whatsapp?type=template' => [['success' => true, 'data' => [$number]], 200],
-        ]);
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.connect'))->assertOk()->assertJson(['success' => true]);
+        SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '7001001001001001', 'string', $this->society);
+        $this->fakeAccount(['whatsapp?type=template' => [['success' => true, 'data' => [$this->waNumber('7001001001001001', '+919000000001', $templates)]], 200]]);
+        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.sync'))->assertOk()->assertJson(['success' => true]);
     }
 
     // ── Settings structure ──────────────────────────────────────────────────
@@ -183,95 +165,6 @@ class CommunicationSettingsTest extends TestCase
         SystemSetting::set('sms', 'fast2sms_api_key', self::KEY, 'encrypted', $this->society);
     }
 
-    public function test_sms_connect_verifies_the_key_and_lists_only_approved_templates(): void
-    {
-        $this->saveSmsKey();
-        $this->fakeAccount([
-            '/dev/wallet' => [['return' => true, 'wallet' => '512.30', 'sms_count' => 2300], 200],
-            'dlt_manager?type=template' => $this->smsTemplatesResponse(),
-        ]);
-
-        $r = $this->actingAs($this->admin)->postJson(route('settings.sms.connect'))->assertOk();
-
-        $this->assertTrue($r->json('success'));
-        $this->assertSame(['182001', '182002', '182003'], array_column($r->json('templates'), 'message_id'));
-        $this->assertSame('ROYALE', $r->json('templates.0.sender_id'));
-        $this->assertTrue(ChannelStatus::get('sms', $this->society)['ok']);
-        $this->assertStringNotContainsString(self::KEY, $r->getContent());
-    }
-
-    public function test_sms_connect_with_a_rejected_key_is_explained(): void
-    {
-        $this->saveSmsKey();
-        $this->fakeAccount(['/dev/wallet' => [['return' => false, 'status_code' => 412, 'message' => 'Invalid Authentication, Check Authorization Key'], 401]]);
-
-        $r = $this->actingAs($this->admin)->postJson(route('settings.sms.connect'))->assertOk();
-
-        $this->assertFalse($r->json('success'));
-        $this->assertStringContainsString('did not accept this API key', $r->json('message'));
-        $this->assertStringContainsString('Invalid Authentication', $r->json('details'));
-        $this->assertFalse(ChannelStatus::get('sms', $this->society)['ok']);
-    }
-
-    public function test_sms_verify_matches_a_message_id_and_explains_a_dlt_template_id(): void
-    {
-        $this->saveSmsKey();
-        $this->fakeAccount(['dlt_manager?type=template' => $this->smsTemplatesResponse()]);
-
-        $this->actingAs($this->admin)->postJson(route('settings.sms.verify'), ['template_ref' => '182001'])
-            ->assertOk()->assertJson(['success' => true, 'template' => ['message_id' => '182001', 'sender_id' => 'ROYALE']]);
-
-        $dlt = $this->actingAs($this->admin)->postJson(route('settings.sms.verify'), ['template_ref' => '1707168880000012345'])->assertOk();
-        $this->assertFalse($dlt->json('success'));
-        $this->assertStringContainsString('DLT Template ID', $dlt->json('message'));
-        $this->assertCount(3, $dlt->json('templates'), 'the manager is offered the list to pick from');
-
-        $this->actingAs($this->admin)->postJson(route('settings.sms.verify'), ['template_ref' => '999999'])
-            ->assertOk()->assertJson(['success' => false]);
-
-        $this->assertNull(SystemSetting::where('key', 'fast2sms_template_id')->value('value'), 'verifying never saves anything');
-    }
-
-    public function test_using_a_template_for_otp_saves_message_id_sender_and_route(): void
-    {
-        $this->saveSmsKey();
-        $this->fakeAccount(['dlt_manager?type=template' => $this->smsTemplatesResponse()]);
-
-        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'otp', 'message_id' => '182001'])
-            ->assertOk()->assertJson(['success' => true]);
-
-        $this->assertSame('182001', SystemSetting::get('sms', 'fast2sms_template_id', null, $this->society));
-        $this->assertSame('ROYALE', SystemSetting::get('sms', 'fast2sms_sender_id', null, $this->society));
-        $this->assertSame('dlt', SystemSetting::get('sms', 'fast2sms_route', null, $this->society));
-        $this->actingAs($this->admin)->get('/settings?tab=sms')->assertSee('Your Royal Eden login OTP is');
-
-        // Two variables, or not in the account: refused.
-        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'notification', 'message_id' => '182003'])
-            ->assertJson(['success' => false]);
-        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'notification', 'message_id' => '555555'])
-            ->assertJson(['success' => false]);
-        $this->assertNull(SystemSetting::get('sms', 'fast2sms_notification_template_id', null, $this->society));
-    }
-
-    public function test_notification_sms_use_their_own_template_and_sender(): void
-    {
-        $this->saveSmsKey();
-        SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $this->society);
-        SystemSetting::set('sms', 'fast2sms_template_id', '182001', 'string', $this->society);
-        SystemSetting::set('sms', 'fast2sms_sender_id', 'ROYALE', 'string', $this->society);
-        $this->fakeAccount(['dlt_manager?type=template' => $this->smsTemplatesResponse()]);
-        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'notification', 'message_id' => '182002'])->assertJson(['success' => true]);
-
-        $sent = null;
-        SmsService::$transportOverride = function ($url, $data) use (&$sent) { parse_str((string) parse_url($url, PHP_URL_QUERY), $sent); // Fast2SMS SMS is a documented GET: values are in the query
-             return [['return' => true], 200]; };
-
-        SmsService::sendDltNotification('notification', '9876543210', 'Water supply off 2-4 PM', $this->society);
-
-        $this->assertSame('182002', $sent['message'], 'notification template, not the OTP one');
-        $this->assertSame('Water supply off 2-4 PM', $sent['variables_values']);
-    }
-
     public function test_a_saved_dlt_template_id_is_never_sent_as_a_message_id(): void
     {
         $this->saveSmsKey();
@@ -302,77 +195,56 @@ class CommunicationSettingsTest extends TestCase
         $r = $this->actingAs($this->admin)->postJson(route('settings.sms.test'), ['phone' => '9876543210', 'test_value' => '4321'])->assertOk();
 
         $this->assertTrue($r->json('success'));
-        $this->assertStringContainsString('accepted it for delivery', $r->json('message'));
+        $this->assertStringContainsString('Fast2SMS accepted the test SMS', $r->json('message'));
+        $this->assertStringContainsString('not a delivery confirmation', $r->json('message'));
         $this->assertSame('4321', $sent['variables_values']);
         $this->assertTrue(ChannelStatus::get('sms', $this->society)['ok']);
     }
 
     // ── WhatsApp ────────────────────────────────────────────────────────────
 
-    public function test_connect_fills_number_ids_and_syncs_this_numbers_templates(): void
+    public function test_refreshing_syncs_this_numbers_templates_with_message_id_variables_and_body(): void
     {
-        $this->connectWhatsApp([
+        $this->syncWhatsApp([
             $this->waTemplate('payment_completed', 1, 'Dear user, Your last payment completed successfully amount: {{1}} Thank you.'),
             $this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is at the gate.'),
             $this->waTemplate('promo', 1, 'Sale {{1}}', '7001001001001001', 'Rejected'),
         ]);
 
-        $this->assertSame('7001001001001001', SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', null, $this->society));
-        $this->assertSame('4001001001001001', SystemSetting::get('whatsapp', 'whatsapp_waba_id', null, $this->society));
         $this->assertSame(3, WhatsAppTemplate::bySociety($this->society)->count());
         $this->assertSame(2, WhatsAppTemplate::bySociety($this->society)->approved()->count());
         $tpl = WhatsAppTemplate::where('name', 'payment_completed')->first();
         $this->assertSame(1, $tpl->var_count);
         $this->assertSame('en', $tpl->language);
+        $this->assertNotEmpty($tpl->message_id);
         $this->assertStringContainsString('amount: {{1}}', $tpl->body_text);
-        $this->assertTrue(ChannelStatus::get('whatsapp', $this->society)['ok']);
 
         $html = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertOk()->getContent();
-        $this->assertStringContainsString('WhatsApp connected', $html);
-        $this->assertStringContainsString('Payment Completed', $html);
+        $this->assertStringContainsString('Payment Completed', $html, 'the approved template is offered for the test');
         $this->assertStringNotContainsString('meta_payment_completed', $html, 'Meta template IDs stay internal');
         $this->assertStringNotContainsString(self::KEY, $html);
     }
 
-    public function test_connect_with_several_numbers_asks_which_one(): void
+    public function test_refreshing_keeps_only_templates_of_the_saved_phone_number_id(): void
     {
         $this->saveWhatsAppKey();
+        SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '7002', 'string', $this->society);
         $this->fakeAccount([
-            'whatsapp?type=number' => [['success' => true, 'data' => [
-                array_diff_key($this->waNumber('7001'), ['templates' => 1]),
-                array_diff_key($this->waNumber('7002', '+919000000002'), ['templates' => 1]),
+            'whatsapp?type=template' => [['success' => true, 'data' => [
+                $this->waNumber('7001', '+919000000001', [$this->waTemplate('only_on_one', 1, 'X {{1}}', '7001')]),
+                $this->waNumber('7002', '+919000000002', [$this->waTemplate('only_on_two', 1, 'X {{1}}', '7002')]),
             ]], 200],
-            'whatsapp?type=template' => [['success' => true, 'data' => [$this->waNumber('7002', '+919000000002', [$this->waTemplate('only_on_two', 1, 'X {{1}}', '7002')])]], 200],
         ]);
 
-        $first = $this->actingAs($this->admin)->postJson(route('settings.whatsapp.connect'))->assertOk();
-        $this->assertTrue($first->json('choose'));
-        $this->assertCount(2, $first->json('numbers'));
-        $this->assertEmpty(SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', null, $this->society));
+        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.sync'))->assertOk()->assertJson(['success' => true]);
 
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.connect'), ['phone_number_id' => '7002'])->assertJson(['success' => true]);
-        $this->assertSame('7002', SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', null, $this->society));
         $this->assertSame(['only_on_two'], WhatsAppTemplate::bySociety($this->society)->pluck('name')->all());
-    }
-
-    public function test_verify_template_resolves_ids_and_names_but_never_saves_the_pasted_value(): void
-    {
-        $this->connectWhatsApp([$this->waTemplate('payment_completed', 1, 'amount: {{1}}')]);
-        $tpl = WhatsAppTemplate::where('name', 'payment_completed')->first();
-
-        foreach (['meta_payment_completed', 'payment_completed', 'Payment Completed', (string) $tpl->message_id] as $ref) {
-            $this->actingAs($this->admin)->postJson(route('settings.whatsapp.verify-template'), ['template_ref' => $ref])
-                ->assertOk()->assertJson(['success' => true, 'template' => ['id' => $tpl->id]]);
-        }
-
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.verify-template'), ['template_ref' => 'no_such_template'])
-            ->assertJson(['success' => false]);
-        $this->assertNull(SystemSetting::get('whatsapp', 'whatsapp_payment_template_name', null, $this->society));
+        $this->assertStringContainsString('phone_number_id=7002', implode(' ', $this->providerCalls), 'the documented phone_number_id filter is sent');
     }
 
     public function test_assigning_a_template_checks_variables_and_drives_the_real_send(): void
     {
-        $this->connectWhatsApp([
+        $this->syncWhatsApp([
             $this->waTemplate('payment_completed', 1, 'Dear user, amount: {{1}}'),
             $this->waTemplate('huge', 9, '{{1}}{{2}}{{3}}{{4}}{{5}}{{6}}{{7}}{{8}}{{9}}'),
         ]);
@@ -386,7 +258,6 @@ class CommunicationSettingsTest extends TestCase
         $this->actingAs($this->admin)->postJson(route('settings.whatsapp.assign'), ['purpose' => 'payment', 'template_id' => $ok->id, 'variables' => ['amount']])
             ->assertJson(['success' => true]);
 
-        $sent = null;
         $url = null;
         WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'request_id' => 'r1'], 200]; };
 
@@ -397,6 +268,8 @@ class CommunicationSettingsTest extends TestCase
         parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
         $this->assertSame((string) $ok->message_id, $q['message_id']);
         $this->assertNotSame('meta_payment_completed', $q['message_id']);
+        $this->assertSame('7001001001001001', $q['phone_number_id']);
+        $this->assertSame('919876543210', $q['numbers']);
         $this->assertSame("\u{20B9}1,200.00", $q['variables_values']);
         $this->assertDatabaseHas('email_logs', ['channel' => 'whatsapp', 'trigger_action' => 'payment', 'status' => 'sent']);
     }
@@ -407,11 +280,11 @@ class CommunicationSettingsTest extends TestCase
         SystemSetting::set('whatsapp', 'whatsapp_payment_template_name', 'Payment Completed', 'string', $this->society);
         SystemSetting::set('whatsapp', 'whatsapp_visitor_template_name', 'Something Unknown', 'string', $this->society);
 
-        $this->connectWhatsApp([$this->waTemplate('payment_completed', 1, 'amount: {{1}}')]);
+        $this->syncWhatsApp([$this->waTemplate('payment_completed', 1, 'amount: {{1}}')]);
 
         $this->assertSame('payment_completed', SystemSetting::get('whatsapp', 'whatsapp_payment_template_name', null, $this->society));
         $this->assertSame('Something Unknown', SystemSetting::get('whatsapp', 'whatsapp_visitor_template_name', null, $this->society), 'unmatched values are left alone, never guessed');
-        // the purpose -> template mapping lives on the Message Templates page now (the settings page only summarises it)
+        // the purpose -> template mapping lives on the Message Templates page (the settings page only links to it)
         $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->assertSee('Needs a new template');
     }
 
@@ -427,31 +300,48 @@ class CommunicationSettingsTest extends TestCase
         $this->assertSame('payment_completed', SystemSetting::get('whatsapp', 'whatsapp_payment_template_name', null, $this->society));
     }
 
-    public function test_test_whatsapp_sends_the_chosen_template_with_sample_values(): void
+    public function test_test_whatsapp_sends_the_chosen_template_with_typed_or_sample_values(): void
     {
-        $this->connectWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is here')]);
+        $this->syncWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is here')]);
         $tpl = WhatsAppTemplate::where('name', 'visitor_alert')->first();
         $url = null;
-        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'request_id' => 'r2'], 200]; };
+        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'r2'], 200]; };
+        $send = fn (array $extra = []) => $this->actingAs($this->admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id] + $extra)->assertOk();
 
-        $r = $this->actingAs($this->admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id])->assertOk();
-
+        // typed values
+        $r = $send(['variables' => 'Asha|Block A']);
         $this->assertTrue($r->json('success'));
+        $this->assertStringContainsString('not a delivery confirmation', $r->json('message'));
+        $this->assertStringContainsString('r2', (string) $r->json('raw'), 'Fast2SMS\'s own reply is shown');
         parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
-        $this->assertSame('Test 1|Test 2', $q['variables_values']);
+        $this->assertSame('Asha|Block A', $q['variables_values']);
         $this->assertSame('919876543210', $q['numbers']);
         $this->assertSame((string) $tpl->message_id, $q['message_id']);
 
+        // no values typed: sample values
+        $send();
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+        $this->assertSame('Test 1|Test 2', $q['variables_values']);
+
+        // wrong number of values is refused before any request
+        $url = null;
+        $bad = $send(['variables' => 'only one']);
+        $this->assertFalse($bad->json('success'));
+        $this->assertStringContainsString('needs 2 value(s)', $bad->json('message'));
+        $this->assertNull($url, 'nothing was sent');
+
+        // a provider rejection is explained and shown raw
         WhatsAppService::$transportOverride = fn () => [['error' => ['message' => '(#132001) Template name does not exist in the translation']], 400];
-        $fail = $this->actingAs($this->admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id])->assertOk();
+        $fail = $send(['variables' => 'Asha|Block A']);
         $this->assertFalse($fail->json('success'));
         $this->assertStringContainsString('does not recognise that template', $fail->json('message'));
         $this->assertStringContainsString('132001', $fail->json('details'));
+        $this->assertStringContainsString('132001', (string) $fail->json('raw'));
     }
 
     public function test_another_societys_admin_cannot_test_with_or_see_our_templates(): void
     {
-        $this->connectWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}} {{2}}')]);
+        $this->syncWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}} {{2}}')]);
         $tpl = WhatsAppTemplate::where('name', 'visitor_alert')->first();
         $other = $this->makeUserWithRole($this->makeSociety('Other'), 'Admin');
         SystemSetting::set('whatsapp', 'whatsapp_enabled', true, 'boolean', $other->society_id);
@@ -465,8 +355,8 @@ class CommunicationSettingsTest extends TestCase
     {
         $tenant = $this->makeUserWithRole(\App\Models\Society::find($this->society), 'Tenant');
 
-        foreach (['settings.sms.connect', 'settings.sms.verify', 'settings.sms.use-template', 'settings.whatsapp.connect', 'settings.whatsapp.sync',
-                  'settings.whatsapp.verify-template', 'settings.whatsapp.assign', 'settings.whatsapp.unassign', 'settings.whatsapp.test-template', 'settings.email.test'] as $route) {
+        foreach (['settings.sms.update', 'settings.sms.test', 'settings.whatsapp.update', 'settings.whatsapp.sync', 'settings.whatsapp.assign',
+                  'settings.whatsapp.unassign', 'settings.whatsapp.test-template', 'settings.email.test'] as $route) {
             $this->actingAs($tenant)->postJson(route($route), [])->assertForbidden();
         }
     }
@@ -488,40 +378,5 @@ class CommunicationSettingsTest extends TestCase
         $this->assertFalse($result['success']);
         $this->assertStringContainsString('No notification SMS template', $result['message']);
         $this->assertFalse($called, 'no request is made: the OTP template is not approved for notification text');
-        $this->actingAs($this->admin)->get('/settings?tab=sms')->assertSee('the OTP template is never reused');
-    }
-
-    public function test_choosing_the_otp_template_never_changes_the_notification_template_and_vice_versa(): void
-    {
-        $this->saveSmsKey();
-        $this->fakeAccount(['dlt_manager?type=template' => $this->smsTemplatesResponse()]);
-        $get = fn (string $k) => SystemSetting::get('sms', $k, null, $this->society);
-
-        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'notification', 'message_id' => '182002'])->assertJson(['success' => true]);
-        $notifBefore = [$get('fast2sms_notification_template_id'), $get('fast2sms_notification_sender_id')];
-        $this->assertNull($get('fast2sms_template_id'), 'choosing a notification template does not fill the OTP one');
-
-        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'otp', 'message_id' => '182001'])->assertJson(['success' => true]);
-        $this->assertSame($notifBefore, [$get('fast2sms_notification_template_id'), $get('fast2sms_notification_sender_id')], 'choosing the OTP template leaves notifications alone');
-        $this->assertSame('182001', $get('fast2sms_template_id'));
-    }
-
-    public function test_connect_and_verify_only_read_the_account_and_never_call_a_send_endpoint(): void
-    {
-        $this->saveSmsKey();
-        $this->fakeAccount(['wallet' => [['return' => true, 'wallet' => 120.5], 200], 'dlt_manager?type=template' => $this->smsTemplatesResponse()]);
-        $sent = false;
-        SmsService::$transportOverride = function () use (&$sent) { $sent = true; return [['return' => true], 200]; };
-
-        $this->actingAs($this->admin)->postJson(route('settings.sms.connect'))->assertOk();
-        $this->actingAs($this->admin)->postJson(route('settings.sms.verify'), ['template_ref' => '182001'])->assertOk();
-
-        $this->assertFalse($sent, 'no SMS transport is touched');
-        foreach ($this->providerCalls as $call) {
-            $this->assertMatchesRegularExpression('#/dev/(wallet|dlt_manager)#', $call, 'only the balance and template-list endpoints are used');
-            $this->assertStringNotContainsString('/bulkV2', $call);
-            $this->assertStringNotContainsString('/otp/send', $call);
-        }
-        $this->assertNotEmpty($this->providerCalls);
     }
 }

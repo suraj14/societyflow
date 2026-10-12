@@ -111,12 +111,6 @@
     </div>
 
     {{-- Where to act --}}
-    @if (in_array($channel, ['all', 'sms'], true))
-        <section aria-labelledby="sms-tools"><h3 id="sms-tools" class="sr-only">SMS templates</h3>
-            @include('settings.partials.sms-templates')
-        </section>
-    @endif
-
     @if (in_array($channel, ['all', 'whatsapp'], true))
         <section aria-labelledby="wa-tools" class="space-y-3">
             <h3 id="wa-tools" class="font-semibold text-gray-900">WhatsApp: approved templates and what each notification uses</h3>

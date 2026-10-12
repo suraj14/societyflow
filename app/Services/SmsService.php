@@ -205,6 +205,12 @@ class SmsService
 
         return $result;
     }
+    /** The saved Fast2SMS API key for a society (falling back to the platform key); '' when none. Never logged. */
+    public static function apiKey(?int $societyId): string
+    {
+        return (string) self::getSetting('fast2sms_api_key', '', $societyId);
+    }
+
     /** The Message Templates purpose a notification purpose reads its SMS template from. */
     private static function templatePurpose(string $purpose): string
     {
@@ -323,6 +329,38 @@ class SmsService
         }
 
         return self::sendViaFast2SmsQuick($phone, $rendered['text'], $apiKey);
+    }
+
+    /**
+     * Settings -> SMS "Send Test SMS": the typed text, routed like any other SMS. With a Sender ID and a default Message
+     * ID saved it goes on the DLT route and the text (split on "|") fills the template's variables; otherwise it is
+     * Quick SMS. Honours the Enabled switch and the messaging kill switch like every other send.
+     */
+    public static function sendTest(string $phone, string $text, ?int $societyId): array
+    {
+        $phone = self::normalizePhone($phone);
+
+        if (!self::getSetting('sms_enabled', false, $societyId)) {
+            return self::stamp(self::skipped(self::STATUS_SKIPPED_DISABLED));
+        }
+
+        $apiKey = (string) self::getSetting('fast2sms_api_key', '', $societyId);
+        if ($apiKey === '') {
+            return self::stamp(self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED));
+        }
+        if ($bad = self::invalidNumber($phone)) {
+            return $bad;
+        }
+
+        $messageId = (string) self::getSetting('fast2sms_template_id', '', $societyId);
+        $senderId = (string) self::getSetting('fast2sms_sender_id', '', $societyId);
+
+        if ($messageId !== '' && $senderId !== '') {
+            return self::stamp(self::fast2smsGet(Fast2SmsService::dltUrl($senderId, $messageId, array_values(array_filter(array_map('trim', explode('|', $text)), fn ($v) => $v !== '')), $phone), $apiKey,
+                self::fast2smsResponseHandler($phone, 'dlt', $apiKey)));
+        }
+
+        return self::stamp(self::sendViaFast2SmsQuick($phone, $text, $apiKey));
     }
 
     /**
@@ -590,6 +628,8 @@ class SmsService
             return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
         }
 
+        \App\Support\ExternalMessaging::beforeOutbound('SMS', (string) parse_url($url, PHP_URL_HOST));
+
         try {
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -626,6 +666,8 @@ class SmsService
 
             return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
         }
+
+        \App\Support\ExternalMessaging::beforeOutbound('SMS', (string) parse_url($url, PHP_URL_HOST));
 
         try {
             $ch = curl_init($url);
