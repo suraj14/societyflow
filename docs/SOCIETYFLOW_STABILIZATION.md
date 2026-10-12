@@ -19,13 +19,20 @@ provider HTTP layer is faked; **no live SMS / WhatsApp / email / payment was sen
 
 ## Finance access by role (verified by `FinanceReconciliationTest` / `WebTenantIsolationTest`)
 
-| Role | Bills / rent | Record payment | Verify / reject | Reports | Receipts |
-|---|---|---|---|---|---|
-| Super Admin | all societies | yes | yes | all | yes |
-| Admin | own society | yes (success) | yes | own society | yes |
-| Accountant | own society, read | **no** (pinned by test; decision for the owner) | no | own society | own society |
-| Owner / Villa Owner | own units | claim only (pending) | no | no | own units, success only |
-| Tenant | own tenancy unit | claim only (pending) | no | no | own unit, success only |
+| Role | Bills / rent | Record payment | Verify / reject | Change / delete a payment | Reports | Receipts |
+|---|---|---|---|---|---|---|
+| Super Admin | all societies | yes | yes | yes | all | yes |
+| Admin | own society | yes (success) | yes, never their own submission | yes (delete leaves an audit row) | own society | yes |
+| Accountant | own society, read | no | **no** | no | own society | own society |
+| Owner / Villa Owner | own units | claim only (pending) | no | own *pending* claim only | no | own units, success only |
+| Tenant | own tenancy unit | claim only (pending) | no | own *pending* claim only | no | own unit, success only |
+
+Correction (2026-10-12, round 2): the first version of this table said Accountant could not verify. The code actually let
+Accountant approve and reject claims, and let a resident edit or delete their own *verified* payment. Both are fixed and
+pinned by `FinancePermissionMatrixTest` (13 tests, mutation-checked). Add/edit of society expenses stays with Accountant
+(documented `manage_expenses` grant, delete is Admin-only). No refund workflow exists in the schema, so there is nothing to
+authorise there; reversing a payment is an Admin delete, audited as `payment.deleted`. Web is the only write surface: the API
+has no payment/bill write route (asserted) and the Flutter app has none.
 
 Calculation rules: only `success` payments count toward `paid_amount` (ledger-derived by `MaintenanceBill::syncFromLedger`);
 `pending` is a claim, `failed` / `cancelled` do not count; there are no refunds in the schema. Totals are decimal(2) and
@@ -42,14 +49,95 @@ reconciliation tests assert bill total = Σ success payments + outstanding on de
 | Society expenses / utility bills | yes | n/a | access matrix only | **unverified in depth** |
 | Password policy | yes | yes | yes | fixed |
 | SMS / WhatsApp / Message Templates | yes | n/a | mocked | done; **live delivery not tested** |
-| Facility booking conflict / cancellation notice | yes | yes | conflict tested | cancellation notice **missing / not audited** |
-| Guard shift change notifications | none | none | none | **missing** |
+| Facility booking conflict / cancellation notice | yes | yes | conflict + every cancellation route tested | fixed (round 2) |
+| Guard shift change notifications | yes (in-app) | bell endpoint | `ShiftRosterNotificationTest` (11) | fixed (round 2); no email/SMS/WhatsApp by design |
 | Push notifications | removed by decision | removed | — | not reintroduced |
 
-## Verification
+## Round 2 (after commit 356c9d5): production-readiness gaps
 
-See `docs/CURRENT_STATUS.md` (2026-10-12 stabilization entry) for the run counts and what was NOT tested
-(Android device, live provider delivery, browser pass of the new screens).
+| # | Gap | Root cause | Fix (files) | Regression test | Status |
+|---|---|---|---|---|---|
+| 9 | Finance separation of duties | `PaymentController::approve/reject` allowed Accountant; `update/edit/destroy` used the generic "own record" check, so a resident could rewrite the amount of, or delete, their own *verified* payment; a resident could repoint a claim at another unit; nobody was barred from verifying their own submission | `PaymentController` (`authorizePaymentWrite`, `authorizeVerifier`, resident edit limited to own unit + not above the balance, audit row on delete); `payments/index` + `payments/show` buttons follow the same rules | `FinancePermissionMatrixTest` (13); `ResidentPaymentSubmissionTest` Accountant case changed deliberately (it pinned the old, wrong behaviour); mutation check: re-allowing Accountant and the old write gate each fail 2 tests | fixed |
+| 10 | Guard shift change notifications absent | Roster actions wrote history/audit only | `GuardShiftService` (`tellGuard`, via `DB::afterCommit`), `BusinessNotifications::guardShiftChanged`: assign, remove, replace (outgoing + incoming guard), absent. Only that guard, only active, only same society, never the acting admin | `ShiftRosterNotificationTest` (11, incl. waits-for-commit with a mutation check, refused/duplicate/rolled-back tell nobody, cross-society, shows in `/api/v1/notifications`) | fixed; in-app only |
+| 11 | Booking cancellation | The report said "missing", the audit found it mostly present: resident withdraw (web) and cancel (API) tell the office; the office setting `cancelled` tells the resident (email + in-app, once). The real gap: the office *deleting* an upcoming pending/approved booking told the requester nothing | `FacilityBookingController::destroy` (dispatches `FacilityBookingStatusUpdated` with the new status for someone else's upcoming booking), `BusinessNotifications::facilityBookingUpdated` and the email listener link to the list when the row is gone | `FacilityBookingWebNotificationTest` +5 (office cancel once, office delete = cancellation with a sent EmailLog, past/rejected/cancelled/own = nobody, other society 403, API cancel once) | fixed |
+| 12 | Message-template form broke after a rejected save | An emptied box comes back as `null`, the page script then called `body.matchAll()` (4 JS errors per page load of the form); found only by the browser run | `admin/message-templates/sms-form.blade.php` | `MessageTemplatesPageTest::test_a_failed_save_re_renders...` (mutation-checked) | fixed |
+| 13 | Mobile unit for a tenant | `MobileUserPayload` trusted the legacy `residents` row before the active tenancy, so a tenant who moved still saw the old unit in the app while the web showed the new one | `MobileUserPayload` | `TenantUnitFromTenancyTest` (+1) | fixed |
+
+### Migrations (`2026_10_13_000001_create_sms_message_templates_table`, `2026_10_13_000002_make_bill_uniqueness_per_type`)
+
+Verified on isolated databases only (production, `.env` and the dev DB untouched):
+- **SQLite, copy of the pre-migration dev DB backup** (8 bills, 7 payments): both migrations apply; the old unique index
+  is replaced by `(society_id, flat_id, month, year, bill_type)`; row and payment checksums identical before/after and after
+  rollback + re-migrate; `bill_type` is NOT NULL default `maintenance` (no NULL-in-unique loophole); a rent bill can sit
+  beside a maintenance bill for the same unit+month while a second rent bill is refused.
+- **MariaDB 10.4 throwaway (:3307)**, old schema rebuilt by rolling the migration back, then seeded with paid / partial /
+  pending bills and success + pending payments: the pre-fix bug reproduces (rent insert refused), the migration applies,
+  checksums unchanged, uniqueness kept. `down()` **refuses** (RuntimeException, nothing deleted) when a unit has both a rent
+  and a maintenance bill for the same month; recovery is to keep the new index, or to resolve the clash by hand.
+  Widening a unique index cannot fail on existing data (the old one was stricter), so `up()` needs no data repair.
+- Operator: back up, `php artisan migrate --force`, then confirm `maintenance_bills_unit_month_type_unique` exists.
+
+### Browser verification (isolated copy on :8124, `EXTERNAL_MESSAGING_ENABLED=false`, Chrome)
+
+`stab_main.js` (scratchpad, not in the repo): **124/124 checks** at 390, 360, 320 and 1366 px - register + profile password
+meter, mismatch, wrong-current and weak rejections, change + old/new password login (persistence, then restored), SMS
+settings validation and persistence (key masked and absent from the HTML), WhatsApp settings persistence and hostile input,
+Message Templates tabs, SMS create / empty-form errors / variable insert / edit / delete, roster empty form, past date,
+valid assignment, duplicate, listing, removal; no overflow or clipped controls; no JS errors or 5xx (after fix 12). The only
+non-GET requests were login, profile, settings save, template save/edit/delete and roster save/delete - no test / send /
+connect / sync / refresh endpoint was ever called. Not covered by the browser: Tenant dashboard in Chrome (covered by
+`TenantQuickActionsTest`), Safari/Firefox, a real phone browser.
+
+### Mobile (Flutter)
+
+Equivalents of the four web Quick Actions: Pay Rent -> Bills tab (**view only**: the app has no payment write endpoint, so
+claiming a payment is web-only - a deliberate gap, P2); Raise Request -> Tickets tab; View Notices -> Notices (shortcut / Notice
+Board); My Unit -> Profile > Property Details (now from the active tenancy, fix 13). Pinned by `role_navigation_test.dart`
+(+5). Guard workflow: `guard_shift_test.dart`, `role_navigation_test.dart`. `flutter devices` lists only Windows, Chrome and
+Edge - **no Android device or emulator, so nothing was run on Android** (unverified).
+
+### Messaging safety
+
+Stored provider secrets are ciphertext (checked on the isolated copy: row present, `eyJ...` payload, plaintext not found; no
+value printed). Routing, template selection, variables, the kill switch and status words are covered by the existing mocked
+suites (`Fast2Sms*`, `SmsTemplate*`, `WhatsApp*`, `MessageTemplatesPageTest`, `ExternalMessagingKillSwitchTest`,
+`SmsResultStatusTest`) and are green in the full run below. All provider HTTP is faked; `ExternalMessaging::$outboundGuard`
+fails any test that reaches a real transport. **Live delivery was not tested.** Credentials were not rotated by the assistant;
+the operator checklist is the addendum in [CREDENTIAL_ROTATION.md](CREDENTIAL_ROTATION.md).
+
+### Database processes (read-only inspection)
+
+| PID | Executable | Port | Data directory | Parent | Owner |
+|---|---|---|---|---|---|
+| 11764 | `g:\xampp\mysql\bin\mysqld.exe --defaults-file=g:\xampp\mysql\bin\my.ini --standalone` | 3306 | `G:/xampp/mysql/data` (from `my.ini`) | `xampp-control.exe` | the user's XAMPP - **do not stop from here** |
+| 22728 | `G:\xampp\mysql\bin\mysqld.exe --no-defaults --datadir=<scratchpad>\mariadb_throwaway --port=3307` | 3307 | scratchpad `mariadb_throwaway` | an assistant shell | the throwaway test server started in this session |
+
+### Test evidence (final, after the last code change; shard runner now records each process's real exit code)
+
+Runner: `scripts/run-test-shards.ps1 -Engine sqlite|mariadb -Shards N -OutDir ...` (waits for every phpunit process, reads
+`Process.ExitCode`, treats a missing summary as failure, exits non-zero if any shard did). Smoke-tested first on two classes.
+
+| Suite | Command | Result | Exit codes |
+|---|---|---|---|
+| PHP, SQLite in-memory, 8 shards | `scripts/run-test-shards.ps1 -Engine sqlite -Shards 8` | 2028 tests, 11266 assertions, 0 failures, 0 errors, 5 skipped | 8/8 = 0 |
+| PHP, MariaDB 10.4 throwaway :3307, 6 shards | `scripts/run-test-shards.ps1 -Engine mariadb -Shards 6` | 2028 tests, 11264 assertions, 0 failures, 0 errors, 3 skipped | 6/6 = 0 |
+| Flutter tests | `flutter test` (societyflowmob) | 217 passed | 0 |
+| Flutter analyze | `flutter analyze` | 2 known info-level `value` deprecations, 0 errors/warnings | 1 (infos only) |
+| PHP lint of files changed since 356c9d5 | `php -l` | 0 failures | 0 |
+| `git diff --check` | | clean | 0 |
+
+Skips are the engine-specific tests and the baseline-capture helper (unchanged).
+
+## Remaining limitations (not claimed fixed)
+
+- Release status stays **READY FOR STAGING, NOT READY FOR PRODUCTION**. Blockers: credential rotation (operator), staging delivery
+  verification with approved recipients, Android device run, mobile payment-claim flow decision, Society Expenses / utility bill
+  deep audit, load testing.
+- Live SMS / WhatsApp / email delivery: **not tested**. The DLR delivery check is not implemented (response format undocumented).
+- Android device / emulator: **not tested** (none available). Flutter widget/unit tests only.
+- Shift notices are in-app only; an external channel needs an approved DLT / WhatsApp template and its own toggle.
+- Admin deleting a verified payment is allowed (audited) - there is no refund / reversal workflow; adding one is a product decision.
+- No claim is made that the application has zero bugs; this document lists what was found, fixed and verified.
 
 ## Operator actions
 

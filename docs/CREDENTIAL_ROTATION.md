@@ -74,3 +74,17 @@ Not secrets (identifiers): `whatsapp_phone_number_id`, `whatsapp_waba_id`, sende
 - Failed-form logging strips passwords and tokens (`HandlesFormSubmissions`).
 - Automated tests never reach a provider: they use transport overrides, `Mail::fake()`, or unresolvable
   `.invalid` hosts.
+
+## Addendum 2026-10-12 - exposed Fast2SMS key and the operator's secure steps
+
+A live Fast2SMS API key was pasted into a chat session during development. Treat it as **exposed**: it was never used by any
+test or by the assistant, never written to a file, but it must be replaced.
+
+1. In the Fast2SMS dashboard (Dev API), generate a new key and delete the old one. Do this first - nothing else matters while the old key is live.
+2. Enter the new key only in Settings -> SMS of each society (it is stored encrypted; the page shows it masked and never echoes it).
+   Do not put it in `.env`, a ticket, a chat or a commit. Remove the duplicated `FAST2SMS_API_KEY` and `MAIL_PASSWORD` lines from `.env` if present.
+3. Keep `EXTERNAL_MESSAGING_ENABLED=false` on every non-production copy; the per-society key is applied over `.env` at send time,
+   so a restored production backup on a laptop can send real messages unless the flag is off.
+4. Send ONE test from Settings -> SMS to a number you own, then check the Delivery Log. "Not sent / Skipped" means nothing left the server.
+5. Run `php artisan credentials:audit` (read-only, fingerprints only). Exit 0 means no stored credential matches the old baseline.
+6. Rotate SMTP, WhatsApp and any gateway secrets the same way (see the inventory above), then purge the old DB snapshots in `C:\Users\USER\SocietyFlow-backups` that hold the previous encrypted values (operator decision; nothing was deleted by the assistant).

@@ -4,6 +4,13 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-12 (round 2) - production-readiness gaps closed where feasible
+
+Committed on `production-readiness` (after 356c9d5). **READY FOR STAGING, NOT READY FOR PRODUCTION.** Detail: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) (Round 2).
+- Fixed: Accountant could verify/reject payments and a resident could rewrite or delete their own verified payment (`FinancePermissionMatrixTest`); guard-shift change notifications and the missing "office removed your booking" notice; message-template form JS error after a rejected save (found by the browser run); mobile tenant unit now follows the active tenancy like the web.
+- Evidence: PHP SQLite 8 shards 2028 tests / 11266 assertions / 0 failures / 5 skipped, **all shard exit codes 0**; MariaDB 10.4 throwaway 6 shards 2028 / 11264 / 0 / 3 skipped, **all exit codes 0**; Flutter 217 tests exit 0, analyze = the 2 known infos (exit 1); browser 124/124 at 390/360/320/1366; migrations verified with data on SQLite and MariaDB, rollback refusal confirmed.
+- NOT TESTED: Android device/emulator (none available), live SMS/WhatsApp/email delivery, Tenant dashboard in a browser. Credentials NOT rotated (checklist in CREDENTIAL_ROTATION.md).
+- DB processes: PID 11764 is the user's XAMPP MariaDB (:3306, `G:/xampp/mysql/data`) - leave it; PID 22728 is the assistant's throwaway (:3307, scratchpad datadir).
 ## 2026-10-12 - stabilization, bug fix and web/mobile parity run
 
 Committed on `production-readiness` (last commit: see `git log`). **READY FOR STAGING, NOT READY FOR PRODUCTION.** Details, root causes and per-defect tests: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md).

@@ -98,3 +98,8 @@ broke: the events and facilities endpoints serialised nulls for title,
 date, venue and charges, and the app rendered empty rows without
 complaining, so nothing surfaced the problem on either side. If a payload
 key changes on the server, these tests fail instead.
+
+
+## Sharded full runs with real exit codes
+
+`powershell -ExecutionPolicy Bypass -File scripts/run-test-shards.ps1 -Engine sqlite -Shards 8 -OutDir <dir>` (or `-Engine mariadb -Shards 6` against a throwaway server on :3307 with databases `societyflow_test_0..5`). The script waits for every phpunit process, records each shard's real exit code, treats a shard with no summary as failed, prints totals and exits non-zero if any shard failed. A PHPUnit summary count alone is not proof of success.
