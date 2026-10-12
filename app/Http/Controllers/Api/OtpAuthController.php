@@ -387,7 +387,8 @@ class OtpAuthController extends Controller
         $request->validate([
             'email'    => 'required|email',
             'otp'      => 'required|string|size:4',
-            'password' => 'required|string|min:6|confirmed',
+            // the policy of the account's own society (the platform's if the email is unknown)
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(User::where('email', $request->email)->value('society_id'))),
         ]);
 
         $rateLimitKey = 'reset-password:' . $request->ip();

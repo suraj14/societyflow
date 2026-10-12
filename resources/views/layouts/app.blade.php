@@ -358,6 +358,7 @@
         setTimeout(function () { f.dataset.sfSubmitted = ''; buttons.forEach(function (b) { b.disabled = false; }); }, 8000);
     }, false);
     </script>
+    @include('partials.password-strength')
 </body>
 </html>
 

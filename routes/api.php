@@ -43,6 +43,10 @@ Route::prefix('v1')->group(function () {
         ]);
     });
 
+    // The password rules the app's meter shows. Public (the register / reset screens need it before sign-in): the platform's
+    // policy, or - when a valid token is sent - the signed-in user's society's. Only rules, no society data.
+    Route::get('/password-policy', [AuthApiController::class, 'passwordPolicy']);
+
     // Public auth routes
     Route::prefix('auth')->group(function () {
         Route::post('/login',           [AuthApiController::class, 'login']);

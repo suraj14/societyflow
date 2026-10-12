@@ -24,7 +24,7 @@ class DashboardApiController extends Controller
 
         // Pending bills across all units the user resides in or owns
         $pendingBills = $flatIds
-            ? MaintenanceBill::whereIn('flat_id', $flatIds)
+            ? MaintenanceBill::where('society_id', $societyId)->whereIn('flat_id', $flatIds)
                 ->whereIn('status', ['pending', 'overdue', 'partial'])
                 ->count()
             : 0;
@@ -76,15 +76,23 @@ class DashboardApiController extends Controller
     {
         $activities = [];
 
-        // Recent payment
-        $payment = Payment::where('user_id', $user->id)
+        // Recent payment: one the user made, or one recorded against a unit they own or rent (an admin recording a
+        // tenant's rent at the office writes user_id = admin) - the same rule as the bills screens.
+        $payment = Payment::where('society_id', $societyId)
+            ->where(function ($q) use ($user, $flatIds) {
+                $q->where('user_id', $user->id);
+                if ($flatIds) {
+                    $q->orWhereIn('flat_id', $flatIds);
+                }
+            })
             ->where('status', 'success')
             ->latest('payment_date')
             ->first();
         if ($payment) {
+            $kind = strtolower((string) $payment->bill_type) === 'rent' ? 'Rent' : 'Maintenance';
             $activities[] = [
                 'type'   => 'payment',
-                'title'  => 'Maintenance bill paid',
+                'title'  => $kind . ' bill paid',
                 'time'   => $payment->payment_date->diffForHumans(),
                 'status' => 'paid',
             ];

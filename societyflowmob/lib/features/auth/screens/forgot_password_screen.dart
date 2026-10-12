@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/security/password_policy.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/password_strength_meter.dart';
 import '../providers/auth_provider.dart';
 
 /// Two-step password reset:
@@ -15,6 +17,7 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
 }
 
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
+  PasswordPolicy get _policy => ref.watch(passwordPolicyProvider).valueOrNull ?? PasswordPolicy.baseline;
   final _formKey      = GlobalKey<FormState>();
   final _emailCtrl    = TextEditingController();
   final _otpCtrl      = TextEditingController();
@@ -141,14 +144,18 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                   controller: _passwordCtrl,
                   obscureText: _obscure,
                   decoration: InputDecoration(
-                    hintText: 'Minimum 6 characters',
+                    hintText: 'Choose a new password',
                     prefixIcon: const Icon(Icons.lock_outline, color: AppColors.textHint),
                     suffixIcon: IconButton(
                       icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: AppColors.textHint),
                       onPressed: () => setState(() => _obscure = !_obscure),
                     ),
                   ),
-                  validator: (v) => (v == null || v.length < 6) ? 'Password must be at least 6 characters' : null,
+                  validator: (v) => _policy.validate(v),
+                ),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _passwordCtrl,
+                  builder: (_, value, __) => PasswordStrengthMeter(password: value.text, policy: _policy),
                 ),
                 const SizedBox(height: 20),
                 const Text('Confirm Password', style: AppTextStyles.label),

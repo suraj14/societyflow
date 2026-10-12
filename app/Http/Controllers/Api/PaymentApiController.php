@@ -19,7 +19,7 @@ class PaymentApiController extends Controller
         $flatIds = $this->userFlatIds($user);
 
         $bills = $flatIds
-            ? MaintenanceBill::whereIn('flat_id', $flatIds)
+            ? MaintenanceBill::where('society_id', $user->society_id)->whereIn('flat_id', $flatIds)
                 ->latest('due_date')
                 ->take(12)
                 ->get()
@@ -51,7 +51,7 @@ class PaymentApiController extends Controller
             return response()->json(['success' => true, 'data' => []]);
         }
 
-        $bills = MaintenanceBill::whereIn('flat_id', $flatIds)
+        $bills = MaintenanceBill::where('society_id', $user->society_id)->whereIn('flat_id', $flatIds)
             ->latest('due_date')
             ->paginate(15);
 
@@ -113,7 +113,8 @@ class PaymentApiController extends Controller
             'month'          => $b->month,
             'year'           => $b->year,
             'due_date'       => $b->due_date?->toDateString(),
-            'bill_type'      => 'maintenance',
+            // the real type (maintenance | rent): every bill used to be labelled maintenance, so a rent bill read as one
+            'bill_type'      => $b->bill_type ?: 'maintenance',
         ];
     }
 

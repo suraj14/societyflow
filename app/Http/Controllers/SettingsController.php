@@ -1044,7 +1044,7 @@ class SettingsController extends Controller
             'login_attempt_limit' => 'required|integer|min:3|max:10',
             'session_timeout' => 'required|integer|min:5|max:1440',
             'force_https' => 'nullable|boolean',
-            'password_min_length' => 'required|integer|min:6|max:32',
+            'password_min_length' => 'required|integer|min:8|max:32',
             'password_require_uppercase' => 'nullable|boolean',
             'password_require_number' => 'nullable|boolean',
             'password_require_special' => 'nullable|boolean',

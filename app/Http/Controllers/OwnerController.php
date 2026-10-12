@@ -409,7 +409,7 @@ class OwnerController extends BaseController
         $this->authorizeSocietyAccess($owner);
 
         $validated = $request->validate([
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety((int) $owner->society_id)),
         ]);
 
         $ownerUser = $owner->user;

@@ -235,5 +235,6 @@
             </div>
         </div>
     </div>
+    @include('partials.password-strength')
 </body>
 </html>

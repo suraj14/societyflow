@@ -599,6 +599,10 @@ class PaymentController extends Controller
 
         \App\Models\ActivityLog::recordFor($payment, 'payment.approved', ['amount' => (float) $payment->amount, 'maintenance_bill_id' => $payment->maintenance_bill_id]);
 
+        // The payer is told only now, when the office has verified the money (a resident's own submission is a claim,
+        // not a payment, and says nothing until then). Verifying twice cannot repeat this: a verified payment returned above.
+        PaymentReceived::dispatch($payment->refresh());
+
         return back()->with('success', 'Payment verified and applied to the bill.');
     }
 

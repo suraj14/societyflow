@@ -196,7 +196,8 @@ class AuthController extends Controller
         $request->validate([
             'token' => 'required',
             'email' => 'required|email',
-            'password' => 'required|string|min:8|confirmed',
+            // the policy of the society this account belongs to (the platform's when the email is unknown)
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(User::where('email', $request->email)->value('society_id'))),
         ]);
 
         $status = Password::reset(
@@ -243,7 +244,8 @@ class AuthController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'phone' => 'required|string|max:15',
-            'password' => 'required|string|min:8|confirmed',
+            // a new society has no policy of its own yet: the platform's applies
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(null)),
             'terms' => 'required|accepted',
             // Required, not optional: a society created without this silently
             // became "both", which then offered villa menus to apartment

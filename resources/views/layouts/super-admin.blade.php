@@ -261,5 +261,6 @@
     </div>
 
     @stack('scripts')
+    @include('partials.password-strength')
 </body>
 </html>

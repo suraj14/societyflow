@@ -102,6 +102,20 @@ class AuthApiController extends Controller
     }
 
     /**
+     * The rules every new password must meet (App\Support\PasswordPolicy), for the app's strength meter. The server is the
+     * authority: this only tells the screen what the server will check.
+     */
+    public function passwordPolicy(Request $request): JsonResponse
+    {
+        $user = $request->user('sanctum');
+
+        return response()->json([
+            'success' => true,
+            'data'    => \App\Support\PasswordPolicy::describe(\App\Support\PasswordPolicy::forUser($user)),
+        ]);
+    }
+
+    /**
      * Step 2 of registration: set password and activate account.
      */
     public function register(Request $request): JsonResponse
@@ -109,7 +123,8 @@ class AuthApiController extends Controller
         $request->validate([
             'email'    => 'required|email',
             'phone'    => 'required|string|max:20',
-            'password' => 'required|string|min:6|confirmed',
+            // the platform policy: the account's society is not known until the email/phone are matched below
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(null)),
         ]);
 
         $rateLimitKey = 'register:' . $request->ip();

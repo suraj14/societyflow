@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/security/password_policy.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/password_strength_meter.dart';
 import '../providers/profile_provider.dart';
 
 class ChangePasswordScreen extends ConsumerStatefulWidget {
@@ -11,6 +13,7 @@ class ChangePasswordScreen extends ConsumerStatefulWidget {
 }
 
 class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
+  PasswordPolicy get _policy => ref.watch(passwordPolicyProvider).valueOrNull ?? PasswordPolicy.baseline;
   final _formKey     = GlobalKey<FormState>();
   final _currentCtrl = TextEditingController();
   final _newCtrl     = TextEditingController();
@@ -53,7 +56,11 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
             const SizedBox(height: 32),
             _pwField('Current Password', _currentCtrl, validator: (v) => v?.isEmpty == true ? 'Required' : null),
             const SizedBox(height: 16),
-            _pwField('New Password', _newCtrl, validator: (v) { if (v?.isEmpty == true) return 'Required'; if (v!.length < 6) return 'Min 6 characters'; return null; }),
+            _pwField('New Password', _newCtrl, validator: (v) => _policy.validate(v)),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: _newCtrl,
+              builder: (_, value, __) => PasswordStrengthMeter(password: value.text, policy: _policy),
+            ),
             const SizedBox(height: 16),
             _pwField('Confirm New Password', _confirmCtrl, validator: (v) { if (v?.isEmpty == true) return 'Required'; if (v != _newCtrl.text) return 'Passwords do not match'; return null; }),
             const SizedBox(height: 32),

@@ -69,7 +69,7 @@ class SocietyController extends Controller
             'property_type' => ['required', Rule::in(SocietyPropertyType::values())],
             'admin_name' => 'required|string|max:255',
             'admin_email' => 'required|email|unique:users,email',
-            'admin_password' => 'required|string|min:8|confirmed',
+            'admin_password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(null)),
         ]);
 
         DB::beginTransaction();
@@ -325,7 +325,7 @@ class SocietyController extends Controller
     public function resetAdminPassword(Request $request, Society $society)
     {
         $request->validate([
-            'new_password' => 'required|string|min:8|confirmed',
+            'new_password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety($society->id)),
         ]);
 
         if (!$society->admin) {
@@ -350,7 +350,7 @@ class SocietyController extends Controller
         $request->validate([
             'admin_name' => 'required|string|max:255',
             'admin_email' => 'required|email|unique:users,email',
-            'admin_password' => 'required|string|min:8|confirmed',
+            'admin_password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(null)),
         ]);
 
         if (!$society->canAssignAdmin()) {

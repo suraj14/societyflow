@@ -41,7 +41,10 @@ class ProfileController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|max:255|unique:users,email,' . $user->id,
             'phone' => 'nullable|string|max:20',
-            'password' => 'nullable|string|min:8|confirmed',
+            // Changing the password needs the current one (a hijacked session must not be able to lock the owner out),
+            // and the new one must meet the society's password policy - the same rules the form's meter shows.
+            'current_password' => ['required_with:password', 'nullable', 'current_password'],
+            'password' => array_merge(['nullable'], \App\Support\PasswordPolicy::rules(\App\Support\PasswordPolicy::forUser($user))),
             // Every role edits its own picture here - the account being
             // changed is always the signed-in user's, never an id the
             // client sends, so there is no one else's profile to reach.
@@ -50,11 +53,13 @@ class ProfileController extends Controller
         ]);
 
         // Only update password if provided
-        if ($request->filled('password')) {
+        $passwordChanged = $request->filled('password');
+        if ($passwordChanged) {
             $validated['password'] = bcrypt($validated['password']);
         } else {
             unset($validated['password']);
         }
+        unset($validated['current_password']);
 
         // The picture fields are not columns to mass-assign.
         unset($validated['avatar'], $validated['remove_avatar']);
@@ -74,7 +79,12 @@ class ProfileController extends Controller
             return back()->withInput()->withErrors(['avatar' => $e->getMessage()]);
         }
 
+        // A new password ends every API session issued under the old one (the mobile app signs in again).
+        if ($passwordChanged && method_exists($user, 'tokens')) {
+            $user->tokens()->delete();
+        }
+
         return redirect()->route('profile.show')
-            ->with('success', 'Profile updated successfully.');
+            ->with('success', $passwordChanged ? 'Profile updated and password changed.' : 'Profile updated successfully.');
     }
 }

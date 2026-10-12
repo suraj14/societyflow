@@ -323,7 +323,7 @@ class UserController extends BaseController
         }
 
         $validated = $request->validate([
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety($user->society_id)),
         ]);
 
         $passwordReset->reset($user, $validated['password']);

@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules\Password;
 
 class ProfileApiController extends Controller
 {
@@ -120,7 +119,7 @@ class ProfileApiController extends Controller
     {
         $request->validate([
             'current_password' => 'required|string',
-            'password'         => ['required', 'confirmed', Password::min(6)],
+            'password'         => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forUser($request->user())),
         ]);
 
         $user = $request->user();

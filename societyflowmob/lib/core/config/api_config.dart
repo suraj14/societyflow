@@ -105,6 +105,7 @@ class ApiConfig {
   static const String notices          = '/notices';
   static const String profile          = '/profile';
   static const String changePassword   = '/change-password';
+  static const String passwordPolicy   = '/password-policy';
   static const String familyMembers    = '/profile/family-members';
   static const String facilities       = '/facilities';
   static const String facilityBookings = '/facility-bookings';

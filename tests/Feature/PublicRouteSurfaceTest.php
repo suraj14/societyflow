@@ -26,6 +26,7 @@ class PublicRouteSurfaceTest extends TestCase
     private const PUBLIC_ROUTES = [
         'GET /',
         'GET api/v1/health',
+        'GET api/v1/password-policy',   // rules only (min length, required character kinds, well-known passwords); the register / reset screens need them before sign-in. No tenant data.
         'GET forgot-password',
         'GET login',
         'GET logout',            // redirect-only stub for stale bookmarks; does NOT log out (LogoutTest)

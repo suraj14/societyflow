@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/security/password_policy.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/password_strength_meter.dart';
 import '../providers/auth_provider.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
@@ -11,6 +13,7 @@ class RegisterScreen extends ConsumerStatefulWidget {
 }
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
+  PasswordPolicy get _policy => ref.watch(passwordPolicyProvider).valueOrNull ?? PasswordPolicy.baseline;
   // Step 1: verify account
   final _step1Key    = GlobalKey<FormState>();
   final _emailCtrl   = TextEditingController();
@@ -172,11 +175,16 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           controller: _passwordCtrl,
           obscureText: _obscure,
           decoration: InputDecoration(
-            hintText: 'Create a password (min 6 characters)',
+            hintText: 'Create a password',
             prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.textHint),
             suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: AppColors.textHint), onPressed: () => setState(() => _obscure = !_obscure)),
           ),
-          validator: (v) { if (v?.isEmpty == true) return 'Password is required'; if (v!.length < 6) return 'Min 6 characters'; return null; },
+          // the server's own rules (GET /password-policy), never a weaker local guess
+          validator: (v) => _policy.validate(v),
+        ),
+        ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _passwordCtrl,
+          builder: (_, value, __) => PasswordStrengthMeter(password: value.text, policy: _policy),
         ),
         const SizedBox(height: 16),
         const Text('Confirm Password', style: AppTextStyles.label),

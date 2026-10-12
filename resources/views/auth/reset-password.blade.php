@@ -101,5 +101,6 @@
             </div>
         </div>
     </div>
+    @include('partials.password-strength', ['policyEmail' => $email ?? request('email')])
 </body>
 </html>
