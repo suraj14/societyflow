@@ -175,4 +175,14 @@ class TenantUnitFromTenancyTest extends TestCase
         $this->assertSame('159', $payload['villa_number']);
         $this->assertTrue($payload['is_tenant']);
     }
+
+    public function test_the_mobile_payload_ignores_a_stale_active_residency_for_the_unit_he_left(): void
+    {
+        $this->legacyRow($this->left, 'active');   // the unrepaired state: web already uses the tenancy, the app must agree
+
+        $payload = MobileUserPayload::make($this->tenantUser->fresh());
+
+        $this->assertSame('159', $payload['flat_number']);
+        $this->assertSame('159', $payload['villa_number']);
+    }
 }

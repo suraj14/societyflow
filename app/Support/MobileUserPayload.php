@@ -22,6 +22,12 @@ final class MobileUserPayload
     {
         $resident = $user->resident()->with('flat.building')->first();
         $flat     = $resident?->flat;
+
+        // A tenant's unit is the one they actively rent - what the web uses (UserFlatResolver). The legacy residents row
+        // is not closed when a tenancy moves, so trusting it first showed the app the unit they had left.
+        if ($user->hasRole('Tenant') && !$user->owner_id && UserFlatResolver::tenantFlatIds($user) !== []) {
+            $flat = null;
+        }
         $building = $flat?->building;
         $society  = $user->society;
         $roles    = $user->getRoleNames();

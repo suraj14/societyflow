@@ -169,6 +169,48 @@ void main() {
     });
   });
 
+  // ── the tenant's four web Quick Actions, and where each lives in the app ───
+  // Web: Pay Rent / Raise Request / View Notices / My Unit. The app has no tile row; each is a destination.
+  group('tenant Quick Actions on mobile', () {
+    final tenant = UserModel.fromJson({
+      'id': 9, 'name': 'Piyus', 'email': 'p@x.in', 'role': 'Tenant', 'roles': ['Tenant'], 'capabilities': _resident, 'society_name': 'Royal Eden',
+      'flat_number': '159', 'villa_number': '159', 'property_type': 'villa',
+    });
+
+    test('Pay Rent -> the Bills tab (view only: payment claims are made on the web, the app has no write endpoint)', () {
+      expect(AppNav.bottomBar(tenant), contains(Dest.bills));
+      expect(AppNav.allowed(tenant, Dest.bills), isTrue);
+      expect(AppNav.tabIndex[Dest.bills], isNotNull);
+    });
+
+    test('Raise Request -> the Tickets tab', () {
+      expect(AppNav.bottomBar(tenant), contains(Dest.tickets));
+      expect(AppNav.allowed(tenant, Dest.tickets), isTrue);
+      expect(AppNav.tabIndex[Dest.tickets], isNotNull);
+    });
+
+    test('View Notices -> the Notices destination (a shortcut, or the Notice Board on Home)', () {
+      expect(AppNav.allowed(tenant, Dest.notices), isTrue);
+      expect(AppNav.shortcuts(tenant), contains(Dest.notices));
+      expect(AppNav.tabIndex[Dest.notices], isNotNull);
+    });
+
+    test('My Unit -> Profile > Property Details, with the rented unit from the server', () {
+      expect(AppNav.bottomBar(tenant), contains(Dest.profile));
+      expect(tenant.hasUnit, isTrue);
+      expect(tenant.displayUnit, contains('159'));
+    });
+
+    test('every destination a tenant can tap resolves to a screen, and a switched-off module takes its action away', () {
+      for (final d in [...AppNav.bottomBar(tenant), ...AppNav.shortcuts(tenant)]) {
+        expect(AppNav.tabIndex.containsKey(d) || d == Dest.accessPasses, isTrue, reason: '$d has nowhere to go');
+      }
+      final noBills = UserModel.fromJson({'id': 9, 'name': 'P', 'email': 'p@x.in', 'role': 'Tenant', 'roles': ['Tenant'],
+        'capabilities': _caps(_resident, {'bills': false}), 'society_name': 'Royal Eden'});
+      expect(AppNav.bottomBar(noBills), isNot(contains(Dest.bills)));
+    });
+  });
+
   // ── the destinations registry ─────────────────────────────────────────────
   group('AppNav', () {
     List<Dest> bar(UserModel u) => AppNav.bottomBar(u);
