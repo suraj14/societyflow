@@ -263,7 +263,8 @@ class CommunicationSettingsTest extends TestCase
         $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'notification', 'message_id' => '182002'])->assertJson(['success' => true]);
 
         $sent = null;
-        SmsService::$transportOverride = function ($url, $data) use (&$sent) { $sent = $data; return [['return' => true], 200]; };
+        SmsService::$transportOverride = function ($url, $data) use (&$sent) { parse_str((string) parse_url($url, PHP_URL_QUERY), $sent); // Fast2SMS SMS is a documented GET: values are in the query
+             return [['return' => true], 200]; };
 
         SmsService::sendDltNotification('notification', '9876543210', 'Water supply off 2-4 PM', $this->society);
 
@@ -295,7 +296,8 @@ class CommunicationSettingsTest extends TestCase
         SystemSetting::set('sms', 'fast2sms_template_id', '182001', 'string', $this->society);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'ROYALE', 'string', $this->society);
         $sent = null;
-        SmsService::$transportOverride = function ($url, $data) use (&$sent) { $sent = $data; return [['return' => true, 'request_id' => 'abc'], 200]; };
+        SmsService::$transportOverride = function ($url, $data) use (&$sent) { parse_str((string) parse_url($url, PHP_URL_QUERY), $sent); // Fast2SMS SMS is a documented GET: values are in the query
+             return [['return' => true, 'request_id' => 'abc'], 200]; };
 
         $r = $this->actingAs($this->admin)->postJson(route('settings.sms.test'), ['phone' => '9876543210', 'test_value' => '4321'])->assertOk();
 

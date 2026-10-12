@@ -31,10 +31,18 @@ class SmsResultStatusTest extends TestCase
         // Safety net: whatever a test does, the provider transport is a recording stub that rejects the request.
         // Nothing in this class can reach the network (an earlier draft did, via a stale cached fake key).
         SmsService::$transportOverride = function (string $url, array $data) {
-            $this->calls[] = ['url' => $url, 'message' => $data['message'] ?? null, 'unexpected' => true];
+            $this->calls[] = ['url' => $url, 'message' => ($data['message'] ?? self::queryOf($url)['message'] ?? null), 'unexpected' => true];
 
             return [['return' => false, 'message' => ['stub: no provider in tests']], 401];
         };
+    }
+
+    /** Fast2SMS SMS is a documented GET: the values are in the URL's query string. */
+    private static function queryOf(string $url): array
+    {
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+
+        return $q;
     }
 
     protected function tearDown(): void
@@ -46,7 +54,7 @@ class SmsResultStatusTest extends TestCase
     private function guardTransport(): void
     {
         SmsService::$transportOverride = function (string $url, array $data) {
-            $this->calls[] = ['url' => $url, 'message' => $data['message'] ?? null, 'unexpected' => true];
+            $this->calls[] = ['url' => $url, 'message' => ($data['message'] ?? self::queryOf($url)['message'] ?? null), 'unexpected' => true];
 
             return [['return' => false, 'message' => ['stub: no provider in tests']], 401];
         };
@@ -74,7 +82,7 @@ class SmsResultStatusTest extends TestCase
     private function mockProvider(array $body, int $status = 200): void
     {
         SmsService::$transportOverride = function (string $url, array $data) use ($body, $status) {
-            $this->calls[] = ['url' => $url, 'message' => $data['message'] ?? null];
+            $this->calls[] = ['url' => $url, 'message' => ($data['message'] ?? self::queryOf($url)['message'] ?? null)];
 
             return [$body, $status];
         };

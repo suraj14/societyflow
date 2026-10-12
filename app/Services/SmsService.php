@@ -157,12 +157,16 @@ class SmsService
         // The notification template chosen in Settings -> SMS, if any;
         // otherwise the one DLT template saved for OTP (the original
         // single-template behaviour, kept so nothing that worked stops).
-        $result = self::sendViaFast2SmsDlt(
-            $phone, $message, $apiKey, $societyId,
-            self::getSetting('fast2sms_notification_template_id', null, $societyId),
-            self::getSetting('fast2sms_notification_sender_id', null, $societyId),
-            false,
-        );
+        // A Message Templates -> SMS template for this purpose wins; its Message ID decides DLT or Quick SMS.
+        $smsTemplate = \App\Models\SmsTemplate::forPurpose($societyId, self::templatePurpose($purpose));
+        $result = $smsTemplate
+            ? self::sendByTemplate(self::templatePurpose($purpose), $phone, ['message' => $message], $societyId, $message)
+            : self::sendViaFast2SmsDlt(
+                $phone, $message, $apiKey, $societyId,
+                self::getSetting('fast2sms_notification_template_id', null, $societyId),
+                self::getSetting('fast2sms_notification_sender_id', null, $societyId),
+                false,
+            );
 
         // email_logs is now the multi-channel delivery log (see the
         // 2026_10_07 migrations) - recording here is what makes an SMS
@@ -201,6 +205,16 @@ class SmsService
 
         return $result;
     }
+    /** The Message Templates purpose a notification purpose reads its SMS template from. */
+    private static function templatePurpose(string $purpose): string
+    {
+        return match ($purpose) {
+            'visitor'     => 'visitor',
+            'access_pass' => 'gate_pass',
+            default       => 'notice',
+        };
+    }
+
     /** Bare digits, with an Indian country code stripped down to 10 digits. */
     public static function normalizePhone(string $phone): string
     {
@@ -265,15 +279,50 @@ class SmsService
             return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
         }
 
-        if ($route === 'quick') {
-            return self::sendViaFast2SmsQuick($phone, "Your verification code is {$otp}. Do not share it.", $apiKey);
-        }
-
+        // Advanced: the Fast2SMS OTP service (needs an OTP ID). Everything else is routed automatically.
         if ($route === 'otp') {
             return self::sendViaFast2SmsOtp($phone, $otp, $apiKey, $societyId);
         }
 
-        return self::sendViaFast2SmsDlt($phone, $otp, $apiKey, $societyId);
+        return self::sendByTemplate('login_otp', $phone, ['otp' => $otp], $societyId, "Your verification code is {$otp}. Do not share it.");
+    }
+
+    /**
+     * Automatic routing for one SMS purpose:
+     *  - the purpose's template (or, failing that, the default Message ID) gives a Fast2SMS Message ID AND a Sender ID
+     *    is set  ->  DLT route, with the template's variables piped in order;
+     *  - otherwise  ->  Quick SMS with the rendered text (random sender - fine for testing, not for production).
+     *
+     * @param array<string|int,string> $values   named or listed variable values
+     * @param string                   $fallbackText  used when the purpose has no template of its own
+     */
+    public static function sendByTemplate(string $purpose, string $phone, array $values, ?int $societyId, string $fallbackText): array
+    {
+        $apiKey = (string) self::getSetting('fast2sms_api_key', '', $societyId);
+        if ($apiKey === '') {
+            return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => reset($values) ?: '']);
+        }
+        if ($bad = self::invalidNumber($phone)) {
+            return $bad;
+        }
+
+        $template = \App\Models\SmsTemplate::forPurpose($societyId, $purpose);
+        $messageId = (string) ($template?->dlt_message_id ?: self::getSetting('fast2sms_template_id', '', $societyId));
+        $senderId = (string) self::getSetting('fast2sms_sender_id', '', $societyId);
+
+        $rendered = $template ? Fast2SmsService::render((string) $template->body, $values) : ['text' => $fallbackText, 'variables' => array_values($values)];
+
+        if ($messageId !== '' && $senderId !== '') {
+            // 15+ digits is the telecom DLT Template ID, which Fast2SMS rejects here.
+            if (strlen(preg_replace('/\D+/', '', $messageId)) >= 15) {
+                return ['success' => false, 'message' => 'The saved SMS template is a DLT Template ID, but Fast2SMS needs its Message ID. Choose the template again in Settings > SMS / OTP.'];
+            }
+
+            return self::fast2smsGet(Fast2SmsService::dltUrl($senderId, $messageId, $rendered['variables'], $phone), $apiKey,
+                self::fast2smsResponseHandler($phone, 'dlt', $apiKey));
+        }
+
+        return self::sendViaFast2SmsQuick($phone, $rendered['text'], $apiKey);
     }
 
     /**
@@ -286,12 +335,30 @@ class SmsService
             return $bad;
         }
 
-        $payload = ['route' => 'q', 'message' => $text, 'flash' => 0, 'numbers' => $phone];
+        return self::fast2smsGet(Fast2SmsService::quickUrl($text, $phone), $apiKey, self::fast2smsResponseHandler($phone, 'q', $apiKey));
+    }
 
-        return self::curlPost('https://www.fast2sms.com/dev/bulkV2', $payload,
-            ['authorization: ' . $apiKey, 'Content-Type: application/json'],
-            self::fast2smsResponseHandler($phone, 'q', $apiKey)
-        );
+    /** GET to Fast2SMS through the shared transport, or the test override (same arguments curlPost would use). */
+    private static function fast2smsGet(string $url, string $apiKey, callable $handler): array
+    {
+        if (self::$transportOverride !== null) {
+            [$body, $httpCode] = (self::$transportOverride)($url, [], ['authorization: ' . $apiKey]);
+
+            return $handler($body, $httpCode);
+        }
+
+        [$body, $httpCode] = Fast2SmsService::get($url, $apiKey);
+        if ($httpCode === 0) {
+            if (!empty($body['skipped'])) {
+                Log::notice('SMS suppressed', ['host' => 'www.fast2sms.com']);
+
+                return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
+            }
+
+            return ['success' => false, 'message' => 'SMS service unavailable: ' . ($body['transport_error'] ?? 'no response')];
+        }
+
+        return $handler($body, $httpCode);
     }
 
     /** A provider answer made safe to show: the API key and long token-like strings are removed. */
@@ -375,17 +442,10 @@ class SmsService
             return ['success' => false, 'message' => 'Fast2SMS DLT not configured properly'];
         }
 
-        $payload = [
-            'route'            => 'dlt',
-            'flash'            => 0,
-            'numbers'          => $phone,
-            'sender_id'        => $senderId,
-            'message'          => $templateId,
-            'variables_values' => $otp,
-        ];
-
-        return self::curlPost('https://www.fast2sms.com/dev/bulkV2', $payload,
-            ['authorization: ' . $apiKey, 'Content-Type: application/json'],
+        // GET /dev/bulkV2 (the documented method). $otp may already hold several values separated by "|".
+        return self::fast2smsGet(
+            Fast2SmsService::dltUrl((string) $senderId, (string) $templateId, array_values(array_filter(explode('|', $otp), fn ($v) => $v !== '')), $phone),
+            $apiKey,
             self::fast2smsResponseHandler($phone, 'dlt', $apiKey)
         );
     }

@@ -188,37 +188,8 @@ class Fast2SmsAccount
             return (self::$transportOverride)($method, $url);
         }
 
-        if (!\App\Support\ExternalMessaging::enabled()) {
-            // No request is made at all - this is not a connection problem and must not be reported as one.
-            return [['transport_error' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'skipped' => true], 0];
-        }
-
-        try {
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT        => 20,
-                CURLOPT_SSL_VERIFYPEER => true,
-                CURLOPT_HTTPHEADER     => ['authorization: ' . $apiKey, 'Accept: application/json'],
-            ]);
-            if ($method === 'POST') {
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, '');
-            }
-            $result  = curl_exec($ch);
-            $curlErr = curl_error($ch);
-            $code    = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            if ($curlErr) {
-                Log::warning('Fast2SMS account lookup transport error', ['path' => parse_url($url, PHP_URL_PATH)]);
-                return [['transport_error' => mb_substr($curlErr, 0, 120)], 0];
-            }
-
-            return [json_decode((string) $result, true) ?? ['message' => 'Unreadable response'], $code];
-        } catch (\Throwable $e) {
-            Log::warning('Fast2SMS account lookup failed', ['class' => get_class($e)]);
-            return [['transport_error' => 'request failed'], 0];
-        }
+        // The kill switch, timeouts and masked logging live in Fast2SmsService; when messaging is off no request is
+        // made at all, and that is not a connection problem and must not be reported as one.
+        return Fast2SmsService::send($method, $url, $apiKey);
     }
 }

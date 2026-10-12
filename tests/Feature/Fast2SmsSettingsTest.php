@@ -48,7 +48,7 @@ class Fast2SmsSettingsTest extends TestCase
     private function fakeTransport(array $body, int $status, ?array &$sent = null): void
     {
         SmsService::$transportOverride = function (string $url, array $data, array $headers) use ($body, $status, &$sent) {
-            $sent = ["url" => $url, "data" => $data, "headers" => $headers];
+            $sent = ["url" => $url, "data" => $data ?: (function () use ($url) { parse_str((string) parse_url($url, PHP_URL_QUERY), $q); return $q; })(), "headers" => $headers];
             return [$body, $status];
         };
     }
@@ -263,7 +263,7 @@ class Fast2SmsSettingsTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
 
-        $this->assertSame('https://www.fast2sms.com/dev/bulkV2', $sent['url']);
+        $this->assertStringStartsWith('https://www.fast2sms.com/dev/bulkV2?', $sent['url'], 'documented GET request');
         $this->assertSame('dlt', $sent['data']['route']);
         $this->assertSame('DISP24', $sent['data']['sender_id']);
         $this->assertSame('223577', $sent['data']['message']);

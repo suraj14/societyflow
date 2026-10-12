@@ -35,5 +35,10 @@
         <env name="SESSION_DRIVER" value="array"/>
         <env name="FAST2SMS_API_KEY" value=""/>
         <env name="SMS_API_KEY" value=""/>
+        <!-- a developer's real .env must not leak sender/template IDs into the routing tests -->
+        <env name="FAST2SMS_SENDER_ID" value=""/>
+        <env name="FAST2SMS_TEMPLATE_ID" value=""/>
+        <env name="FAST2SMS_OTP_ID" value=""/>
+        <env name="FAST2SMS_ROUTE" value=""/>
     </php>
 </phpunit>

@@ -41,7 +41,7 @@ class Fast2SmsDltSeparationTest extends TestCase
     private function fakeTransport(array $body, int $status, ?array &$sent = null): void
     {
         SmsService::$transportOverride = function (string $url, array $data, array $headers) use ($body, $status, &$sent) {
-            $sent = ['url' => $url, 'data' => $data, 'headers' => $headers];
+            $sent = ['url' => $url, 'data' => $data ?: (function () use ($url) { parse_str((string) parse_url($url, PHP_URL_QUERY), $q); return $q; })(), 'headers' => $headers];
             return [$body, $status];
         };
     }
@@ -106,7 +106,7 @@ class Fast2SmsDltSeparationTest extends TestCase
         $this->actingAs($admin)->postJson(route('settings.sms.test'), ['phone' => '9876543210', 'route' => 'dlt'])
             ->assertOk()->assertJson(['success' => true]);
 
-        $this->assertSame('https://www.fast2sms.com/dev/bulkV2', $sent['url']);
+        $this->assertStringStartsWith('https://www.fast2sms.com/dev/bulkV2?', $sent['url'], 'documented GET request');
         $this->assertSame('dlt', $sent['data']['route']);
         $this->assertSame('DISP24', $sent['data']['sender_id']);
         $this->assertSame('223577', $sent['data']['message']);
@@ -189,7 +189,7 @@ class Fast2SmsDltSeparationTest extends TestCase
         $result = SmsService::sendDltNotification('visitor', '9876543210', 'Your visitor has arrived.', $admin->society_id);
 
         $this->assertTrue($result['success']);
-        $this->assertSame('https://www.fast2sms.com/dev/bulkV2', $sent['url']);
+        $this->assertStringStartsWith('https://www.fast2sms.com/dev/bulkV2?', $sent['url'], 'documented GET request');
         $this->assertSame('Your visitor has arrived.', $sent['data']['variables_values']);
     }
 }

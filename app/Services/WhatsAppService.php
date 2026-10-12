@@ -201,7 +201,7 @@ class WhatsAppService
             return ['success' => true, 'message' => 'dev_mode'];
         }
 
-        $to = self::toE164($phone);
+        $to = self::toE164($phone, $societyId);
         $url = 'https://www.fast2sms.com/dev/whatsapp-session?' . http_build_query([
             'phone_number_id' => $phoneNumberId,
             'to'              => $to,
@@ -266,12 +266,7 @@ class WhatsAppService
             return ['success' => true, 'message' => 'dev_mode'];
         }
 
-        // pipe is the separator, so it cannot appear inside a value
-        $values = implode('|', array_map(fn ($p) => str_replace('|', '/', (string) $p), $params));
-        $query = ['message_id' => (int) $template->message_id, 'phone_number_id' => $phoneNumberId, 'numbers' => self::toE164($phone)];
-        if ($values !== '') {
-            $query['variables_values'] = $values;
-        }
+        $url = Fast2SmsService::whatsappUrl((int) $template->message_id, (string) $phoneNumberId, self::toE164($phone, $societyId), $params);
 
         $handler = function ($body, $httpCode) use ($phone, $apiKey, $logContext) {
             if ($httpCode === 200 && filter_var($body['status'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
@@ -288,8 +283,24 @@ class WhatsAppService
             return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey), 'http_status' => $httpCode];
         };
 
-        return self::curlPost('https://www.fast2sms.com/dev/whatsapp?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986),
-            [], ['authorization: ' . $apiKey], $handler, get: true);
+        if (self::$transportOverride !== null) {
+            [$body, $httpCode] = (self::$transportOverride)($url, [], ['authorization: ' . $apiKey]);
+
+            return $handler($body, $httpCode);
+        }
+
+        [$body, $httpCode] = Fast2SmsService::get($url, (string) $apiKey);
+        if ($httpCode === 0) {
+            if (!empty($body['skipped'])) {
+                Log::notice('WhatsApp suppressed', ['host' => 'www.fast2sms.com']);
+
+                return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+            }
+
+            return ['success' => false, 'message' => 'WhatsApp service unavailable: ' . ($body['transport_error'] ?? 'no response')];
+        }
+
+        return $handler($body, $httpCode);
     }
 
     private static function sendTemplateMessage(string $phone, ?string $templateName, array $components, ?int $societyId, array $logContext, ?string $language = null): array
@@ -315,7 +326,7 @@ class WhatsAppService
             return ['success' => false, 'message' => 'No WhatsApp template name configured for this notification type.'];
         }
 
-        $to = self::toE164($phone);
+        $to = self::toE164($phone, $societyId);
         $url = "https://www.fast2sms.com/dev/whatsapp/{$version}/{$phoneNumberId}/messages";
 
         $payload = [
@@ -369,11 +380,12 @@ class WhatsAppService
     }
 
     /** Meta's API wants a country-coded number with no leading '+'. India default. */
-    private static function toE164(string $phone): string
+    private static function toE164(string $phone, ?int $societyId = null): string
     {
         $digits = SmsService::normalizePhone($phone);
+        $code = preg_replace('/\D+/', '', (string) self::getSetting('whatsapp_country_code', '91', $societyId)) ?: '91';
 
-        return strlen($digits) === 10 ? '91' . $digits : $digits;
+        return strlen($digits) === 10 ? $code . $digits : $digits;
     }
 
     private static function getSetting(string $key, $default, ?int $societyId)
