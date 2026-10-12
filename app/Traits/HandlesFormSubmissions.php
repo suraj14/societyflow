@@ -57,6 +57,12 @@ trait HandlesFormSubmissions
                 ->withErrors($e->errors())
                 ->withInput();
                 
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            // abort(403/404/...) is an answer, not a failure: a refused action must say so (a 403 page), not be turned
+            // into the generic "an error occurred" message below.
+            DB::rollBack();
+
+            throw $e;
         } catch (Exception $e) {
             DB::rollBack();
             

@@ -8,7 +8,11 @@ use App\Models\Shift;
 use App\Models\ShiftAssignment;
 use App\Models\User;
 use App\Services\GuardShiftService;
+use App\Exceptions\ShiftAssignmentException;
+use App\Support\SocietyClock;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * "Do not create a complicated enterprise scheduling UI" - a filterable
@@ -25,7 +29,7 @@ class ShiftAssignmentController extends BaseController
 
         $societyId = $this->getSocietyId();
 
-        $query = ShiftAssignment::bySociety($societyId)->with(['shift', 'gate', 'guardUser']);
+        $query = ShiftAssignment::bySociety($societyId)->with(['shift', 'gate', 'guardUser', 'replacedBy']);
 
         if ($request->filled('date')) {
             // whereDate(), not where() - the column stores a full
@@ -62,7 +66,8 @@ class ShiftAssignmentController extends BaseController
         $societyId = $this->getSocietyId();
         $gates = Gate::bySociety($societyId)->active()->orderBy('name')->get();
         $shifts = Shift::bySociety($societyId)->active()->orderBy('start_time')->get();
-        $guards = User::where('society_id', $societyId)->whereHas('roles', fn ($q) => $q->where('name', 'Guard'))->orderBy('name')->get();
+        // only guards whose account is active can be rostered
+        $guards = User::where('society_id', $societyId)->where('status', 'active')->whereHas('roles', fn ($q) => $q->where('name', 'Guard'))->orderBy('name')->get();
 
         return view('admin.shift-assignments.create', compact('gates', 'shifts', 'guards'));
     }
@@ -71,17 +76,40 @@ class ShiftAssignmentController extends BaseController
     {
         $this->authorizeRole('Super Admin', 'Admin');
 
+        $societyId = $this->getSocietyId();
+        // "Today" by the society's own clock. Past dates are refused (a shift that has already ended cannot be
+        // scheduled; the history of earlier assignments is untouched), and so is a date a year away, which is a typo.
+        $today = SocietyClock::today($societyId);
+
+        // Every id must belong to THIS society: an id from another society is "invalid", exactly like one that does not
+        // exist, and says nothing about whether it exists there.
         $validated = $request->validate([
-            'shift_id'      => 'required|exists:shifts,id',
-            'gate_id'       => 'required|exists:gates,id',
-            'guard_user_id' => 'required|exists:users,id',
-            'date'          => 'required|date',
+            'guard_user_id' => ['required', Rule::exists('users', 'id')->where('society_id', $societyId)],
+            'shift_id'      => ['required', Rule::exists('shifts', 'id')->where('society_id', $societyId)],
+            'gate_id'       => ['required', Rule::exists('gates', 'id')->where('society_id', $societyId)],
+            'date'          => ['required', 'date_format:Y-m-d', 'after_or_equal:' . $today->toDateString(), 'before_or_equal:' . $today->copy()->addDays(366)->toDateString()],
+        ], [
+            'guard_user_id.required' => 'Choose a guard.',
+            'guard_user_id.exists'   => 'Choose a guard from this society.',
+            'shift_id.required'      => 'Choose a shift.',
+            'shift_id.exists'        => 'Choose a shift from this society.',
+            'gate_id.required'       => 'Choose a gate.',
+            'gate_id.exists'         => 'Choose a gate from this society.',
+            'date.required'          => 'Choose the date of the shift.',
+            'date.date_format'       => 'Enter the date as day, month and year.',
+            'date.after_or_equal'    => 'Choose today or a later date - a shift that has already ended cannot be scheduled.',
+            'date.before_or_equal'   => 'Choose a date within the next year.',
         ]);
 
-        $validated['society_id'] = $this->getSocietyId();
+        $validated['society_id'] = $societyId;
         $validated['created_by'] = auth()->id();
 
-        $service->assign($validated);
+        try {
+            $service->assign($validated);
+        } catch (ShiftAssignmentException $e) {
+            // a roster rule (overlap, duplicate, inactive gate ...) belongs next to its field, not on a bare 422 page
+            throw ValidationException::withMessages([$e->field => $e->getMessage()]);
+        }
 
         return redirect()->route('admin.shift-assignments.index', ['date' => $validated['date']])
             ->with('success', 'Guard assigned.');
@@ -92,7 +120,11 @@ class ShiftAssignmentController extends BaseController
         $this->authorizeRole('Super Admin', 'Admin');
         $this->authorizeSocietyAccess($shiftAssignment);
 
-        $service->remove($shiftAssignment, auth()->user());
+        try {
+            $service->remove($shiftAssignment, auth()->user());
+        } catch (ShiftAssignmentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return back()->with('success', 'Assignment removed from the roster.');
     }
@@ -102,23 +134,36 @@ class ShiftAssignmentController extends BaseController
         $this->authorizeRole('Super Admin', 'Admin');
         $this->authorizeSocietyAccess($shiftAssignment);
 
-        $service->markAbsent($shiftAssignment, auth()->user());
+        try {
+            $service->markAbsent($shiftAssignment, auth()->user());
+        } catch (ShiftAssignmentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return back()->with('success', 'Guard marked absent for this shift.');
     }
+
     public function replace(Request $request, ShiftAssignment $shiftAssignment, GuardShiftService $service)
     {
         $this->authorizeRole('Super Admin', 'Admin');
         $this->authorizeSocietyAccess($shiftAssignment);
 
         $validated = $request->validate([
-            'replacement_guard_id' => 'required|exists:users,id',
+            'replacement_guard_id' => ['required', Rule::exists('users', 'id')->where('society_id', $shiftAssignment->society_id)],
             'reason'               => 'required|string|max:255',
+        ], [
+            'replacement_guard_id.required' => 'Choose the guard who takes over.',
+            'replacement_guard_id.exists'   => 'Choose a guard from this society.',
+            'reason.required'               => 'Say why the guard is being replaced.',
         ]);
 
         $replacement = User::findOrFail($validated['replacement_guard_id']);
 
-        $service->replace($shiftAssignment, $replacement, auth()->user(), $validated['reason']);
+        try {
+            $service->replace($shiftAssignment, $replacement, auth()->user(), $validated['reason']);
+        } catch (ShiftAssignmentException $e) {
+            return back()->with('error', $e->getMessage());
+        }
 
         return back()->with('success', 'Guard replaced for this shift.');
     }

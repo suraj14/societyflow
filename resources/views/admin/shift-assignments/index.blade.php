@@ -16,6 +16,11 @@
         </div>
     </div>
 
+    @if ($errors->any())
+        <div class="mb-6 rounded-lg bg-red-50 border border-red-200 text-red-800 px-4 py-3" role="alert">
+            <ul class="list-disc ml-5 text-sm">@foreach ($errors->all() as $message)<li>{{ $message }}</li>@endforeach</ul>
+        </div>
+    @endif
 
     <form method="GET" class="bg-white rounded-lg shadow p-4 mb-6 grid grid-cols-2 md:grid-cols-5 gap-3">
         <input type="date" name="date" value="{{ request('date', \App\Support\SocietyClock::today(auth()->user()->society_id)->toDateString()) }}"
@@ -66,8 +71,11 @@
                             <td class="px-6 py-3">
                                 <span class="px-2 py-0.5 rounded text-xs font-medium
                                     {{ in_array($a->status, ['present','checked_out']) ? 'bg-green-100 text-green-700' : ($a->status === 'late' ? 'bg-amber-100 text-amber-700' : (in_array($a->status, ['absent','missed']) ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600')) }}">
-                                    {{ ucfirst($a->status) }}
+                                    {{ ucfirst(str_replace('_', ' ', $a->status)) }}
                                 </span>
+                                @if ($a->status === 'replaced' && $a->replacedBy)
+                                    <p class="text-xs text-gray-500 mt-1">by {{ $a->replacedBy->name }}@if ($a->replacement_reason) - {{ $a->replacement_reason }}@endif</p>
+                                @endif
                             </td>
                             <td class="px-6 py-3 text-right">
                                 @if ($a->status === 'scheduled' && !$a->checked_in_at)

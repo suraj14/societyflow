@@ -36,7 +36,8 @@
                 </div>
             </div>
             
-            <!-- Unit Information - Prominent Display -->
+            <!-- Unit Information - Prominent Display (the Quick Action "My Unit" jumps here) -->
+            <div id="my-unit" class="scroll-mt-24"></div>
             @if(isset($unit) && $unit)
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
                     <div class="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl p-6 border border-white border-opacity-20">
@@ -217,25 +218,25 @@
                 </div>
                 <div class="p-6">
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <a href="#" class="flex flex-col items-center p-4 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+                        <a href="{{ route('tenant.rent') }}" class="flex flex-col items-center p-4 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
                             <div class="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mb-2">
                                 <i class="fas fa-credit-card text-white"></i>
                             </div>
                             <span class="text-sm font-medium text-gray-700">Pay Rent</span>
                         </a>
-                        <a href="#" class="flex flex-col items-center p-4 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors">
+                        <a href="{{ route('complaints.create') }}" class="flex flex-col items-center p-4 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors">
                             <div class="w-12 h-12 bg-orange-600 rounded-full flex items-center justify-center mb-2">
                                 <i class="fas fa-tools text-white"></i>
                             </div>
                             <span class="text-sm font-medium text-gray-700">Raise Request</span>
                         </a>
-                        <a href="#" class="flex flex-col items-center p-4 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
+                        <a href="{{ route('notices.index') }}" class="flex flex-col items-center p-4 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
                             <div class="w-12 h-12 bg-purple-600 rounded-full flex items-center justify-center mb-2">
                                 <i class="fas fa-bullhorn text-white"></i>
                             </div>
                             <span class="text-sm font-medium text-gray-700">View Notices</span>
                         </a>
-                        <a href="#" class="flex flex-col items-center p-4 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
+                        <a href="#my-unit" class="flex flex-col items-center p-4 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">
                             <div class="w-12 h-12 bg-green-600 rounded-full flex items-center justify-center mb-2">
                                 <i class="fas fa-home text-white"></i>
                             </div>

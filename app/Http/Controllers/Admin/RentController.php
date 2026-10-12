@@ -102,7 +102,8 @@ class RentController extends BaseController
                 ->first();
                 
             if (!$flat) {
-                throw new \Exception('Selected unit is not available for rent.');
+                // a rule the admin can act on is a message beside the field, not the generic "an error occurred"
+                throw \Illuminate\Validation\ValidationException::withMessages(['unit_id' => 'Selected unit is not available for rent: it needs an active tenant.']);
             }
             
             // Validate tenant belongs to the unit
@@ -112,7 +113,7 @@ class RentController extends BaseController
                 ->first();
                 
             if (!$tenant) {
-                throw new \Exception('Selected tenant is not assigned to this unit.');
+                throw \Illuminate\Validation\ValidationException::withMessages(['tenant_id' => 'Selected tenant is not assigned to this unit.']);
             }
             
             // Check for duplicate rent record (same unit, month, year)
@@ -124,7 +125,7 @@ class RentController extends BaseController
                 ->exists();
                 
             if ($existingRent) {
-                throw new \Exception('Rent record already exists for this unit in ' . $billDate->format('F Y') . '.');
+                throw \Illuminate\Validation\ValidationException::withMessages(['bill_date' => 'A rent bill already exists for this unit in ' . $billDate->format('F Y') . '.']);
             }
             
             // The bill itself is always created unpaid; the payment below

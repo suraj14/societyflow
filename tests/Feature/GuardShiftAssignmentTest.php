@@ -28,6 +28,7 @@ class GuardShiftAssignmentTest extends TestCase
 
     public function test_admin_can_assign_a_guard_to_a_shift_and_gate(): void
     {
+        $date = now()->addDays(3)->toDateString();
         $society = $this->makeSociety();
         $admin = $this->makeUserWithRole($society, 'Admin');
         $guard = $this->makeUserWithRole($society, 'Guard');
@@ -38,11 +39,11 @@ class GuardShiftAssignmentTest extends TestCase
             'guard_user_id' => $guard->id,
             'shift_id'      => $shift->id,
             'gate_id'       => $gate->id,
-            'date'          => '2026-01-10',
+            'date'          => $date,
         ])->assertRedirect();
 
         $this->assertDatabaseHas('shift_assignments', [
-            'guard_user_id' => $guard->id, 'shift_id' => $shift->id, 'gate_id' => $gate->id, 'date' => '2026-01-10 00:00:00',
+            'guard_user_id' => $guard->id, 'shift_id' => $shift->id, 'gate_id' => $gate->id, 'date' => $date . ' 00:00:00',
         ]);
     }
 

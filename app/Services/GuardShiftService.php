@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ActivityLog;
 use App\Models\Gate;
 use App\Models\Shift;
+use App\Exceptions\ShiftAssignmentException;
 use App\Models\ShiftAssignment;
 use App\Models\ShiftHandover;
 use App\Models\User;
@@ -141,9 +142,10 @@ class GuardShiftService
         $gate = Gate::findOrFail($data['gate_id']);
         $guard = User::findOrFail($data['guard_user_id']);
 
-        abort_if(!$shift->is_active, 422, 'This shift is not active.');
-        abort_if(!$gate->is_active, 422, 'This gate is not active.');
-        abort_if(!$guard->hasRole('Guard'), 422, 'Only a Guard account can be assigned a shift.');
+        $this->ensure($shift->is_active, 'shift_id', 'This shift is not active. Choose an active shift.');
+        $this->ensure($gate->is_active, 'gate_id', 'This gate is not active. Choose an active gate.');
+        $this->ensure($guard->hasRole('Guard'), 'guard_user_id', 'Only a Guard account can be assigned a shift.');
+        $this->ensure($this->isAvailable($guard), 'guard_user_id', "{$guard->name}'s account is not active, so they cannot be given a shift.");
         abort_if(
             (int) $shift->society_id !== (int) $data['society_id']
                 || (int) $gate->society_id !== (int) $data['society_id']
@@ -152,29 +154,7 @@ class GuardShiftService
             'Shift, gate and guard must all belong to the same society.'
         );
 
-        [$newStart, $newEnd] = $shift->windowStartingOn($data['date']);
-
-        // Same whereDate() reasoning as currentAssignmentFor() above - a
-        // plain string whereIn('date', ...) never matched the stored
-        // "YYYY-MM-DD 00:00:00" value, so this check silently let every
-        // overlapping assignment through until it was caught by a test
-        // actually asserting on the result, not just on the code existing.
-        $overlaps = ShiftAssignment::where('guard_user_id', $guard->id)
-            ->where(function ($q) use ($data) {
-                $q->whereDate('date', Carbon::parse($data['date'])->subDay()->toDateString())
-                  ->orWhereDate('date', $data['date'])
-                  ->orWhereDate('date', Carbon::parse($data['date'])->addDay()->toDateString());
-            })
-            ->whereIn('status', [ShiftAssignment::STATUS_SCHEDULED, ShiftAssignment::STATUS_PRESENT, ShiftAssignment::STATUS_LATE])
-            ->with('shift')
-            ->get()
-            ->first(function (ShiftAssignment $existing) use ($newStart, $newEnd) {
-                [$existingStart, $existingEnd] = $existing->shift->windowStartingOn($existing->date);
-
-                return $newStart->lt($existingEnd) && $existingStart->lt($newEnd);
-            });
-
-        abort_if($overlaps !== null, 422, 'This guard already has an overlapping shift assignment.');
+        $this->ensureNoConflict($guard, $shift, $data['date'], 'guard_user_id');
 
         return ShiftAssignment::create([
             'society_id'    => $data['society_id'],
@@ -185,6 +165,59 @@ class GuardShiftService
             'status'        => ShiftAssignment::STATUS_SCHEDULED,
             'created_by'    => $data['created_by'] ?? null,
         ]);
+    }
+
+    /** @throws ShiftAssignmentException unless $condition holds */
+    private function ensure(bool $condition, string $field, string $message): void
+    {
+        if (!$condition) {
+            throw new ShiftAssignmentException($field, $message);
+        }
+    }
+
+    /** A guard account that can actually be rostered: an active user. */
+    private function isAvailable(User $guard): bool
+    {
+        return ($guard->status ?? 'active') === 'active';
+    }
+
+    /**
+     * Refuses a guard who already holds this very shift on this date (the unique index covers every status, so a guard
+     * who was replaced or marked absent on it keeps that history row and cannot be given the same slot again), or who is
+     * on a different shift whose real time window overlaps this one.
+     *
+     * Whole-day comparison with whereDate(): the column stores "YYYY-MM-DD 00:00:00" on SQLite although it is declared
+     * DATE, so a plain string match silently returned nothing and let every overlap through.
+     *
+     * @throws ShiftAssignmentException
+     */
+    private function ensureNoConflict(User $guard, Shift $shift, $date, string $field): void
+    {
+        $day = Carbon::parse($date)->toDateString();
+
+        $same = ShiftAssignment::where('guard_user_id', $guard->id)->where('shift_id', $shift->id)->whereDate('date', $day)->first();
+        $this->ensure($same === null, $field,
+            "{$guard->name} already has the {$shift->name} shift on {$day} (status: {$same?->status}). Choose another date or shift.");
+
+        [$newStart, $newEnd] = $shift->windowStartingOn($day);
+
+        $overlaps = ShiftAssignment::where('guard_user_id', $guard->id)
+            ->where(function ($q) use ($day) {
+                $q->whereDate('date', Carbon::parse($day)->subDay()->toDateString())
+                  ->orWhereDate('date', $day)
+                  ->orWhereDate('date', Carbon::parse($day)->addDay()->toDateString());
+            })
+            ->whereIn('status', [ShiftAssignment::STATUS_SCHEDULED, ShiftAssignment::STATUS_PRESENT, ShiftAssignment::STATUS_LATE])
+            ->with('shift')
+            ->get()
+            ->first(function (ShiftAssignment $existing) use ($newStart, $newEnd) {
+                [$existingStart, $existingEnd] = $existing->shift->windowStartingOn($existing->date);
+
+                return $newStart->lt($existingEnd) && $existingStart->lt($newEnd);
+            });
+
+        $this->ensure($overlaps === null, $field,
+            "{$guard->name} already has the {$overlaps?->shift?->name} shift on {$overlaps?->date?->toDateString()}, which overlaps this one.");
     }
 
     public function startShift(ShiftAssignment $assignment, ?Carbon $at = null): ShiftAssignment
@@ -227,9 +260,14 @@ class GuardShiftService
      */
     public function replace(ShiftAssignment $assignment, User $replacement, User $admin, string $reason): ShiftAssignment
     {
-        abort_if(!$assignment->isOpen(), 422, 'Only an open assignment can be replaced.');
-        abort_if(!$replacement->hasRole('Guard'), 422, 'Only a Guard account can replace another guard.');
+        $this->ensure($assignment->isOpen(), 'assignment', 'Only an open assignment can be replaced.');
+        $this->ensure($replacement->hasRole('Guard'), 'replacement_guard_id', 'Only a Guard account can replace another guard.');
         abort_if((int) $replacement->society_id !== (int) $assignment->society_id, 403, 'Replacement guard must belong to the same society.');
+        $this->ensure($this->isAvailable($replacement), 'replacement_guard_id', "{$replacement->name}'s account is not active, so they cannot take this shift.");
+        $this->ensure((int) $replacement->id !== (int) $assignment->guard_user_id, 'replacement_guard_id', 'Choose a different guard to replace this one.');
+        // the replacement is rostered like anyone else: not already on this shift, not on an overlapping one
+        $assignment->loadMissing('shift');
+        $this->ensureNoConflict($replacement, $assignment->shift, $assignment->date, 'replacement_guard_id');
 
         return DB::transaction(function () use ($assignment, $replacement, $admin, $reason) {
             $old = $assignment->only(['status', 'replaced_by_user_id', 'replacement_reason']);
@@ -267,10 +305,10 @@ class GuardShiftService
      */
     public function remove(ShiftAssignment $assignment, User $admin): void
     {
-        abort_if(
-            $assignment->status !== ShiftAssignment::STATUS_SCHEDULED || $assignment->hasStarted(),
-            422,
-            'Only a scheduled shift that has not started can be removed.'
+        $this->ensure(
+            $assignment->status === ShiftAssignment::STATUS_SCHEDULED && !$assignment->hasStarted(),
+            'assignment',
+            'Only a scheduled shift that has not started can be removed. A started, absent, replaced or finished shift is attendance history and stays.'
         );
 
         ActivityLog::recordFor($assignment, 'guard_shift_removed', [
@@ -290,15 +328,15 @@ class GuardShiftService
      */
     public function markAbsent(ShiftAssignment $assignment, User $admin): ShiftAssignment
     {
-        abort_if(
-            $assignment->status !== ShiftAssignment::STATUS_SCHEDULED || $assignment->hasStarted(),
-            422,
+        $this->ensure(
+            $assignment->status === ShiftAssignment::STATUS_SCHEDULED && !$assignment->hasStarted(),
+            'assignment',
             'Only a scheduled shift that was never started can be marked absent.'
         );
         $assignment->loadMissing('shift');
-        abort_if(
-            SocietyClock::now($assignment->society_id)->lt($assignment->shift->windowStartingOn($assignment->date)[0]),
-            422,
+        $this->ensure(
+            !SocietyClock::now($assignment->society_id)->lt($assignment->shift->windowStartingOn($assignment->date)[0]),
+            'assignment',
             'This shift has not begun yet.'
         );
 

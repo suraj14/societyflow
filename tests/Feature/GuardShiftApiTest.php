@@ -342,7 +342,8 @@ class GuardShiftApiTest extends TestCase
         $a = $this->assign($society, $guard, $this->shift($society, 'Day Shift', '09:00', '18:00'), $this->gate($society));
         (new GuardShiftService())->startShift($a, Carbon::parse('2026-10-10 09:00:00', 'Asia/Kolkata'));
 
-        $this->actingAs($admin)->delete(route('admin.shift-assignments.destroy', $a))->assertStatus(422);
+        // a roster rule: the admin is sent back with the reason (not a bare 422 page) and the history stays
+        $this->actingAs($admin)->delete(route('admin.shift-assignments.destroy', $a))->assertRedirect()->assertSessionHas('error', fn ($m) => str_contains($m, 'attendance history'));
         $this->assertDatabaseHas('shift_assignments', ['id' => $a->id]);
     }
 
@@ -367,7 +368,7 @@ class GuardShiftApiTest extends TestCase
         $admin = $this->makeUserWithRole($society, 'Admin');
         $a = $this->assign($society, $this->guard($society), $this->shift($society, 'Evening', '16:00', '23:00'), $this->gate($society));
 
-        $this->actingAs($admin)->post(route('admin.shift-assignments.absent', $a))->assertStatus(422);
+        $this->actingAs($admin)->post(route('admin.shift-assignments.absent', $a))->assertRedirect()->assertSessionHas('error', 'This shift has not begun yet.');
         $this->assertSame(ShiftAssignment::STATUS_SCHEDULED, $a->fresh()->status);
     }
 

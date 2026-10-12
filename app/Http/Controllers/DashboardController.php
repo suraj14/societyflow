@@ -484,9 +484,14 @@ class DashboardController extends Controller
         // login opened its dashboard. A login with no tenancy gets an honest
         // empty dashboard until the office assigns one.
 
-        // Get tenant's unit
-        if ($tenant && $tenant->flat_id) {
-            $unit = Flat::with(['building', 'villaArea'])->find($tenant->flat_id);
+        // The tenant's unit is the one on an ACTIVE tenancy - the same rule My Rent, requests and the mobile app use. A
+        // tenancy that has ended (or was moved) must not keep showing a home he no longer rents.
+        $unitIds = \App\Support\UserFlatResolver::tenantFlatIds($user);
+        if ($unitIds !== []) {
+            $unit = Flat::with(['building', 'villaArea'])->where('society_id', $user->society_id)->whereIn('id', $unitIds)->orderByDesc('id')->first();
+        }
+        if (!$unit) {
+            $tenant = null;   // no active tenancy: the dashboard says so instead of describing a past one
         }
 
         // Outstanding bills on the user's own units - the same rule as the mobile dashboard (Api\DashboardApiController);
