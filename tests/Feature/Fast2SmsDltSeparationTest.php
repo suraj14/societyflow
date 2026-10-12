@@ -33,7 +33,7 @@ class Fast2SmsDltSeparationTest extends TestCase
             'fast2sms_route'       => 'otp',
             'fast2sms_otp_id'      => '6fd92db0ae',
             'fast2sms_sender_id'   => 'DISP24',
-            'fast2sms_template_id' => '169ec8e6c8',
+            'fast2sms_template_id' => '223577',
             'fast2sms_entity_id'   => '1701234567890123456',
         ], $overrides));
     }
@@ -109,7 +109,7 @@ class Fast2SmsDltSeparationTest extends TestCase
         $this->assertSame('https://www.fast2sms.com/dev/bulkV2', $sent['url']);
         $this->assertSame('dlt', $sent['data']['route']);
         $this->assertSame('DISP24', $sent['data']['sender_id']);
-        $this->assertSame('169ec8e6c8', $sent['data']['message']);
+        $this->assertSame('223577', $sent['data']['message']);
     }
 
     public function test_an_invalid_route_value_is_rejected(): void

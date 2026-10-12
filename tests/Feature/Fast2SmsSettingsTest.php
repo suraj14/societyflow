@@ -33,7 +33,7 @@ class Fast2SmsSettingsTest extends TestCase
             'sms_enabled'          => '1',
             'fast2sms_route'       => 'otp',
             'fast2sms_sender_id'   => 'DISP24',
-            'fast2sms_template_id' => '169ec8e6c8',
+            'fast2sms_template_id' => '223577',
             'fast2sms_otp_id'      => '6fd92db0ae',
         ], $overrides));
     }
@@ -254,7 +254,7 @@ class Fast2SmsSettingsTest extends TestCase
             'fast2sms_api_key'     => self::KEY,
             'fast2sms_route'       => 'dlt',
             'fast2sms_sender_id'   => 'DISP24',
-            'fast2sms_template_id' => '169ec8e6c8',
+            'fast2sms_template_id' => '223577',
         ]);
 
         $this->fakeTransport(['return' => true], 200, $sent);
@@ -266,7 +266,7 @@ class Fast2SmsSettingsTest extends TestCase
         $this->assertSame('https://www.fast2sms.com/dev/bulkV2', $sent['url']);
         $this->assertSame('dlt', $sent['data']['route']);
         $this->assertSame('DISP24', $sent['data']['sender_id']);
-        $this->assertSame('169ec8e6c8', $sent['data']['message']);
+        $this->assertSame('223577', $sent['data']['message']);
         $this->assertStringNotContainsString('6fd92db0ae', json_encode($sent));
     }
 

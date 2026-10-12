@@ -724,9 +724,11 @@ class SettingsController extends Controller
             'sms_provider'               => 'required|in:fast2sms,bulksmsplans,custom',
             'sms_enabled'                => 'nullable|boolean',
             'fast2sms_api_key'           => 'nullable|string|max:500',
-            'fast2sms_route'             => 'nullable|in:otp,dlt',
-            'fast2sms_sender_id'         => 'nullable|string|max:20',
-            'fast2sms_template_id'       => 'nullable|string|max:50',
+            // dlt = Sender ID + Message ID (default), quick = testing only (no DLT), otp = Fast2SMS OTP service (Advanced)
+            'fast2sms_route'             => 'nullable|in:otp,dlt,quick',
+            // DLT headers are 3-6 characters (letters; a digit is tolerated because older saved IDs such as DISP24 have one)
+            'fast2sms_sender_id'         => ['nullable', 'regex:/^[A-Za-z][A-Za-z0-9]{2,5}$/'],
+            'fast2sms_template_id'       => ['nullable', 'regex:/^[0-9]{1,15}$/'],
             'fast2sms_otp_id'            => 'nullable|string|max:50',
             // DLT compliance metadata (Entity ID). Fast2SMS's send APIs do not
             // take this as a request parameter - it is the registration record
@@ -742,11 +744,14 @@ class SettingsController extends Controller
             'bulksmsplans_sender_id'     => 'nullable|string|max:20',
             'bulksmsplans_template_id'   => 'nullable|string|max:50',
             'custom_sms_api_url'         => 'nullable|string|max:1000',
+        ], [
+            'fast2sms_sender_id.regex'   => 'Sender ID must be 3 to 6 letters, for example BOOKMZ.',
+            'fast2sms_template_id.regex' => 'Message ID is the number Fast2SMS shows next to your template, for example 223577.',
         ]);
 
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
 
-        SystemSetting::set('sms', 'sms_enabled',  $request->boolean('sms_enabled'), 'boolean', $societyId);
+        SystemSetting::set('sms', 'sms_enabled', $request->boolean('sms_enabled'), 'boolean', $societyId);
         SystemSetting::set('sms', 'sms_provider',  $request->sms_provider, 'string', $societyId);
 
         // A masked field means "unchanged" - never store the mask itself.
@@ -755,7 +760,7 @@ class SettingsController extends Controller
         if ($request->filled('fast2sms_api_key') && !\App\Support\SettingSecrets::isMask($request->fast2sms_api_key)) {
             SystemSetting::set('sms', 'fast2sms_api_key', $request->fast2sms_api_key, 'encrypted', $societyId);
         }
-        SystemSetting::set('sms', 'fast2sms_route', $request->fast2sms_route ?? 'otp', 'string', $societyId);
+        SystemSetting::set('sms', 'fast2sms_route', $request->fast2sms_route ?? 'dlt', 'string', $societyId);
         if ($request->filled('fast2sms_sender_id')) {
             SystemSetting::set('sms', 'fast2sms_sender_id', $request->fast2sms_sender_id, 'string', $societyId);
         }
@@ -807,15 +812,17 @@ class SettingsController extends Controller
             // Lets the Settings page test OTP and DLT independently of
             // whichever route is currently saved - without this, there was
             // no way to verify the one not selected before switching to it.
-            'route' => 'nullable|in:otp,dlt',
+            'route' => 'nullable|in:otp,dlt,quick',
             // 'notification' tests the template used for notification SMS.
             'template' => 'nullable|in:otp,notification',
             'test_value' => 'nullable|string|max:30',
+            // pipe-separated values for the template's variables, e.g. "1234|Alpha Heights"
+            'variables' => 'nullable|string|max:200',
         ]);
 
         $user      = auth()->user();
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
-        $value     = trim((string) $request->input('test_value', '')) ?: '1234';
+        $value     = trim((string) $request->input('variables', '')) ?: (trim((string) $request->input('test_value', '')) ?: '1234');
 
         try {
             $result = $request->input('template') === 'notification'
@@ -859,6 +866,7 @@ class SettingsController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Test SMS sent to ' . \App\Services\SmsService::maskPhone($request->phone) . '. Fast2SMS accepted it for delivery.',
+                'raw'     => $result['raw'] ?? null,
             ]);
         }
 
@@ -891,6 +899,7 @@ class SettingsController extends Controller
             'success' => false,
             'message' => "Test SMS failed. {$reason}",
             'details' => 'Fast2SMS request failed: ' . $provider,
+            'raw'     => $result['raw'] ?? null,
         ]);
     }
 

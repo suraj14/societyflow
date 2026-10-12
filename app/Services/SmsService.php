@@ -105,9 +105,11 @@ class SmsService
             if ($apiKey === '') {
                 return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
             }
-            return $forceRoute === 'dlt'
-                ? self::sendViaFast2SmsDlt($phone, $otp, $apiKey, $societyId)
-                : self::sendViaFast2SmsOtp($phone, $otp, $apiKey, $societyId);
+            return match ($forceRoute) {
+                'dlt'   => self::sendViaFast2SmsDlt($phone, $otp, $apiKey, $societyId),
+                'quick' => self::sendViaFast2SmsQuick($phone, "Test message from SocietyFlow: {$otp}", $apiKey),
+                default => self::sendViaFast2SmsOtp($phone, $otp, $apiKey, $societyId),
+            };
         }
 
         return match ($provider) {
@@ -254,7 +256,7 @@ class SmsService
     private static function sendViaFast2Sms(string $phone, string $otp, ?int $societyId): array
     {
         $apiKey = self::getSetting('fast2sms_api_key', null, $societyId);
-        $route  = self::getSetting('fast2sms_route', 'otp', $societyId);
+        $route  = self::getSetting('fast2sms_route', 'dlt', $societyId);
 
         if (empty($apiKey)) {
             // Never write the OTP itself to the log (CLAUDE.md §7); dev mode
@@ -263,11 +265,44 @@ class SmsService
             return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
         }
 
-        if ($route === 'dlt') {
-            return self::sendViaFast2SmsDlt($phone, $otp, $apiKey, $societyId);
+        if ($route === 'quick') {
+            return self::sendViaFast2SmsQuick($phone, "Your verification code is {$otp}. Do not share it.", $apiKey);
         }
 
-        return self::sendViaFast2SmsOtp($phone, $otp, $apiKey, $societyId);
+        if ($route === 'otp') {
+            return self::sendViaFast2SmsOtp($phone, $otp, $apiKey, $societyId);
+        }
+
+        return self::sendViaFast2SmsDlt($phone, $otp, $apiKey, $societyId);
+    }
+
+    /**
+     * Fast2SMS Quick SMS (route=q): free text, no DLT sender or template. For testing only - Indian carriers
+     * block it for most traffic and Fast2SMS may require a minimum recharge before it works.
+     */
+    public static function sendViaFast2SmsQuick(string $phone, string $text, string $apiKey): array
+    {
+        if ($bad = self::invalidNumber($phone)) {
+            return $bad;
+        }
+
+        $payload = ['route' => 'q', 'message' => $text, 'flash' => 0, 'numbers' => $phone];
+
+        return self::curlPost('https://www.fast2sms.com/dev/bulkV2', $payload,
+            ['authorization: ' . $apiKey, 'Content-Type: application/json'],
+            self::fast2smsResponseHandler($phone, 'q', $apiKey)
+        );
+    }
+
+    /** A provider answer made safe to show: the API key and long token-like strings are removed. */
+    public static function rawResponse($body, ?string $apiKey = null): string
+    {
+        $json = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) ?: '';
+        if ($apiKey !== null && $apiKey !== '') {
+            $json = str_replace($apiKey, '[redacted]', $json);
+        }
+
+        return mb_substr($json, 0, 1000);
     }
 
     /**
@@ -366,7 +401,7 @@ class SmsService
         return function ($body, $httpCode) use ($phone, $route, $apiKey) {
             if ($httpCode === 200 && ($body['return'] ?? false) === true) {
                 // request_id is the provider's reference for this send (not a secret): kept for support/correlation.
-                return ['success' => true, 'message' => 'OTP sent via Fast2SMS', 'request_id' => isset($body['request_id']) ? (string) $body['request_id'] : null];
+                return ['success' => true, 'message' => 'OTP sent via Fast2SMS', 'request_id' => isset($body['request_id']) ? (string) $body['request_id'] : null, 'raw' => self::rawResponse($body, $apiKey)];
             }
             $error = is_array($body['message'] ?? null)
                 ? implode(', ', $body['message'])
@@ -389,7 +424,7 @@ class SmsService
                 default => 'rejected',
             };
 
-            return ['success' => false, 'message' => self::safeProviderMessage((string) $error, $apiKey), 'error_code' => $code, 'provider_status' => $httpCode];
+            return ['success' => false, 'message' => self::safeProviderMessage((string) $error, $apiKey), 'error_code' => $code, 'provider_status' => $httpCode, 'raw' => self::rawResponse($body, $apiKey)];
         };
     }
 

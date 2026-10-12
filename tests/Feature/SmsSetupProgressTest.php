@@ -8,7 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Settings -> SMS / OTP: honest, distinct states. A saved key is "Configuration saved - not verified" (never a
+ * Settings -> SMS / OTP: honest, distinct states. A saved key is "Not tested yet" (never a
  * connection), "Provider check passed" appears only after a real recorded check, and while external messaging is off
  * the page says so. Another society never sees this society's state. A rejected save explains itself.
  */
@@ -26,7 +26,7 @@ class SmsSetupProgressTest extends TestCase
 
         $page = $this->actingAs($admin)->get('/settings?tab=sms')->assertOk();
 
-        $page->assertSee('Configuration saved - not verified')
+        $page->assertSee('Not tested yet')
             ->assertSee('Real SMS delivery is switched off on this server')
             ->assertDontSee('Provider check passed')
             ->assertDontSee('a-secret-key-value');

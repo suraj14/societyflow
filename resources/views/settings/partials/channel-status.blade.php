@@ -28,10 +28,7 @@
             <p class="font-semibold text-red-900">{{ $status['summary'] }}</p>
             <p class="text-sm text-red-800">Checked {{ $sfAgo }}. Fix the settings below, save, and test again.</p>
             @if (!empty($status['detail']))
-                <details class="mt-2 text-xs text-red-800">
-                    <summary class="cursor-pointer select-none">View technical details</summary>
-                    <p class="mt-1 font-mono break-words">{{ $status['detail'] }}</p>
-                </details>
+                <p class="mt-1 text-xs text-red-800 font-mono break-words">{{ $status['detail'] }}</p>
             @endif
         </div>
     </div>

@@ -23,7 +23,7 @@
                     <input type="{{ $f['type'] ?? 'text' }}" name="{{ $f['name'] }}" value="{{ $f['value'] ?? '' }}" placeholder="{{ $f['placeholder'] ?? '' }}"
                            @if (!empty($f['maxlength'])) maxlength="{{ $f['maxlength'] }}" @endif
                            @if (!empty($f['inputmode'])) inputmode="{{ $f['inputmode'] }}" @endif
-                           required class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-green-500">
+                           @if ($f['required'] ?? true) required @endif class="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-green-500">
                 @endif
             </div>
         @endforeach
@@ -42,6 +42,12 @@
                 <summary class="cursor-pointer select-none">View technical details</summary>
                 <p class="mt-1 font-mono break-words" x-text="result.details"></p>
             </details>
+        </template>
+        <template x-if="result && result.raw">
+            <div class="mt-2">
+                <p class="text-xs font-semibold">Fast2SMS response</p>
+                <pre class="mt-1 text-xs font-mono whitespace-pre-wrap break-words bg-white/70 rounded-lg p-2" x-text="result.raw"></pre>
+            </div>
         </template>
     </div>
 </div>
@@ -68,7 +74,7 @@ function sfChannelTest(url) {
                 if (r.status === 422) {
                     this.result = { success: false, message: Object.values(data.errors || {}).flat()[0] || 'Please check the details entered.' };
                 } else {
-                    this.result = { success: !!data.success, message: data.message || 'Something went wrong.', details: data.details || null };
+                    this.result = { success: !!data.success, message: data.message || 'Something went wrong.', details: data.details || null, raw: data.raw || null };
                 }
             } catch (e) {
                 this.result = { success: false, message: 'Could not reach the server. Check your connection and try again.' };

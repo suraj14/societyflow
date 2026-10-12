@@ -5,13 +5,13 @@
     $sfSmsSociety = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
     $sfSmsStatus = \App\Support\ChannelStatus::get('sms', $sfSmsSociety);
     $sfHasKey = !empty($sfSms['fast2sms_api_key']);
-    $sfRoute = $sfSms['fast2sms_route'] ?? 'otp'; // SmsService's own default
+    $sfRoute = $sfSms['fast2sms_route'] ?? 'dlt'; // SmsService's own default
     $sfTemplateId = (string) ($sfSms['fast2sms_template_id'] ?? '');
     $sfLooksLikeDltId = strlen(preg_replace('/\D+/', '', $sfTemplateId)) >= 15;
     $sfOtpMeta = is_array($sfSms['fast2sms_otp_template'] ?? null) ? $sfSms['fast2sms_otp_template'] : null;
     $sfNotifMeta = is_array($sfSms['fast2sms_notification_template'] ?? null) ? $sfSms['fast2sms_notification_template'] : null;
     $sfNotifId = (string) ($sfSms['fast2sms_notification_template_id'] ?? '');
-    $sfOtpReady = $sfRoute === 'otp' ? !empty($sfSms['fast2sms_otp_id']) : ($sfTemplateId !== '' && !$sfLooksLikeDltId);
+    $sfOtpReady = $sfRoute === 'otp' ? !empty($sfSms['fast2sms_otp_id']) : ($sfRoute === 'quick' || ($sfTemplateId !== '' && !$sfLooksLikeDltId));
     $sfSmsConfigured = $sfHasKey && $sfOtpReady;
     $sfEnabled = (bool) ($sfSms['sms_enabled'] ?? false);
     $sfInput = 'w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500';
@@ -42,8 +42,8 @@
         'okLabel' => 'Provider check passed',
         'notConfiguredLabel' => 'SMS not configured',
         'notConfiguredHint' => $sfHasKey ? 'API key saved. Choose how OTPs are sent below (an OTP ID, or a template Message ID).' : 'Enter your Fast2SMS API key and save.',
-        'savedLabel' => 'Configuration saved - not verified',
-        'savedHint' => 'Saving does not prove the connection works. Use "Verify connection" below.',
+        'savedLabel' => 'Not tested yet',
+        'savedHint' => 'Settings are saved. Press "Verify connection" or "Send Test SMS" to see Fast2SMS\'s answer.',
     ])
 
     @if ($sfLooksLikeDltId)
@@ -87,30 +87,25 @@
                 </div>
             </div>
 
-            {{-- How OTPs are sent: two different identifiers, kept visibly apart --}}
-            <div class="rounded-xl border border-gray-200 p-4 space-y-3">
-                <p class="text-sm font-medium text-gray-900">How OTP codes are sent</p>
+            {{-- Mode: DLT (default) or Quick SMS (testing). The Fast2SMS OTP service lives under Advanced. --}}
+            <div class="space-y-3">
+                <p class="text-sm font-medium text-gray-900">Mode</p>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label class="flex items-start gap-2 p-3 rounded-xl border cursor-pointer" :class="route === 'dlt' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'">
                         <input type="radio" name="fast2sms_route" value="dlt" x-model="route" class="mt-0.5 text-purple-600">
-                        <span class="text-sm"><span class="font-medium text-gray-900">My approved DLT template</span><span class="block text-gray-500">Uses a template <strong>Message ID</strong>.</span></span>
+                        <span class="text-sm"><span class="font-medium text-gray-900">DLT (Sender ID + Message ID)</span></span>
                     </label>
-                    <label class="flex items-start gap-2 p-3 rounded-xl border cursor-pointer" :class="route === 'otp' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'">
-                        <input type="radio" name="fast2sms_route" value="otp" x-model="route" class="mt-0.5 text-purple-600">
-                        <span class="text-sm"><span class="font-medium text-gray-900">Fast2SMS OTP service</span><span class="block text-gray-500">Uses an <strong>OTP ID</strong>.</span></span>
+                    <label class="flex items-start gap-2 p-3 rounded-xl border cursor-pointer" :class="route === 'quick' ? 'border-amber-400 bg-amber-50' : 'border-gray-200'">
+                        <input type="radio" name="fast2sms_route" value="quick" x-model="route" class="mt-0.5 text-amber-600">
+                        <span class="text-sm"><span class="font-medium text-gray-900">Quick SMS (testing only, no DLT)</span></span>
                     </label>
                 </div>
-                <div x-show="route === 'dlt'" x-cloak>
-                    <label for="sf-msgid" class="block text-sm font-medium text-gray-700 mb-1.5">OTP template Message ID</label>
-                    <input id="sf-msgid" type="text" name="fast2sms_template_id" value="{{ $sfTemplateId }}" placeholder="e.g. 182001" class="{{ $sfInput }}">
-                    <p class="text-xs text-gray-500 mt-1">The short Fast2SMS Message ID - not the long 19-digit DLT Template ID.</p>
+                <div x-show="route === 'dlt' || route === 'otp'" x-cloak>
+                    <label for="sf-msgid" class="block text-sm font-medium text-gray-700 mb-1.5">Default Message ID</label>
+                    <input id="sf-msgid" type="text" name="fast2sms_template_id" value="{{ $sfTemplateId }}" inputmode="numeric" placeholder="e.g. 223577" class="{{ $sfInput }}">
+                    <p class="text-xs text-gray-500 mt-1">The number Fast2SMS shows next to your approved template (DLT Manager). Not the long 19-digit DLT Template ID.</p>
                 </div>
-                <div x-show="route === 'otp'" x-cloak>
-                    <label for="sf-otpid" class="block text-sm font-medium text-gray-700 mb-1.5">Fast2SMS OTP ID</label>
-                    <input id="sf-otpid" type="text" name="fast2sms_otp_id" value="{{ $sfSms['fast2sms_otp_id'] ?? '' }}" class="{{ $sfInput }}">
-                    <p class="text-xs text-gray-500 mt-1">Your OTP template identifier from Fast2SMS (<span class="font-mono">otp_id</span>).</p>
-                </div>
-                <p class="text-xs text-gray-500"><i class="fas fa-circle-info mr-1"></i>An <strong>OTP ID</strong> and a <strong>Message ID</strong> are different numbers for different Fast2SMS services. One is never a substitute for the other.</p>
+                <p x-show="route === 'quick'" x-cloak class="text-xs text-amber-800">Quick SMS sends plain text with no DLT template. Use it for testing only.</p>
             </div>
 
             {{-- Notifications: a summary, the templates themselves live on their own page --}}
@@ -148,6 +143,17 @@
         <details class="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6 group">
             <summary class="cursor-pointer text-sm font-medium text-gray-700 select-none">Advanced / Technical details</summary>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                <div class="sm:col-span-2 rounded-xl border border-gray-200 p-4 space-y-3">
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="radio" name="fast2sms_route" value="otp" x-model="route" class="mt-0.5 text-purple-600">
+                        <span class="text-sm"><span class="font-medium text-gray-900">Use the Fast2SMS OTP service for login codes</span><span class="block text-gray-500">Needs an <strong>OTP ID</strong>, which is a different number from a Message ID.</span></span>
+                    </label>
+                    <div>
+                        <label for="sf-otpid" class="block text-sm font-medium text-gray-700 mb-1.5">Fast2SMS OTP ID</label>
+                        <input id="sf-otpid" type="text" name="fast2sms_otp_id" value="{{ $sfSms['fast2sms_otp_id'] ?? '' }}" class="{{ $sfInput }}">
+                        <p class="text-xs text-gray-500 mt-1">Your OTP template identifier from Fast2SMS (<span class="font-mono">otp_id</span>). Only used when the option above is selected.</p>
+                    </div>
+                </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1.5">DLT Entity ID (for your records)</label>
                     <input type="text" name="fast2sms_entity_id" value="{{ $sfSms['fast2sms_entity_id'] ?? '' }}" class="{{ $sfInput }}">
@@ -192,11 +198,11 @@
     {{-- ───────────── Card 2: Test SMS ───────────── --}}
     @include('settings.partials.channel-test', [
         'title' => 'Test SMS',
-        'hint' => 'Sends one real SMS through your saved settings. A DLT template has fixed wording - your test value fills its variable. Nothing is sent until you press the button.',
+        'hint' => 'Sends one real SMS with your saved settings and shows Fast2SMS\'s reply. Nothing is sent until you press the button.',
         'url' => route('settings.sms.test'),
         'fields' => [
-            ['name' => 'phone', 'type' => 'tel', 'label' => 'Mobile number', 'value' => auth()->user()->phone, 'placeholder' => '10-digit mobile', 'maxlength' => 13, 'inputmode' => 'numeric'],
-            ['name' => 'test_value', 'type' => 'text', 'label' => 'Test value', 'value' => '1234', 'maxlength' => 30],
+            ['name' => 'phone', 'type' => 'tel', 'label' => 'Phone number', 'value' => auth()->user()->phone, 'placeholder' => '10 digits', 'maxlength' => 13, 'inputmode' => 'numeric'],
+            ['name' => 'variables', 'type' => 'text', 'label' => 'Variables (separate with |)', 'value' => '1234', 'maxlength' => 200, 'placeholder' => 'e.g. 1234|Alpha Heights'],
             ['name' => 'template', 'type' => 'select', 'label' => 'Template', 'options' => ['otp' => 'OTP template', 'notification' => 'Notification template']],
         ],
         'button' => 'Send Test SMS',
