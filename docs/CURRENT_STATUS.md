@@ -4,6 +4,13 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-12 - stabilization, bug fix and web/mobile parity run
+
+Committed on `production-readiness` (last commit: see `git log`). **READY FOR STAGING, NOT READY FOR PRODUCTION.** Details, root causes and per-defect tests: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md).
+- Fixed: shift-assignment 422 (field-aware errors, conflict/past-date/unavailable-guard rules), tenant Quick Actions, rent vs maintenance bill index collision (cause of the tenant Rs 0), **residents marking their own bill paid** (now a pending claim), payer notification on verification, mobile bill type, one password policy (server + web + Flutter).
+- Results after the last code change: **SQLite** 8 shards 1997 tests / 11058 assertions / 0 failures / 0 errors / 5 skipped; **MariaDB 10.4** (throwaway :3307, fresh DBs) 6 shards 1997 / 11056 / 0 / 0 / 3 skipped; **Flutter** 212 tests pass, `flutter analyze` only the 2 known info deprecations. Shard exit codes are not captured by the runner; figures are phpunit summaries.
+- NOT TESTED: Android device/emulator, live Fast2SMS/WhatsApp/SMTP delivery, browser pass of the new password/SMS/template/roster screens, Society Expenses in depth. Missing: shift-change and booking-cancellation notifications.
+- Operator: migrate (2 new migrations), rotate the pasted Fast2SMS key, Accountant cannot record payments (decision), SMS needs the master switch.
 ## 2026-10-12 - master implementation run (P1-99..101, P2-39, P2-40)
 
 Uncommitted on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION.** No real SMS/OTP/email/WhatsApp was sent and no live provider endpoint was called (the Fast2SMS and Flutter tests use recording stubs / a fake HTTP layer; the two docs pages were read, which is not a provider call). EXTERNAL_MESSAGING_ENABLED stayed false; `.env`, credentials and databases untouched.
