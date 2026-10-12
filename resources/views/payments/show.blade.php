@@ -4,6 +4,11 @@
 @section('page-title', 'Payment Details')
 
 @section('content')
+@php
+    // Mirrors PaymentController::authorizePaymentWrite(): the Admin always; a resident only their own pending claim.
+    $canChange = auth()->user()->hasAnyRole(['Super Admin', 'Admin'])
+        || ($payment->status === 'pending' && $payment->user_id !== null && (int) $payment->user_id === (int) auth()->id());
+@endphp
 <div class="container mx-auto px-4 py-6">
     <div class="flex items-center justify-between mb-6">
         <div class="flex items-center">
@@ -23,11 +28,13 @@
                 <i class="fas fa-print mr-2"></i>
                 Print Receipt
             </a>
-            <a href="{{ route('payments.edit', $payment) }}" 
+            @if($canChange)
+            <a href="{{ route('payments.edit', $payment) }}"
                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center">
                 <i class="fas fa-edit mr-2"></i>
                 Edit Payment
             </a>
+            @endif
         </div>
     </div>
 
@@ -196,11 +203,13 @@
                 <!-- Actions -->
                 <div class="mt-6 pt-6 border-t border-gray-200 flex justify-between print:hidden">
                     <div class="flex space-x-3">
-                        <a href="{{ route('payments.edit', $payment) }}" 
+                        @if($canChange)
+                        <a href="{{ route('payments.edit', $payment) }}"
                            class="text-blue-600 hover:text-blue-800 font-medium transition-colors">
                             <i class="fas fa-edit mr-1"></i>
                             Edit Payment
                         </a>
+                        @endif
                         <a href="{{ route('payments.receipt', $payment) }}" 
                            target="_blank"
                            class="text-green-600 hover:text-green-800 font-medium transition-colors">
@@ -208,7 +217,8 @@
                             Print Receipt
                         </a>
                     </div>
-                    <form action="{{ route('payments.destroy', $payment) }}" 
+                    @if($canChange)
+                    <form action="{{ route('payments.destroy', $payment) }}"
                           method="POST" 
                           class="inline-block"
                           onsubmit="return confirm('Are you sure you want to delete this payment? This action cannot be undone.');">
@@ -220,6 +230,7 @@
                             Delete Payment
                         </button>
                     </form>
+                    @endif
                 </div>
             </div>
         </div>

@@ -271,7 +271,7 @@
                                             
                                             <div id="action-menu-{{ $payment->id }}" class="hidden absolute right-0 z-10 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5">
                                                 <div class="py-1">
-                                                    @if($payment->status === 'pending' && auth()->user()->hasAnyRole(['Super Admin', 'Admin', 'Accountant']))
+                                                    @if($payment->status === 'pending' && auth()->user()->hasAnyRole(['Super Admin', 'Admin']) && (int) $payment->user_id !== (int) auth()->id())
                                                         <form method="POST" action="{{ route('payments.approve', $payment) }}" onsubmit="this.querySelector('button').disabled = true;">
                                                             @csrf
                                                             <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-green-700 hover:bg-gray-100">

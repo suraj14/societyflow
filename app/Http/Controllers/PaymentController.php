@@ -499,7 +499,7 @@ class PaymentController extends Controller
 
     public function edit(Payment $payment)
     {
-        $this->authorizeOwnedRecord($payment);
+        $this->authorizePaymentWrite($payment);
 
         // Eager load the flat relationship
         $payment->load(['flat.building', 'flat.villaArea']);
@@ -509,7 +509,7 @@ class PaymentController extends Controller
 
     public function update(Request $request, Payment $payment)
     {
-        $this->authorizeOwnedRecord($payment);
+        $this->authorizePaymentWrite($payment);
 
         $user = auth()->user();
 
@@ -542,6 +542,20 @@ class PaymentController extends Controller
             // payment at another society's flat was open to every non-Admin
             // role. authorizeSocietyAccess() scopes by default.
             $this->authorizeSocietyAccess($flat);
+
+            // A resident correcting their own pending claim stays on their own unit and cannot claim more than the bill owes.
+            if (!$user->hasAnyRole(['Super Admin', 'Admin'])) {
+                if (!\App\Support\UserFlatResolver::userHasFlat($user, $flat->id)) {
+                    return back()->withErrors(['error' => 'You can only record a payment for your own property.'])->withInput();
+                }
+                $bill = $payment->maintenance_bill_id ? \App\Models\MaintenanceBill::find($payment->maintenance_bill_id) : null;
+                if ($bill && (int) $bill->flat_id !== (int) $flat->id) {
+                    return back()->withErrors(['error' => 'This payment belongs to another property\'s bill.'])->withInput();
+                }
+                if ($bill && (float) $request->amount > (float) $bill->balance_amount + 0.009) {
+                    return back()->withErrors(['amount' => 'This is more than the bill still owes (' . number_format((float) $bill->balance_amount, 2) . ').'])->withInput();
+                }
+            }
 
             // Create payment data
             $paymentData = [
@@ -581,13 +595,46 @@ class PaymentController extends Controller
 
     public function destroy(Payment $payment)
     {
-        $this->authorizeOwnedRecord($payment);
+        $this->authorizePaymentWrite($payment);
+
+        \App\Models\ActivityLog::recordFor($payment, 'payment.deleted', ['amount' => (float) $payment->amount, 'status' => $payment->status, 'maintenance_bill_id' => $payment->maintenance_bill_id]);
 
         // The Payment model's deleted hook re-derives the linked bill.
         $payment->delete();
 
         return redirect()->route('payments.index')
             ->with('success', 'Payment deleted successfully!');
+    }
+
+    /**
+     * Who may change or remove a payment row.
+     *
+     * Money is only ever altered by Admin / Super Admin. A resident may correct or withdraw their OWN claim, and only
+     * while it is still pending: once the office has verified it, it is a financial record, and the generic "own record"
+     * check this replaced let the resident rewrite its amount or delete it and so move the bill's balance. Accountant is
+     * read-only on payments (no documented business requirement says otherwise).
+     */
+    private function authorizePaymentWrite(Payment $payment): void
+    {
+        $this->authorizeSocietyAccess($payment);
+
+        $user = auth()->user();
+        if ($user->hasAnyRole(['Super Admin', 'Admin'])) {
+            return;
+        }
+
+        abort_unless($payment->user_id !== null && (int) $payment->user_id === (int) $user->id && $payment->status === 'pending', 403, 'Only your own pending payment can be changed or withdrawn.');
+    }
+
+    /**
+     * Verification is a separate duty from submission: only Admin / Super Admin verify, and nobody verifies a payment
+     * they submitted themselves (an Admin who also lives in the society cannot approve their own claim).
+     */
+    private function authorizeVerifier(Payment $payment): void
+    {
+        $user = auth()->user();
+        abort_unless($user->hasAnyRole(['Super Admin', 'Admin']), 403, 'Only an administrator can verify or reject a payment.');
+        abort_if($payment->user_id !== null && (int) $payment->user_id === (int) $user->id, 403, 'You cannot verify a payment you submitted yourself.');
     }
 
     /**
@@ -598,7 +645,7 @@ class PaymentController extends Controller
     public function approve(Payment $payment)
     {
         $this->authorizeSocietyAccess($payment);
-        abort_unless(auth()->user()->hasAnyRole(['Super Admin', 'Admin', 'Accountant']), 403);
+        $this->authorizeVerifier($payment);
 
         if ($payment->status === 'success') {
             return back()->with('info', 'This payment is already verified.');
@@ -630,7 +677,7 @@ class PaymentController extends Controller
     public function reject(Payment $payment)
     {
         $this->authorizeSocietyAccess($payment);
-        abort_unless(auth()->user()->hasAnyRole(['Super Admin', 'Admin', 'Accountant']), 403);
+        $this->authorizeVerifier($payment);
 
         if ($payment->status !== 'pending') {
             return back()->with('error', 'Only a pending payment can be rejected.');

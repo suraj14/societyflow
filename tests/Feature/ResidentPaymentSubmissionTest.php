@@ -16,7 +16,7 @@ use Tests\TestCase;
  * Who can make a bill "paid".
  *
  * Found in the audit: POST /payments created a `success` payment for ANY signed-in resident of the unit, and the ledger
- * then marked their bill paid - no money, no verification. Now only the office (Admin, Accountant, Super Admin) records
+ * then marked their bill paid - no money, no verification. Now only the office (Admin, Super Admin) records
  * received money; a resident's record is a pending claim that changes nothing until an admin verifies it. The same
  * route also accepted ₹0, more than the bill owes, and the same payment twice in a row; and a verified payment never told
  * its payer. Ledger and figures: see FinanceReconciliationTest.
@@ -99,16 +99,16 @@ class ResidentPaymentSubmissionTest extends TestCase
         Event::assertDispatchedTimes(PaymentReceived::class, 1);
     }
 
-    public function test_the_accountant_verifies_claims_but_does_not_record_payments_on_this_form(): void
+    public function test_the_accountant_neither_records_nor_verifies_payments(): void
     {
-        // unchanged behaviour, pinned: the form is for residents' own units and the Admin
+        // separation of duties (FinancePermissionMatrixTest): the form is for residents' own units and the Admin, and only an Admin verifies
         $this->record($this->accountant, $this->maint159oct, 1000)->assertSessionHasErrors('error');
         $this->assertSame(0, Payment::where('maintenance_bill_id', $this->maint159oct->id)->where('amount', 1000)->count());
 
         $this->record($this->tenant, $this->maint159oct, 1000);
         $claim = Payment::where('maintenance_bill_id', $this->maint159oct->id)->where('amount', 1000)->sole();
-        $this->actingAs($this->accountant)->post(route('payments.approve', $claim))->assertSessionHas('success');
-        $this->assertSame('success', $claim->fresh()->status);
+        $this->actingAs($this->accountant)->post(route('payments.approve', $claim))->assertForbidden();
+        $this->assertSame('pending', $claim->fresh()->status);
     }
     // ── what the route refuses ──────────────────────────────────────────────
 
