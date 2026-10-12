@@ -407,7 +407,8 @@ class CommunicationSettingsTest extends TestCase
 
         $this->assertSame('payment_completed', SystemSetting::get('whatsapp', 'whatsapp_payment_template_name', null, $this->society));
         $this->assertSame('Something Unknown', SystemSetting::get('whatsapp', 'whatsapp_visitor_template_name', null, $this->society), 'unmatched values are left alone, never guessed');
-        $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertSee('Needs a new template');
+        // the purpose -> template mapping lives on the Message Templates page now (the settings page only summarises it)
+        $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->assertSee('Needs a new template');
     }
 
     public function test_saving_whatsapp_settings_keeps_template_assignments(): void
@@ -462,5 +463,59 @@ class CommunicationSettingsTest extends TestCase
                   'settings.whatsapp.verify-template', 'settings.whatsapp.assign', 'settings.whatsapp.unassign', 'settings.whatsapp.test-template', 'settings.email.test'] as $route) {
             $this->actingAs($tenant)->postJson(route($route), [])->assertForbidden();
         }
+    }
+
+    // ── OTP / notification independence (SMS audit) ─────────────────────────
+
+    public function test_a_notification_is_never_sent_through_the_otp_template_when_none_is_chosen(): void
+    {
+        $this->saveSmsKey();
+        SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $this->society);
+        // Legacy shape: only the (single) OTP template exists.
+        SystemSetting::set('sms', 'fast2sms_template_id', '182001', 'string', $this->society);
+        SystemSetting::set('sms', 'fast2sms_sender_id', 'ROYALE', 'string', $this->society);
+        $called = false;
+        SmsService::$transportOverride = function () use (&$called) { $called = true; return [['return' => true], 200]; };
+
+        $result = SmsService::sendDltNotification('notification', '9876543210', 'Water supply off 2-4 PM', $this->society);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('No notification SMS template', $result['message']);
+        $this->assertFalse($called, 'no request is made: the OTP template is not approved for notification text');
+        $this->actingAs($this->admin)->get('/settings?tab=sms')->assertSee('the OTP template is never reused');
+    }
+
+    public function test_choosing_the_otp_template_never_changes_the_notification_template_and_vice_versa(): void
+    {
+        $this->saveSmsKey();
+        $this->fakeAccount(['dlt_manager?type=template' => $this->smsTemplatesResponse()]);
+        $get = fn (string $k) => SystemSetting::get('sms', $k, null, $this->society);
+
+        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'notification', 'message_id' => '182002'])->assertJson(['success' => true]);
+        $notifBefore = [$get('fast2sms_notification_template_id'), $get('fast2sms_notification_sender_id')];
+        $this->assertNull($get('fast2sms_template_id'), 'choosing a notification template does not fill the OTP one');
+
+        $this->actingAs($this->admin)->postJson(route('settings.sms.use-template'), ['purpose' => 'otp', 'message_id' => '182001'])->assertJson(['success' => true]);
+        $this->assertSame($notifBefore, [$get('fast2sms_notification_template_id'), $get('fast2sms_notification_sender_id')], 'choosing the OTP template leaves notifications alone');
+        $this->assertSame('182001', $get('fast2sms_template_id'));
+    }
+
+    public function test_connect_and_verify_only_read_the_account_and_never_call_a_send_endpoint(): void
+    {
+        $this->saveSmsKey();
+        $this->fakeAccount(['wallet' => [['return' => true, 'wallet' => 120.5], 200], 'dlt_manager?type=template' => $this->smsTemplatesResponse()]);
+        $sent = false;
+        SmsService::$transportOverride = function () use (&$sent) { $sent = true; return [['return' => true], 200]; };
+
+        $this->actingAs($this->admin)->postJson(route('settings.sms.connect'))->assertOk();
+        $this->actingAs($this->admin)->postJson(route('settings.sms.verify'), ['template_ref' => '182001'])->assertOk();
+
+        $this->assertFalse($sent, 'no SMS transport is touched');
+        foreach ($this->providerCalls as $call) {
+            $this->assertMatchesRegularExpression('#/dev/(wallet|dlt_manager)#', $call, 'only the balance and template-list endpoints are used');
+            $this->assertStringNotContainsString('/bulkV2', $call);
+            $this->assertStringNotContainsString('/otp/send', $call);
+        }
+        $this->assertNotEmpty($this->providerCalls);
     }
 }

@@ -93,7 +93,7 @@ class OtpAuthController extends Controller
             'otp'        => $otp,
             'attempts'   => 0,
             'is_used'    => false,
-            'expires_at' => now()->addMinutes(5),
+            'expires_at' => now()->addMinutes(MobileOtp::TTL_MINUTES),
         ]);
 
         // Send OTP via the SMS settings of the account's society (Fast2SMS;
@@ -105,7 +105,7 @@ class OtpAuthController extends Controller
         $smsResult  = null;
         foreach ($societyIds as $societyId) {
             $smsResult = SmsService::sendOtp($phone, $otp, $societyId);
-            if ($smsResult['success'] && ($smsResult['message'] ?? null) !== 'dev_mode') {
+            if (!empty($smsResult['sent'])) {   // accepted by the provider - a skip is not a send
                 break;
             }
         }
@@ -128,12 +128,13 @@ class OtpAuthController extends Controller
         // answer success:true ("Could not send SMS") whenever Fast2SMS rejected
         // the request or SMS was not configured, and the app then waited on an
         // OTP screen for a code that was never sent.
-        $notSent = !$smsResult['success'] || ($smsResult['message'] ?? null) === 'dev_mode';
+        $notSent = empty($smsResult['sent']);
+        $skipped = SmsService::wasSkipped($smsResult);   // switched off / not set up: nothing was attempted
 
         if ($notSent && !$isDevEnv) {
             Log::warning('OTP SMS not sent', [
                 'society_id' => $societyIds->implode(','),
-                'reason'     => ($smsResult['message'] ?? null) === 'dev_mode' ? 'sms_not_configured' : 'provider_rejected',
+                'reason'     => $skipped ? (string) ($smsResult['status'] ?? 'sms_not_configured') : 'provider_rejected',
                 'provider'   => SmsService::safeProviderMessage((string) ($smsResult['message'] ?? '')),
             ]);
             MobileOtp::where('phone', $phone)->where('is_used', false)->update(['is_used' => true]);
@@ -141,8 +142,8 @@ class OtpAuthController extends Controller
 
             return response()->json([
                 'success' => false,
-                'code'    => ($smsResult['message'] ?? null) === 'dev_mode' ? 'sms_not_configured' : 'sms_failed',
-                'message' => ($smsResult['message'] ?? null) === 'dev_mode'
+                'code'    => $skipped ? 'sms_not_configured' : 'sms_failed',
+                'message' => $skipped
                     ? 'OTP login by SMS is not set up for your society yet. Please log in with email and password, or ask your society office.'
                     : 'We could not send the OTP SMS right now. Please try again in a minute, or log in with email and password.',
             ], 503);
@@ -363,7 +364,7 @@ class OtpAuthController extends Controller
             'otp'        => $otp,
             'attempts'   => 0,
             'is_used'    => false,
-            'expires_at' => now()->addMinutes(5),
+            'expires_at' => now()->addMinutes(MobileOtp::TTL_MINUTES),
         ]);
 
         SmsService::sendOtp($phone, $otp, $user->society_id ?? null);

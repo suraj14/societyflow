@@ -440,6 +440,11 @@ class SettingsController extends Controller
 
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
 
+        // "No encryption" is stored as empty, not the literal word "null" (which the mailer would receive as a scheme).
+        if (($validated['mail_encryption'] ?? null) === 'null') {
+            $validated['mail_encryption'] = null;
+        }
+
         SystemSetting::set('email', 'mail_driver', $validated['mail_driver'], 'string', $societyId);
         SystemSetting::set('email', 'mail_host', $validated['mail_host'], 'string', $societyId);
         SystemSetting::set('email', 'mail_port', $validated['mail_port'], 'integer', $societyId);
@@ -460,7 +465,10 @@ class SettingsController extends Controller
         SystemSetting::set('email', 'mail_from_name', $validated['mail_from_name'], 'string', $societyId);
 
         // Apply settings to current Laravel mail configuration
-        EmailConfigurationService::applyMailConfiguration($validated);
+        // Apply the real stored password, never the mask the form echoed back.
+        EmailConfigurationService::applyMailConfiguration(
+            ['mail_password' => SystemSetting::get('email', 'mail_password', null, $societyId)] + $validated
+        );
 
         // New settings have not been tested yet - the old "Connected" no
         // longer describes them.
@@ -827,6 +835,24 @@ class SettingsController extends Controller
 
         // Success is only reported when the provider actually accepted the
         // request - never because SMS is switched off (dev_mode).
+        $result = \App\Services\SmsService::stamp($result);
+
+        // A skipped test never claims anything was sent, says exactly why, and does not touch the channel status
+        // (nothing was checked with the provider).
+        if (\App\Services\SmsService::wasSkipped($result)) {
+            $why = match (true) {
+                $result['status'] === \App\Services\SmsService::STATUS_SKIPPED_NOT_CONFIGURED && ($result['message'] ?? '') !== 'dev_mode'
+                    => $result['message'],
+                $result['status'] === \App\Services\SmsService::STATUS_SKIPPED_NOT_CONFIGURED
+                    => 'the Fast2SMS API key is not saved yet. Enter it, save, then test again.',
+                ($result['message'] ?? '') === 'dev_mode'
+                    => 'SMS is turned off for this society. Switch on "Enable SMS / OTP", save, then test again.',
+                default => 'real SMS delivery is switched off on this server, so no message was sent.',
+            };
+
+            return response()->json(['success' => false, 'skipped' => true, 'status' => $result['status'], 'message' => 'Not sent: ' . $why]);
+        }
+
         if ($result['success'] && $result['message'] !== 'dev_mode') {
             \App\Support\ChannelStatus::record('sms', $societyId, true, 'Test SMS accepted for ' . \App\Services\SmsService::maskPhone($request->phone));
 

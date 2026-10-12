@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:societyflow/core/utils/date_text.dart';
+import 'package:societyflow/features/auth/models/user_model.dart';
+import 'package:societyflow/features/auth/providers/auth_provider.dart';
 import 'package:societyflow/features/facilities/models/facility_model.dart';
 import 'package:societyflow/features/facilities/providers/facilities_provider.dart';
 import 'package:societyflow/features/facilities/screens/facilities_screen.dart';
@@ -134,8 +136,19 @@ class _Fake extends FacilitiesNotifier {
   }
 }
 
+/// The booking screens are for a signed-in resident; the Book button is shown only to accounts the server says
+/// may book (`capabilities.book_facility`).
+class _ResidentAuth extends AuthNotifier {
+  _ResidentAuth() {
+    state = AuthState(user: UserModel.fromJson({
+      'id': 1, 'name': 'Tara', 'email': 't@x.in', 'role': 'Tenant', 'roles': ['Tenant'],
+      'capabilities': {'book_facility': true, 'view_facilities': true},
+    }));
+  }
+}
+
 Widget _app(Widget home, _Fake fake) => ProviderScope(
-      overrides: [facilitiesProvider.overrideWith((ref) => fake)],
+      overrides: [facilitiesProvider.overrideWith((ref) => fake), authProvider.overrideWith((ref) => _ResidentAuth())],
       child: MaterialApp(home: home),
     );
 

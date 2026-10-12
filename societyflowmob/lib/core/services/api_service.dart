@@ -311,7 +311,14 @@ class ApiService {
           );
         }
         if (status == 403) {
-          return _withDevDetail('Access denied.', e, 'HTTP 403 FORBIDDEN - role/permission check failed');
+          // The API says why in plain words ("Facility booking is for residents.", "Events module is not
+          // enabled."); show that, not a generic line that hides the reason.
+          final serverSays = body is Map ? body['message']?.toString() : null;
+          return _withDevDetail(
+            (serverSays != null && serverSays.isNotEmpty) ? serverSays : 'Access denied.',
+            e,
+            'HTTP 403 FORBIDDEN - role/permission check failed',
+          );
         }
         if (status == 404) {
           return _withDevDetail(

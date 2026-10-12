@@ -37,6 +37,8 @@
 
     <!-- Alpine.js -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/lucide@0.454.0/dist/umd/lucide.min.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', function () { if (window.lucide) { lucide.createIcons(); } });</script>
     
     <style>
         [x-cloak] { display: none !important; }
@@ -89,17 +91,17 @@
                 
                 <div class="h-full flex flex-col">
                     <!-- Logo -->
-                    <div class="h-16 flex items-center px-6 border-b border-gray-200">
+                    <div class="h-14 flex items-center px-4 border-b border-gray-200">
                         <a href="{{ route('dashboard') }}" class="flex items-center">
                             @if($themeSettings['society_logo'] ?? null)
-                                <div class="w-10 h-10 rounded-lg overflow-hidden logo-container">
+                                <div class="w-8 h-8 rounded-lg overflow-hidden logo-container">
                                     <img src="{{ asset('storage/' . $themeSettings['society_logo']) }}" 
                                          alt="{{ $themeSettings['app_name'] ?? 'SocietyFlow' }}" 
                                          class="w-full h-full object-cover logo-image"
                                          onerror="console.log('Logo failed to load:', this.src); this.style.display='none'; this.parentElement.nextElementSibling.style.display='flex';">
                                 </div>
-                                <div class="w-10 h-10 rounded-lg bg-primary items-center justify-center logo-fallback" style="display: none;">
-                                    <span class="text-white font-bold text-xl">
+                                <div class="w-8 h-8 rounded-lg bg-primary items-center justify-center logo-fallback" style="display: none;">
+                                    <span class="text-white font-bold text-base">
                                         @php
                                             $name = $themeSettings['app_name'] ?? 'SocietyFlow';
                                             $words = explode(' ', trim($name));
@@ -128,8 +130,8 @@
                                     Full URL: {{ asset('storage/' . ($themeSettings['society_logo'] ?? '')) }}
                                 </div>
                             @else
-                                <div class="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-                                    <span class="text-white font-bold text-xl">
+                                <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+                                    <span class="text-white font-bold text-base">
                                         @php
                                             $name = $themeSettings['app_name'] ?? 'SocietyFlow';
                                             $words = explode(' ', trim($name));
@@ -153,311 +155,19 @@
                                     </span>
                                 </div>
                             @endif
-                            <div class="ml-3">
-                                <span class="text-lg font-bold text-gray-800">{{ $themeSettings['app_name'] ?? 'SocietyFlow' }}</span>
+                            <div class="ml-2.5 min-w-0">
+                                <span class="text-[15px] leading-tight font-bold text-gray-800 line-clamp-2">{{ $themeSettings['app_name'] ?? 'SocietyFlow' }}</span>
                             </div>
                         </a>
                     </div>
 
-                    <!-- Navigation -->
-                    <nav class="flex-1 overflow-y-auto py-4 px-3">
-                        <div class="space-y-1">
-                            <!-- Dashboard -->
-                            <a href="{{ route('dashboard') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('dashboard') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                <i class="fas fa-home w-5 text-center"></i>
-                                <span class="ml-3">Dashboard</span>
-                            </a>
-
-                            @if($isAccountant)
-                                <!-- Bills -->
-                                <a href="{{ route('payments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('payments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-file-invoice-dollar w-5 text-center"></i>
-                                    <span class="ml-3">Bills &amp; Payments</span>
-                                </a>
-
-                                <!-- Utility Bills / Receipts -->
-                                <a href="{{ route('utility-bills.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('utility-bills.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-receipt w-5 text-center"></i>
-                                    <span class="ml-3">Utility Bills</span>
-                                </a>
-
-                                <!-- Rent (read-only for Accountant) -->
-                                <a href="{{ route('admin.rents.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.rents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-key w-5 text-center"></i>
-                                    <span class="ml-3">Rent</span>
-                                </a>
-
-                                <!-- Society Expenses -->
-                                <a href="{{ route('expenses.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('expenses.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-wallet w-5 text-center"></i>
-                                    <span class="ml-3">Society Expenses</span>
-                                </a>
-
-                                <!-- Finance Report -->
-                                <a href="{{ route('reports.financial') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('reports.financial') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-chart-line w-5 text-center"></i>
-                                    <span class="ml-3">Finance Reports</span>
-                                </a>
-                            @endif
-
-                            @if($isAdmin)
-                                <!-- User Management -->
-                                <a href="{{ route('users.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('users.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-users w-5 text-center"></i>
-                                    <span class="ml-3">User</span>
-                                </a>
-
-                                <!-- Owners Management -->
-                                <a href="{{ route('owners.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('owners.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-user-tie w-5 text-center"></i>
-                                    <span class="ml-3">Owners</span>
-                                </a>
-
-                                @if(auth()->user()?->hasAnyRole(['Super Admin', 'Admin']))
-                                <!-- Property & Occupancy: one entry point for assign/transfer/
-                                     move-in/move-out, instead of finding the right one of three
-                                     separate assignment screens (brief §15/§16). Each of those
-                                     screens stays directly reachable too - see the groups below. -->
-                                <a href="{{ route('admin.property-occupancy.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.property-occupancy.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    {{-- Was fa-people-roof, which does not exist in the Font Awesome
-                                         6.0.0 build this app loads (added in a later FA6 point release) -
-                                         it rendered as nothing, not a broken-icon glyph, so the missing
-                                         icon was easy to miss. fa-building is in FA5/6 from the start. --}}
-                                    <i class="fas fa-building w-5 text-center"></i>
-                                    <span class="ml-3">Property</span>
-                                </a>
-                                @endif
-
-
-                                @php
-                                    // Navigation follows the society's configured property type.
-                                    // A villa township never shows Buildings/Apartments and an
-                                    // apartment society never shows Villas. Super Admin has no
-                                    // society of their own and administers all of them, so they
-                                    // keep both groups.
-                                    $sfSociety = auth()->user()?->society;
-                                    $sfShowApartments = $sfSociety === null || $sfSociety->supportsApartments();
-                                    $sfShowVillas = $sfSociety === null || $sfSociety->supportsVillas();
-                                @endphp
-
-                                @if($sfShowApartments)
-                                <!-- Apartments Group -->
-                                <div x-data="{ open: {{ request()->routeIs('buildings.*') || request()->routeIs('flats.*') ? 'true' : 'false' }} }">
-                                    <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-building w-5 text-center"></i>
-                                            <span class="ml-3">Apartments</span>
-                                        </div>
-                                        <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': open }"></i>
-                                    </button>
-                                    <div x-show="open" x-collapse class="ml-8 mt-1 space-y-1">
-                                        <a href="{{ route('buildings.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('buildings.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Buildings
-                                        </a>
-                                        <a href="{{ route('flats.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('flats.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Apartments
-                                        </a>
-                                        {{-- Assigning an owner to a unit lives in Property & Occupancy
-                                             now (one place for every assignment operation, not a
-                                             second copy of the same link per group - see that page's
-                                             controller docblock). The screen itself is unchanged and
-                                             still directly reachable there. --}}
-                                    </div>
-                                </div>
-                                @endif
-
-                                @if($sfShowVillas)
-                                <!-- Villas Group -->
-                                <div x-data="{ open: {{ request()->routeIs('villa-areas.*') || request()->routeIs('villas.*') ? 'true' : 'false' }} }">
-                                    <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-house-user w-5 text-center"></i>
-                                            <span class="ml-3">Villas</span>
-                                        </div>
-                                        <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': open }"></i>
-                                    </button>
-                                    <div x-show="open" x-collapse class="ml-8 mt-1 space-y-1">
-                                        <a href="{{ route('villa-areas.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('villa-areas.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Villa Areas
-                                        </a>
-                                        <a href="{{ route('villas.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('villas.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Villas
-                                        </a>
-                                        {{-- Owner assignment moved to Property & Occupancy - see the
-                                             Apartments group above for why. --}}
-                                    </div>
-                                </div>
-                                @endif
-
-                                <!-- Tenant Group -->
-                                <div x-data="{ open: {{ request()->routeIs('admin.tenants.*') || request()->routeIs('admin.rents.*') ? 'true' : 'false' }} }">
-                                    <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-key w-5 text-center"></i>
-                                            <span class="ml-3">Tenant</span>
-                                        </div>
-                                        <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': open }"></i>
-                                    </button>
-                                    <div x-show="open" x-collapse class="ml-8 mt-1 space-y-1">
-                                        <a href="{{ route('admin.tenants.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.tenants.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Tenant
-                                        </a>
-                                        <a href="{{ route('admin.rents.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('admin.rents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            Rent
-                                        </a>
-                                        {{-- Tenant assignment moved to Property & Occupancy - see the
-                                             Apartments group above for why. --}}
-                                    </div>
-                                </div>
-                            @endif
-
-                            @if($isTenant)
-                                <!-- Tenant Rent (for Tenant role only) -->
-                                <a href="{{ route('tenant.rent') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('tenant.rent') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-money-bill-wave w-5 text-center"></i>
-                                    <span class="ml-3">Rent</span>
-                                </a>
-                            @endif
-
-                            @if($isAdmin || $isOwner || $isTenant || $isStaff)
-                                <!-- Tickets -->
-                                <a href="{{ route('complaints.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('complaints.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-ticket-alt w-5 text-center"></i>
-                                    <span class="ml-3">Tickets</span>
-                                </a>
-
-{{-- Updated Facilities Menu v2.5 {{ now()->timestamp }} --}}
-                                <!-- Facilities -->
-                                <div x-data="{ open: {{ request()->routeIs('facilities.*') || request()->routeIs('facility-bookings.*') ? 'true' : 'false' }} }">
-                                    <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:bg-gray-50">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-swimming-pool w-5 text-center"></i>
-                                            <span class="ml-3">Facilities</span>
-                                        </div>
-                                        <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': open }"></i>
-                                    </button>
-                                    <div x-show="open" x-collapse class="ml-8 mt-1 space-y-1">
-                                        <a href="{{ route('facilities.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('facilities.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            <i class="fas fa-cogs w-4 text-center mr-2"></i>
-                                            Facilities
-                                        </a>
-                                        <a href="{{ route('facility-bookings.index') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('facility-bookings.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            <i class="fas fa-calendar-check w-4 text-center mr-2"></i>
-                                            Book Facilities
-                                        </a>
-                                    </div>
-                                </div>
-
-                                <!-- Visitors -->
-                                <a href="{{ route('visitors.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('visitors.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-user-friends w-5 text-center"></i>
-                                    <span class="ml-3">Visitors</span>
-                                </a>
-
-                                @if(auth()->user()?->hasAnyRole(['Super Admin', 'Admin', 'Owner', 'Villa Owner', 'Apartment Owner', 'Tenant']))
-                                <!-- Access Passes: recurring staff / temporary service QR, so the
-                                     guard scans instead of retyping the same person every visit. -->
-                                <a href="{{ route('access-passes.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('access-passes.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-id-card w-5 text-center"></i>
-                                    <span class="ml-3">Access Passes</span>
-                                </a>
-                                @endif
-
-                                <!-- Services -->
-                                <a href="{{ route('services.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('services.*') || request()->routeIs('service-providers.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-concierge-bell w-5 text-center"></i>
-                                    <span class="ml-3">Services</span>
-                                </a>
-
-                                <!-- Notices -->
-                                <a href="{{ route('notices.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('notices.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-bullhorn w-5 text-center"></i>
-                                    <span class="ml-3">Notices</span>
-                                </a>
-
-                                <!-- Society Info (details, committee, documents): the former Rules & Documents entry -->
-                                @if(auth()->user()?->hasAnyRole(['Super Admin', 'Admin']))
-                                <a href="{{ route('society-rules.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('society-rules.*', 'admin.society-documents.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-circle-info w-5 text-center"></i>
-                                    <span class="ml-3">Society Info</span>
-                                </a>
-                                @elseif(auth()->user()?->hasAnyRole(\App\Models\SocietyDocument::RESIDENT_ROLES))
-                                <a href="{{ route('society-rules.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('society-rules.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-circle-info w-5 text-center"></i>
-                                    <span class="ml-3">Society Info</span>
-                                </a>
-                                @endif
-
-                                <!-- Bills - HIDDEN FOR STAFF -->
-                                @if(!$isStaff)
-                                <a href="{{ route('payments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('payments.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-file-invoice-dollar w-5 text-center"></i>
-                                    <span class="ml-3">Bills</span>
-                                </a>
-                                @endif
-
-                                <!-- Society Expenses - Admin only (Accountant has its own block above) -->
-                                @if($isAdmin)
-                                <a href="{{ route('expenses.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('expenses.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-wallet w-5 text-center"></i>
-                                    <span class="ml-3">Society Expenses</span>
-                                </a>
-                                @endif
-
-                                <!-- Reports - HIDDEN FOR STAFF -->
-                                @if(!$isStaff)
-                                <div x-data="{ open: {{ request()->routeIs('reports.*') ? 'true' : 'false' }} }">
-                                    <button @click="open = !open" class="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('reports.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-chart-bar w-5 text-center"></i>
-                                            <span class="ml-3">Reports</span>
-                                        </div>
-                                        <i class="fas fa-chevron-down text-xs transition-transform" :class="{ 'rotate-180': open }"></i>
-                                    </button>
-                                    <div x-show="open" x-collapse class="ml-8 mt-1 space-y-1">
-                                        <a href="{{ route('reports.maintenance') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('reports.maintenance') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            <i class="fas fa-wrench w-4 text-center mr-2"></i>
-                                            Maintenance Report
-                                        </a>
-                                        <a href="{{ route('reports.financial') }}" class="flex items-center px-3 py-2 text-sm rounded-lg transition-colors {{ request()->routeIs('reports.financial') ? 'bg-purple-50 text-purple-600' : 'text-gray-600 hover:bg-gray-50' }}">
-                                            <i class="fas fa-chart-line w-4 text-center mr-2"></i>
-                                            Financial Report
-                                        </a>
-                                    </div>
-                                </div>
-                                @endif
-
-                                <!-- Events -->
-                                <a href="{{ route('events.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('events.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-calendar-alt w-5 text-center"></i>
-                                    <span class="ml-3">Events</span>
-                                </a>
-                            @endif
-
-                            @if($isAdmin)
-                                <div class="my-4 border-t border-gray-200"></div>
-
-                                <!-- Guard Shifts (roster) - gates/shifts themselves are managed from
-                                     here too via their own tabs; kept to one sidebar entry rather
-                                     than three, per the "do not fragment the menu" convention. -->
-                                <a href="{{ route('admin.shift-assignments.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('admin.shift-assignments.*') || request()->routeIs('admin.gates.*') || request()->routeIs('admin.shifts.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-user-shield w-5 text-center"></i>
-                                    <span class="ml-3">Guard Shifts</span>
-                                </a>
-
-                                <!-- Settings -->
-                                <a href="{{ route('settings.index') }}" class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs('settings.*') ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
-                                    <i class="fas fa-cog w-5 text-center"></i>
-                                    <span class="ml-3">Settings</span>
-                                </a>
-                            @endif
-                        </div>
-                    </nav>
+                    <!-- Navigation: grouped, compact (see partials/sidebar-nav) -->
+                    @include('partials.sidebar-nav')
 
                     <!-- User Profile -->
-                    <div class="border-t border-gray-200 p-4">
+                    <div class="border-t border-gray-200 px-3 py-2.5">
                         <div class="flex items-center">
-                            <img class="h-10 w-10 rounded-full object-cover" src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'User') . '&background=667eea&color=fff' }}" alt="User">
+                            <img class="h-8 w-8 rounded-full object-cover" src="{{ auth()->user()->avatar_web_url ?? 'https://ui-avatars.com/api/?name=' . urlencode(auth()->user()->name ?? 'User') . '&background=667eea&color=fff' }}" alt="User">
                             <div class="ml-3 flex-1 min-w-0">
                                 <p class="text-sm font-medium text-gray-900 truncate">{{ auth()->user()->name ?? 'User' }}</p>
                                 <p class="text-xs text-gray-500 truncate">{{ auth()->user()->roles->first()->name ?? 'User' }}</p>

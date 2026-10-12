@@ -180,6 +180,10 @@ class Fast2SmsDltSeparationTest extends TestCase
     {
         $admin = $this->admin();
         $this->save($admin, ['visitor_sms_enabled' => '1']);
+        // Notifications use their own approved template (chosen via Settings > "Use for notifications");
+        // the OTP template saved above is never reused for them.
+        \App\Models\SystemSetting::set('sms', 'fast2sms_notification_sender_id', 'DISP24', 'string', $admin->society_id);
+        \App\Models\SystemSetting::set('sms', 'fast2sms_notification_template_id', '169ec8e7aa', 'string', $admin->society_id);
 
         $this->fakeTransport(['return' => true], 200, $sent);
         $result = SmsService::sendDltNotification('visitor', '9876543210', 'Your visitor has arrived.', $admin->society_id);

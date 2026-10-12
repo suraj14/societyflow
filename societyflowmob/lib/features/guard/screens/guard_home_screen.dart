@@ -8,6 +8,7 @@ import '../../visitors/providers/visitors_provider.dart';
 import '../models/guard_shift_model.dart';
 import '../providers/guard_shift_provider.dart';
 import 'today_shift_card.dart';
+import '../../../core/navigation/app_destinations.dart';
 import '../../shell/main_shell.dart';
 import '../../support/screens/emergency_contacts_sheet.dart';
 import 'guard_scan_screen.dart';
@@ -214,19 +215,9 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
           onTap: () => mainShellKey.currentState?.switchTab(1),
         )),
         const SizedBox(width: 10),
-        Expanded(child: _ActionButton(
-          icon: Icons.campaign_rounded,
-          label: 'Notices',
-          color: AppColors.primary,
-          onTap: () => mainShellKey.currentState?.openNotices(),
-        )),
+        const Expanded(child: SizedBox()),
         const SizedBox(width: 10),
-        Expanded(child: _ActionButton(
-          icon: Icons.event_rounded,
-          label: 'Events',
-          color: AppColors.secondary,
-          onTap: () => mainShellKey.currentState?.openEvents(),
-        )),
+        const Expanded(child: SizedBox()),
       ]),
     ]),
   );
@@ -236,30 +227,19 @@ class _GuardHomeScreenState extends ConsumerState<GuardHomeScreen> with AutoRefr
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Modules', style: AppTextStyles.h3),
       const SizedBox(height: 12),
-      _ModuleRow(
-        icon: Icons.build_rounded,
-        label: 'Services Directory',
-        subtitle: 'View service providers & contact info',
-        color: AppColors.secondary,
-        onTap: () => mainShellKey.currentState?.openServices(),
-      ),
-      const SizedBox(height: 10),
-      _ModuleRow(
-        icon: Icons.campaign_rounded,
-        label: 'Notice Board',
-        subtitle: 'Society announcements & notices',
-        color: AppColors.primary,
-        onTap: () => mainShellKey.currentState?.openNotices(),
-      ),
-      const SizedBox(height: 10),
-      _ModuleRow(
-        icon: Icons.event_rounded,
-        label: 'Events',
-        subtitle: 'Upcoming society events',
-        color: AppColors.warning,
-        onTap: () => mainShellKey.currentState?.openEvents(),
-      ),
-      const SizedBox(height: 10),
+      // Services and Notices are bottom-bar tabs for a guard, so they are not repeated here (AppNav); Events shows
+      // only when the society has switched the module on.
+      if (AppNav.shortcuts(ref.watch(currentUserProvider)).contains(Dest.events)) ...[
+        _ModuleRow(
+          key: const Key('guard-module-events'),
+          icon: Icons.event_rounded,
+          label: 'Events',
+          subtitle: 'Upcoming society events',
+          color: AppColors.warning,
+          onTap: () => mainShellKey.currentState?.openEvents(),
+        ),
+        const SizedBox(height: 10),
+      ],
       _ModuleRow(
         icon: Icons.info_outline_rounded,
         label: 'Society Info',
@@ -343,7 +323,7 @@ class _ModuleRow extends StatelessWidget {
   final String label, subtitle;
   final Color color;
   final VoidCallback onTap;
-  const _ModuleRow({required this.icon, required this.label, required this.subtitle, required this.color, required this.onTap});
+  const _ModuleRow({super.key, required this.icon, required this.label, required this.subtitle, required this.color, required this.onTap});
 
   @override
   Widget build(BuildContext context) => AppCard(

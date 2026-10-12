@@ -9,8 +9,25 @@ use Illuminate\Http\JsonResponse;
 
 class EventApiController extends Controller
 {
+    /**
+     * Same rule as the web EventController: Events is a module an admin switches on in Settings -> Features
+     * (default off). The API served events regardless, so the phone showed a module the web answers 403 for.
+     */
+    private function moduleOff(Request $request): ?JsonResponse
+    {
+        $user = $request->user();
+        if ($user->hasRole('Super Admin') || \App\Models\SystemSetting::get('features', 'enable_events', false, $user->society_id)) {
+            return null;
+        }
+
+        return response()->json(['success' => false, 'message' => 'Events module is not enabled.'], 403);
+    }
     public function index(Request $request): JsonResponse
     {
+        if ($off = $this->moduleOff($request)) {
+            return $off;
+        }
+
         $user = $request->user();
 
         // Cancelled events were served to residents alongside live ones,
@@ -40,6 +57,10 @@ class EventApiController extends Controller
 
     public function show(Request $request, int $id): JsonResponse
     {
+        if ($off = $this->moduleOff($request)) {
+            return $off;
+        }
+
         $user = $request->user();
 
         $event = Event::where('society_id', $user->society_id)->findOrFail($id);

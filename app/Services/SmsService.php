@@ -8,10 +8,74 @@ use Illuminate\Support\Facades\Log;
 class SmsService
 {
     /**
+     * Result contract (backward compatible). Every send returns the historical `success` / `message` pair PLUS:
+     *   status - 'sent' (the provider accepted the request), 'skipped_disabled' (SMS switched off, or the global
+     *            EXTERNAL_MESSAGING_ENABLED kill switch), 'skipped_not_configured' (key/template missing), 'failed'
+     *   sent   - true ONLY for 'sent'. Never treat `success` alone as "a message went out": a skip used to
+     *            return success=true / message='dev_mode'. 'sent' means accepted by the provider, not delivered.
+     */
+    public const STATUS_SENT = 'sent';
+    public const STATUS_SKIPPED_DISABLED = 'skipped_disabled';
+    public const STATUS_SKIPPED_NOT_CONFIGURED = 'skipped_not_configured';
+    public const STATUS_FAILED = 'failed';
+
+    /** A send that was deliberately not attempted. Keeps the legacy success=true / 'dev_mode' shape. */
+    private static function skipped(string $status, array $extra = []): array
+    {
+        return ['success' => true, 'message' => 'dev_mode', 'status' => $status, 'sent' => false] + $extra;
+    }
+
+    /** Adds status/sent to any result that does not carry them yet (provider handlers return success/message only). */
+    public static function stamp(array $result): array
+    {
+        if (!isset($result['status'])) {
+            $result['status'] = !empty($result['success']) ? self::STATUS_SENT : self::STATUS_FAILED;
+        }
+        $result['sent'] = $result['status'] === self::STATUS_SENT;
+
+        return $result;
+    }
+
+    /** True when the result is a skip (nothing was attempted), whether or not it reports success for old callers. */
+    public static function wasSkipped(array $result): bool
+    {
+        return str_starts_with((string) ($result['status'] ?? ''), 'skipped_') || ($result['message'] ?? null) === 'dev_mode';
+    }
+
+    /**
+     * Delivery Log row for an attempt that never left the building, so an admin sees "Skipped - not sent" instead of
+     * nothing. email_logs.status cannot hold a new value without a table rebuild, so it uses `failed` with a
+     * "Skipped:" marker and retry_count=3 (the views render the marker as "Skipped" and offer no Retry).
+     */
+    public static function recordSkipped(string $purpose, string $phone, ?int $societyId, string $reason): void
+    {
+        if ($societyId === null) {
+            return;
+        }
+        try {
+            \App\Models\EmailLog::create([
+                'society_id'      => $societyId,
+                'channel'         => 'sms',
+                'recipient_phone' => $phone,
+                'trigger_action'  => $purpose,
+                'status'          => 'failed',
+                'error_message'   => \App\Models\EmailLog::SKIPPED_PREFIX . $reason,
+                'retry_count'     => 3,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Failed to record skipped SMS', ['purpose' => $purpose, 'error' => $e->getMessage()]);
+        }
+    }
+    /**
      * Send OTP via the configured SMS provider.
      * Supports: fast2sms, bulksmsplans, custom
      */
     public static function sendOtp(string $phone, string $otp, ?int $societyId = null, ?string $forceRoute = null): array
+    {
+        return self::stamp(self::dispatchOtp($phone, $otp, $societyId, $forceRoute));
+    }
+
+    private static function dispatchOtp(string $phone, string $otp, ?int $societyId, ?string $forceRoute): array
     {
         // Every send path (OTP login, Test SMS) goes through here, so the
         // number is normalised once, here. Fast2SMS takes a bare 10-digit
@@ -29,7 +93,7 @@ class SmsService
                 // proceed — don't return dev_mode
             } else {
                 Log::info("SMS disabled - no message sent", ["phone" => self::maskPhone($phone)]);
-                return ['success' => true, 'message' => 'dev_mode', 'otp' => $otp];
+                return self::skipped(self::STATUS_SKIPPED_DISABLED, ['otp' => $otp]);
             }
         }
 
@@ -39,7 +103,7 @@ class SmsService
         if ($forceRoute !== null && $provider === 'fast2sms') {
             $apiKey = (string) self::getSetting('fast2sms_api_key', '', $societyId);
             if ($apiKey === '') {
-                return ['success' => true, 'message' => 'dev_mode', 'otp' => $otp];
+                return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
             }
             return $forceRoute === 'dlt'
                 ? self::sendViaFast2SmsDlt($phone, $otp, $apiKey, $societyId)
@@ -77,13 +141,15 @@ class SmsService
         // the template even before notifications are switched on.
         if (!$force && !self::getSetting("{$purpose}_sms_enabled", false, $societyId)) {
             Log::info("{$purpose} SMS disabled - no message sent", ['purpose' => $purpose, 'phone' => self::maskPhone($phone)]);
-            return ['success' => true, 'message' => 'dev_mode'];
+            return self::skipped(self::STATUS_SKIPPED_DISABLED);
         }
 
         $apiKey = self::getSetting('fast2sms_api_key', null, $societyId);
         if (empty($apiKey)) {
             Log::info('Fast2SMS not configured - notification not sent', ['purpose' => $purpose, 'phone' => self::maskPhone($phone)]);
-            return ['success' => true, 'message' => 'dev_mode'];
+            self::recordSkipped($purpose, $phone, $societyId, 'Fast2SMS API key is not configured');
+
+            return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED);
         }
 
         // The notification template chosen in Settings -> SMS, if any;
@@ -93,6 +159,7 @@ class SmsService
             $phone, $message, $apiKey, $societyId,
             self::getSetting('fast2sms_notification_template_id', null, $societyId),
             self::getSetting('fast2sms_notification_sender_id', null, $societyId),
+            false,
         );
 
         // email_logs is now the multi-channel delivery log (see the
@@ -105,6 +172,13 @@ class SmsService
         // application log, where CLAUDE.md's masking rule still applies
         // unchanged (the Log::info/warning calls above and inside
         // sendViaFast2SmsDlt still use maskPhone()).
+        $result = self::stamp($result);
+        if ($societyId !== null && self::wasSkipped($result)) {
+            self::recordSkipped($purpose, $phone, $societyId, (string) ($result['message'] ?? 'not sent'));
+
+            return $result;
+        }
+
         if ($societyId !== null) {
             try {
                 \App\Models\EmailLog::create([
@@ -186,7 +260,7 @@ class SmsService
             // Never write the OTP itself to the log (CLAUDE.md §7); dev mode
             // hands it back in the response instead.
             Log::info("Fast2SMS not configured - no message sent", ["provider" => "fast2sms", "phone" => self::maskPhone($phone)]);
-            return ['success' => true, 'message' => 'dev_mode', 'otp' => $otp];
+            return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
         }
 
         if ($route === 'dlt') {
@@ -196,8 +270,24 @@ class SmsService
         return self::sendViaFast2SmsOtp($phone, $otp, $apiKey, $societyId);
     }
 
+    /**
+     * Fast2SMS takes `mobile` as ^[0-9]{10}$ (Send OTP and DLT SMS). A malformed number is refused here with a plain
+     * reason - nothing is sent and no request is made.
+     */
+    private static function invalidNumber(string $phone): ?array
+    {
+        if (preg_match('/^[0-9]{10}$/', $phone)) {
+            return null;
+        }
+
+        return ['success' => false, 'message' => 'Enter a valid 10-digit Indian mobile number.', 'status' => self::STATUS_FAILED, 'sent' => false, 'error_code' => 'invalid_number'];
+    }
+
     private static function sendViaFast2SmsOtp(string $phone, string $otp, string $apiKey, ?int $societyId): array
     {
+        if ($bad = self::invalidNumber($phone)) {
+            return $bad;
+        }
         $otpId = self::getSetting('fast2sms_otp_id', null, $societyId);
 
         if (empty($otpId)) {
@@ -209,7 +299,7 @@ class SmsService
             'mobile'     => $phone,
             'otp_id'     => (string) $otpId,
             'otp'        => $otp,
-            'otp_expiry' => 10,
+            'otp_expiry' => \App\Models\MobileOtp::TTL_MINUTES,   // minutes; documented range 1-10080
         ];
 
         return self::curlPost('https://www.fast2sms.com/dev/otp/send', $payload,
@@ -218,8 +308,18 @@ class SmsService
         );
     }
 
-    private static function sendViaFast2SmsDlt(string $phone, string $otp, string $apiKey, ?int $societyId, ?string $templateId = null, ?string $senderId = null): array
+    private static function sendViaFast2SmsDlt(string $phone, string $otp, string $apiKey, ?int $societyId, ?string $templateId = null, ?string $senderId = null, bool $fallbackToOtpTemplate = true): array
     {
+        // Notifications pass $fallbackToOtpTemplate = false: a template approved for OTPs is not approved for
+        // notice text, so a missing notification template is an error, never a silent reuse of the OTP one.
+        if ($bad = self::invalidNumber($phone)) {
+            return $bad;
+        }
+
+        if (!$fallbackToOtpTemplate && (empty($templateId) || empty($senderId))) {
+            return ['success' => false, 'message' => 'No notification SMS template is chosen. Choose one in Settings > SMS / OTP > "Use for notifications".', 'status' => self::STATUS_SKIPPED_NOT_CONFIGURED, 'sent' => false];
+        }
+
         // A template and its sender always travel together: they belong to
         // the same DLT entity in Fast2SMS.
         if (empty($templateId) || empty($senderId)) {
@@ -265,7 +365,8 @@ class SmsService
     {
         return function ($body, $httpCode) use ($phone, $route, $apiKey) {
             if ($httpCode === 200 && ($body['return'] ?? false) === true) {
-                return ['success' => true, 'message' => 'OTP sent via Fast2SMS'];
+                // request_id is the provider's reference for this send (not a secret): kept for support/correlation.
+                return ['success' => true, 'message' => 'OTP sent via Fast2SMS', 'request_id' => isset($body['request_id']) ? (string) $body['request_id'] : null];
             }
             $error = is_array($body['message'] ?? null)
                 ? implode(', ', $body['message'])
@@ -279,7 +380,16 @@ class SmsService
                 'provider_msg' => self::safeProviderMessage((string) $error, $apiKey),
             ]);
 
-            return ['success' => false, 'message' => self::safeProviderMessage((string) $error, $apiKey)];
+            // The docs define exactly two failures: 401 "Invalid Authorization key" and 400 (e.g. "Invalid OTP ID").
+            // Anything else is reported as a plain rejection rather than guessed at.
+            $code = match (true) {
+                $httpCode === 401 => 'invalid_api_key',
+                $httpCode === 400 && preg_match('/otp\s*id/i', (string) $error) === 1 => 'invalid_otp_id',
+                $httpCode >= 500, $httpCode === 0 => 'provider_unavailable',
+                default => 'rejected',
+            };
+
+            return ['success' => false, 'message' => self::safeProviderMessage((string) $error, $apiKey), 'error_code' => $code, 'provider_status' => $httpCode];
         };
     }
 
@@ -294,7 +404,7 @@ class SmsService
 
         if (empty($apiId) || empty($apiPassword)) {
             Log::info("BulkSMSPlans not configured - no message sent", ["provider" => "bulksmsplans", "phone" => self::maskPhone($phone)]);
-            return ['success' => true, 'message' => 'dev_mode', 'otp' => $otp];
+            return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
         }
 
         $message = "Your OTP is {$otp}. Valid for 5 minutes. Do not share with anyone.";
@@ -382,7 +492,7 @@ class SmsService
         if (!\App\Support\ExternalMessaging::enabled()) {
             Log::notice('SMS suppressed', ['host' => parse_url($url, PHP_URL_HOST)]);
 
-            return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+            return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
         }
 
         try {
@@ -419,7 +529,7 @@ class SmsService
         if (!\App\Support\ExternalMessaging::enabled()) {
             Log::notice('SMS lookup suppressed', ['host' => parse_url($url, PHP_URL_HOST)]);
 
-            return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+            return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
         }
 
         try {

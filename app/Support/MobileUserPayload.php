@@ -68,6 +68,8 @@ final class MobileUserPayload
             }
         }
 
+        $access = MobileCapabilities::for($user);
+
         return [
             'id'            => $user->id,
             'name'          => $user->name,
@@ -75,6 +77,11 @@ final class MobileUserPayload
             'phone'         => $user->phone,
             'avatar'        => $user->avatar_url,
             'role'          => $roles->first() ?? 'Resident',
+            // Every role (the app used to see only the first) and what the account may do - computed from the
+            // API's own gates by MobileCapabilities. Additive keys; shipped builds ignore them.
+            'roles'         => $access['roles'],
+            'capabilities'  => $access['capabilities'],
+            'modules'       => $access['modules'],
             'status'        => $user->status,
             'flat_number'   => $flat?->flat_number ?? $villaNumber,
             'building_name' => $building?->name,

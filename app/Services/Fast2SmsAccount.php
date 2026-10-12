@@ -152,8 +152,23 @@ class Fast2SmsAccount
         $raw = $body['message'] ?? ($body['error']['message'] ?? ($body['transport_error'] ?? "HTTP {$code}"));
         $detail = SmsService::safeProviderMessage(is_array($raw) ? implode(', ', $raw) : (string) $raw, $apiKey);
 
+        // Messaging switched off on this server (EXTERNAL_MESSAGING_ENABLED=false): nothing was sent anywhere, so
+        // this is "not checked", never "could not reach" (which used to send people hunting for an internet fault).
+        if (!empty($body['skipped'])) {
+            return ['ok' => false, 'skipped' => true, 'message' => 'Not checked - real messaging is switched off on this server, so Fast2SMS was not contacted. Your settings are saved.', 'detail' => null];
+        }
+
+        // A real transport failure (code 0): say which kind. The cURL reason carries no secret.
+        $reason = strtolower((string) ($body['transport_error'] ?? ''));
+        $transport = match (true) {
+            str_contains($reason, 'resolve')                                   => 'This computer cannot find fast2sms.com (DNS or no internet).',
+            str_contains($reason, 'timed out') || str_contains($reason, 'timeout') => 'Fast2SMS did not answer in time. Try again.',
+            str_contains($reason, 'ssl') || str_contains($reason, 'certificate') => 'This server could not verify Fast2SMS\'s secure certificate - a PHP/cURL certificate setup problem on this machine, not your API key.',
+            default                                                            => 'Could not reach Fast2SMS. Check the internet connection and try again.',
+        };
+
         $message = match (true) {
-            $code === 0                                         => 'Could not reach Fast2SMS. Check the internet connection and try again.',
+            $code === 0                                         => $transport,
             $code === 401 || (int) ($body['status_code'] ?? 0) === 412 => 'Fast2SMS did not accept this API key. Copy it again from Fast2SMS -> Dev API.',
             default                                             => 'Fast2SMS could not complete the request.',
         };
@@ -169,7 +184,8 @@ class Fast2SmsAccount
         }
 
         if (!\App\Support\ExternalMessaging::enabled()) {
-            return [['transport_error' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE], 0];
+            // No request is made at all - this is not a connection problem and must not be reported as one.
+            return [['transport_error' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'skipped' => true], 0];
         }
 
         try {

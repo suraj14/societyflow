@@ -10,6 +10,18 @@ class EmailLog extends Model
 {
     use HasFactory;
 
+    /**
+     * A message that was deliberately not attempted (messaging off, key/template missing) is stored as
+     * status `failed` + this marker + retry_count 3, because the status column cannot take a new value without a
+     * table rebuild. Use isSkipped() to tell it apart: it is "Not sent", never "Failed" and never "Sent".
+     */
+    public const SKIPPED_PREFIX = 'Skipped: ';
+
+    public function isSkipped(): bool
+    {
+        return $this->status === 'failed' && str_starts_with((string) $this->error_message, self::SKIPPED_PREFIX);
+    }
+
     protected $fillable = [
         'email_template_id',
         'society_id',

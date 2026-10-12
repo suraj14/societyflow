@@ -51,9 +51,10 @@ class CommunicationSettingsController extends Controller
         return ($value === null || $value === '') && $societyId ? SystemSetting::get($group, $key, $default, null) : ($value ?? $default);
     }
 
-    private function fail(string $message, ?string $details = null): JsonResponse
+    /** `$skipped`: nothing was attempted (messaging switched off) - reported as "not sent/checked", never as a failure. */
+    private function fail(string $message, ?string $details = null, bool $skipped = false): JsonResponse
     {
-        return response()->json(['success' => false, 'message' => $message, 'details' => $details]);
+        return response()->json(['success' => false, 'message' => $message, 'details' => $details] + ($skipped ? ['skipped' => true, 'status' => 'not_sent'] : []));
     }
 
     // ── SMS ─────────────────────────────────────────────────────────────────
@@ -68,9 +69,12 @@ class CommunicationSettingsController extends Controller
 
         $wallet = Fast2SmsAccount::wallet($key);
         if (!$wallet['ok']) {
-            ChannelStatus::record('sms', $this->societyId(), false, $wallet['message'], $wallet['detail'] ?? null);
+            // A skipped check says nothing about the connection, so it must not overwrite the last real result.
+            if (empty($wallet['skipped'])) {
+                ChannelStatus::record('sms', $this->societyId(), false, $wallet['message'], $wallet['detail'] ?? null);
+            }
 
-            return $this->fail($wallet['message'], $wallet['detail'] ?? null);
+            return $this->fail($wallet['message'], $wallet['detail'] ?? null, !empty($wallet['skipped']));
         }
 
         $list = Fast2SmsAccount::smsTemplates($key);
@@ -172,7 +176,7 @@ class CommunicationSettingsController extends Controller
 
         $list = Fast2SmsAccount::smsTemplates($key);
         if (!$list['ok']) {
-            return $this->fail($list['message'], $list['detail'] ?? null);
+            return $this->fail($list['message'], $list['detail'] ?? null, !empty($list['skipped']));
         }
 
         return $this->approvedSms($list['templates']);
@@ -202,9 +206,11 @@ class CommunicationSettingsController extends Controller
 
         $numbers = Fast2SmsAccount::whatsappNumbers($key);
         if (!$numbers['ok']) {
-            ChannelStatus::record('whatsapp', $societyId, false, $numbers['message'], $numbers['detail'] ?? null);
+            if (empty($numbers['skipped'])) {
+                ChannelStatus::record('whatsapp', $societyId, false, $numbers['message'], $numbers['detail'] ?? null);
+            }
 
-            return $this->fail($numbers['message'], $numbers['detail'] ?? null);
+            return $this->fail($numbers['message'], $numbers['detail'] ?? null, !empty($numbers['skipped']));
         }
 
         $list = collect($numbers['numbers']);
@@ -245,7 +251,8 @@ class CommunicationSettingsController extends Controller
     {
         $result = WhatsAppTemplateSyncService::sync($this->societyId());
 
-        return response()->json(['success' => $result['success'], 'message' => $result['message'], 'details' => $result['detail'] ?? null, 'reload' => $result['success']]);
+        return response()->json(['success' => $result['success'], 'message' => $result['message'], 'details' => $result['detail'] ?? null, 'reload' => $result['success']]
+            + (!empty($result['skipped']) ? ['skipped' => true, 'status' => 'not_sent'] : []));
     }
 
     /**
@@ -267,7 +274,7 @@ class CommunicationSettingsController extends Controller
         if (!$template) {
             $sync = WhatsAppTemplateSyncService::sync($societyId);
             if (!$sync['success']) {
-                return $this->fail($sync['message'], $sync['detail'] ?? null);
+                return $this->fail($sync['message'], $sync['detail'] ?? null, !empty($sync['skipped']));
             }
             $template = $find();
         }

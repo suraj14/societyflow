@@ -9,6 +9,7 @@ import '../../../shared/widgets/error_view.dart';
 import '../../../shared/widgets/network_image_widget.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/status_badge.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../models/facility_model.dart';
 import '../providers/facilities_provider.dart';
 import 'facility_booking_screen.dart';
@@ -71,7 +72,7 @@ class _FacilitiesScreenState extends ConsumerState<FacilitiesScreen>
         ),
       ),
       body: TabBarView(controller: _tabController, children: [
-        _FacilityList(state: state, onRefresh: _reload, onBook: _book),
+        _FacilityList(state: state, onRefresh: _reload, onBook: _book, canBook: ref.watch(currentUserProvider)?.can('book_facility') ?? false),
         _BookingList(state: state, onRefresh: _reload),
       ]),
     );
@@ -82,7 +83,8 @@ class _FacilityList extends StatelessWidget {
   final FacilitiesState state;
   final Future<void> Function() onRefresh;
   final void Function(FacilityModel) onBook;
-  const _FacilityList({required this.state, required this.onRefresh, required this.onBook});
+  final bool canBook;
+  const _FacilityList({required this.state, required this.onRefresh, required this.onBook, required this.canBook});
 
   @override
   Widget build(BuildContext context) {
@@ -107,7 +109,7 @@ class _FacilityList extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               itemCount: state.facilities.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (_, i) => _FacilityCard(facility: state.facilities[i], onBook: () => onBook(state.facilities[i])),
+              itemBuilder: (_, i) => _FacilityCard(facility: state.facilities[i], canBook: canBook, onBook: () => onBook(state.facilities[i])),
             ),
     );
   }
@@ -116,14 +118,17 @@ class _FacilityList extends StatelessWidget {
 class _FacilityCard extends StatelessWidget {
   final FacilityModel facility;
   final VoidCallback onBook;
-  const _FacilityCard({required this.facility, required this.onBook});
+
+  /// False for accounts the API refuses (office, staff, guards): they see the facility, not a button that can only 403.
+  final bool canBook;
+  const _FacilityCard({required this.facility, required this.onBook, required this.canBook});
 
   @override
   Widget build(BuildContext context) {
     final f = facility;
     return AppCard(
       padding: EdgeInsets.zero,
-      onTap: onBook,
+      onTap: canBook ? onBook : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (f.image != null)
           NetImage(url: f.image, width: double.infinity, height: 140, borderRadius: const BorderRadius.vertical(top: Radius.circular(16))),
@@ -149,6 +154,9 @@ class _FacilityCard extends StatelessWidget {
               _Meta(f.requiresApproval ? Icons.hourglass_top_rounded : Icons.verified_rounded, f.requiresApproval ? 'Needs approval' : 'Instant'),
             ]),
             const SizedBox(height: 10),
+            if (!canBook)
+              const Text('Booking is for residents. Ask the society office to book on your behalf.', key: Key('booking-residents-only'), style: AppTextStyles.caption)
+            else
             Align(
               alignment: Alignment.centerRight,
               child: ElevatedButton(

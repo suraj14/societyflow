@@ -44,6 +44,10 @@ class WhatsAppTemplateSyncService
         if (!$fetched['ok']) {
             Log::warning('WhatsApp template sync failed', ['provider' => 'fast2sms_whatsapp', 'society_id' => $societyId]);
 
+            if (!empty($fetched['skipped'])) {   // messaging switched off: nothing was attempted
+                return ['success' => false, 'skipped' => true, 'message' => $fetched['message'], 'detail' => null];
+            }
+
             return ['success' => false, 'message' => 'Could not fetch templates: ' . $fetched['message'], 'detail' => $fetched['detail'] ?? null];
         }
 

@@ -139,6 +139,19 @@
 
         <!-- Tab Content -->
         <div class="p-6">
+            {{-- Validation errors for whichever tab's form was just submitted: none of the tab partials showed them,
+                 so a rejected save (e.g. an over-long Sender ID) looked like nothing happened. --}}
+            @if ($errors->any())
+                <div class="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">
+                    <p class="font-semibold"><i class="fas fa-circle-xmark mr-1"></i> Your changes were not saved. Please fix:</p>
+                    <ul class="mt-1 list-disc pl-5 space-y-0.5">
+                        @foreach ($errors->all() as $message)
+                            <li>{{ $message }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+
             <!-- Society Info Tab -->
             <div x-show="activeTab === 'society'" x-cloak>
                 <form action="{{ route('settings.society.update') }}" method="POST">

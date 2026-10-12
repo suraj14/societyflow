@@ -52,6 +52,9 @@ class NoticeMultiChannelTest extends TestCase
         SystemSetting::set('sms', 'fast2sms_route', 'dlt', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'DISP24', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_template_id', '169ec8e6c8', 'string', $society->id);
+        // Notifications use their own approved template; the OTP template is never reused for them.
+        SystemSetting::set('sms', 'fast2sms_notification_sender_id', 'DISP24', 'string', $society->id);
+        SystemSetting::set('sms', 'fast2sms_notification_template_id', '169ec8e6c8', 'string', $society->id);
 
         $sent = null;
         SmsService::$transportOverride = function (string $url, array $data, array $headers) use (&$sent) {
@@ -117,6 +120,9 @@ class NoticeMultiChannelTest extends TestCase
         SystemSetting::set('sms', 'fast2sms_route', 'dlt', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_sender_id', 'DISP24', 'string', $society->id);
         SystemSetting::set('sms', 'fast2sms_template_id', '169ec8e6c8', 'string', $society->id);
+        // Notifications use their own approved template; the OTP template is never reused for them.
+        SystemSetting::set('sms', 'fast2sms_notification_sender_id', 'DISP24', 'string', $society->id);
+        SystemSetting::set('sms', 'fast2sms_notification_template_id', '169ec8e6c8', 'string', $society->id);
 
         $sent = null;
         SmsService::$transportOverride = function (string $url, array $data, array $headers) use (&$sent) {

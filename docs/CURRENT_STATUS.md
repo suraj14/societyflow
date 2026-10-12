@@ -4,6 +4,37 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-12 - master implementation run (P1-99..101, P2-39, P2-40)
+
+Uncommitted on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION.** No real SMS/OTP/email/WhatsApp was sent and no live provider endpoint was called (the Fast2SMS and Flutter tests use recording stubs / a fake HTTP layer; the two docs pages were read, which is not a provider call). EXTERNAL_MESSAGING_ENABLED stayed false; `.env`, credentials and databases untouched.
+- Final results after the last code change: **SQLite** 8 shards 1673 tests / 7569 assertions / 0 failures / 0 errors / 5 skipped; **MariaDB 10.4** (throwaway :3307, scratchpad datadir, fresh databases) 6 shards 1673 tests / 7567 assertions / 0 failures / 0 errors / 3 skipped; **Flutter** `flutter test` exit 0, 187 tests; `flutter analyze` exit 1 only for the 2 known info-level deprecations (0 errors/warnings). PHP lint 34 files clean; `git diff --check` clean. Shard process exit codes are not captured by the shard runner; the figures are from each shard's phpunit summary.
+- Chrome (isolated copy): sidebar 60/60, Lucide-blocked 5/5, phone drawer 30/30 (320/360/390 x Admin/Owner/Tenant/Staff/Accountant). Earlier this run: the Flutter booking 403 cause, the capabilities matrix and Events enforcement were verified by tests (see TODO).
+- NOT TESTED: the Flutter screens on a real device or emulator (widget tests only), live Fast2SMS/SMTP/WhatsApp delivery, Android build for release. Whether the screenshot's booking account was an Admin was not verified.
+- Credentials NOT ROTATED (see P2-40). Event SMS stays disabled until its own approved DLT template and setting exist.
+## 2026-10-12 - compact grouped sidebar, follow-up verification (P2-38, P3-13, P2-39)
+
+Uncommitted on `production-readiness`. READY FOR STAGING, NOT READY FOR PRODUCTION. Desktop sidebar is grouped and compact (`partials/sidebar-nav.blade.php`); the mobile drawer is unchanged.
+- Staff -> Book Facilities resolved: the seeder gives Staff no booking permission and the controller 403s, so the link is hidden (mirrors the controller gate). The routes still 403 for Staff (tested for GET index, GET create, POST). Mutation check (gate forced open) fails 3 tests.
+- Events: link hidden when the module is off; direct `/events` is 403 when off and 200 when on for Admin, Owner, Tenant, Staff and Accountant (tested). Only Events is backend-enforced among the Settings -> Features toggles.
+- Multi-role users: tested that the deduplicated sidebar equals the union of each role's own links for Admin+Accountant, Owner+Tenant, Staff+Accountant, Apartment Owner+Villa Owner.
+- Desktop vs mobile differences measured per role and flag (TODO P2-39); left unchanged pending a product decision.
+- Results (final, after the last code change): SQLite full suite 8 shards: 1642 tests, 7293 assertions, 0 failures, 0 errors, 5 skipped (1 is the baseline-capture helper, 4 engine-specific); MariaDB (throwaway :3307, scratchpad data dir) navigation/authorization/booking/staff subset: 227 tests, 995 assertions, 0 failures, 1 skipped (the helper). Full MariaDB suite NOT run. Lint 21 PHP files clean; `git diff --check` clean.
+- Browser (isolated copy, messaging off): 60/60 sidebar checks (256px width, 40/38px rows, active group opens, Enter/Space, focus ring, 520px-tall scroll with footer, 320/360/390px drawer); 5/5 with the Lucide CDN blocked (icons disappear, labels/layout/navigation unaffected - the same single-CDN dependency the app already has for Tailwind/Font Awesome; no new dependency added).
+
+## 2026-10-11 (latest) - SMS result status contract (P1-98)
+
+Uncommitted on `production-readiness` (last commit 20f568b; P1-97 changes are also still uncommitted). **READY FOR STAGING, NOT READY FOR PRODUCTION.**
+- `SmsService` results now carry `status` + `sent`; `success`/`message` unchanged for old callers. A skip is never "sent"; the kill switch is `skipped_disabled`; a missing key or notification template is `skipped_not_configured` and sends nothing (no OTP-template fallback). OTP login, the Test SMS button and the Delivery Log/Logs screen now say "Not sent / Skipped".
+- Results: lint 17 files clean; SMS result tests 11 OK; SQLite full 1631 tests / 7099 assertions / 0 failures / 4 skipped; MariaDB (throwaway :3307) SMS/settings/auth/log subset 100 tests / 0 failures. Full MariaDB suite not re-run.
+- **Disclosure:** one test run made a real HTTPS call to Fast2SMS with a fake literal key (rejected at authentication, nothing sent, no real credential). Fixed with a transport guard in the test class. No other outbound call was made; EXTERNAL_MESSAGING_ENABLED stayed false; .env, credentials and databases were not touched.
+- Remaining: WhatsApp still returns the legacy `dev_mode` (P2-36), credentials not rotated, live delivery and the `/dev/wallet` read-only/non-billable question are unverified, Android not tested.
+
+## 2026-10-11 (later) - email/SMS settings audit and final verification (P1-97)
+
+Uncommitted on `production-readiness` (last commit 20f568b). **READY FOR STAGING, NOT READY FOR PRODUCTION.** No real SMS/OTP/email/WhatsApp was sent and no provider endpoint was called; EXTERNAL_MESSAGING_ENABLED stayed false (suite config) and the browser server ran on an isolated credential-stripped copy.
+- Fixes: notification SMS never reuses the OTP template (fails, sends nothing); email Save keeps the real password and stores "no encryption" as empty; Settings now shows validation errors; SMS page has a 4-step progress strip and a messaging-disabled banner.
+- Results: lint 10 files clean; focused 21 tests OK; SQLite full 1620 tests / 7037 assertions / 0 failures / 4 skipped; MariaDB (throwaway :3307) SMS+settings subset 106 tests / 0 failures; Chrome SMS page 40/40 at 390, 360, 320, 1366px.
+- Unverified: whether POST /dev/wallet is read-only/non-billable (no provider documentation available here). Not tested: live Connect & Verify, test SMS/email, delivery. Credentials still not rotated.
 ## 2026-10-11 — web audit completion and release sign-off (see [WEB_AUDIT_TRACKER.md](WEB_AUDIT_TRACKER.md))
 
 Branch `production-readiness`. **Not pushed, not deployed.** Release decision: **NOT READY for production; READY FOR STAGING.**

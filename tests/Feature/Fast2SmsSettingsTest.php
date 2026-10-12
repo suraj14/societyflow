@@ -241,7 +241,8 @@ class Fast2SmsSettingsTest extends TestCase
         $this->assertContains('Content-Type: application/json', $sent['headers']);
         $this->assertContains('Accept: application/json', $sent['headers']);
         $this->assertSame(
-            ['mobile' => '9876543210', 'otp_id' => '6fd92db0ae', 'otp' => '1234', 'otp_expiry' => 10],
+            // otp_expiry is the app's own code lifetime (5 min, MobileOtp::TTL_MINUTES) - it was 10 while the app expired codes at 5
+            ['mobile' => '9876543210', 'otp_id' => '6fd92db0ae', 'otp' => '1234', 'otp_expiry' => \App\Models\MobileOtp::TTL_MINUTES],
             $sent['data']
         );
     }

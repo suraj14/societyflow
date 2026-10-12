@@ -377,6 +377,8 @@ Route::middleware(['auth'])->group(function () {
 // Settings Routes (Super Admin & Admin - Unified) - RESTRICTED FOR STAFF
 Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(function () {
     Route::get('settings', [App\Http\Controllers\SettingsController::class, 'index'])->name('settings.index');
+    // One catalogue of SMS / WhatsApp / Email templates (links to the Settings and Email Templates pages to act).
+    Route::get('message-templates', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'index'])->name('admin.message-templates.index');
     Route::post('settings/society', [App\Http\Controllers\SettingsController::class, 'updateSociety'])->name('settings.society.update');
     Route::post('settings/app', [App\Http\Controllers\SettingsController::class, 'updateApp'])->name('settings.app.update');
     Route::post('settings/language', [App\Http\Controllers\SettingsController::class, 'updateLanguage'])->name('settings.language.update');

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/navigation/app_destinations.dart';
 import '../../core/theme/app_theme.dart';
+import '../admin/screens/admin_home_screen.dart';
+import '../admin/screens/admin_requests_screen.dart';
+import '../admin/screens/admin_tickets_screen.dart';
 import '../home/screens/home_screen.dart';
 import '../guard/screens/guard_home_screen.dart';
 import '../visitors/screens/visitors_screen.dart';
@@ -26,37 +30,24 @@ class MainShell extends ConsumerStatefulWidget {
 class _MainShellState extends ConsumerState<MainShell> {
   int _currentIndex = 0;
 
-  // Feature tab indices (hidden from bottom nav, accessible via home cards)
-  static const int _noticesIndex    = 5;
-  static const int _facilitiesIndex = 6;
-  static const int _servicesIndex   = 7;
-  static const int _eventsIndex     = 8;
+  /// Which kind of account this is, from the server's capabilities (see AppNav) - not from the first role name.
+  /// Staff is deliberately not a gate account: their endpoints reject the scanner (no dedicated Staff screen
+  /// exists yet; they get the generic home).
+  bool get _isGateOnly => AppNav.isGateOnly(ref.read(currentUserProvider));
+  bool get _isOffice => AppNav.isOffice(ref.read(currentUserProvider));
 
-  bool get _isGuard {
-    final role = ref.read(currentUserProvider)?.role ?? '';
-    // Staff used to be routed to the Guard home screen (QR scanner, gate
-    // actions) - that is not their job and the scan endpoint's own backend
-    // authorization (Guard|Admin|Super Admin) already rejects them, so it
-    // was a dead button, not a security hole. Staff now gets the same
-    // generic HomeScreen as Owner/Tenant, since no dedicated Staff screen
-    // exists yet - a real one is separate follow-up work, not invented here.
-    return role == 'Guard';
-  }
-
-  List<Widget> get _screens {
-    final homeScreen = _isGuard ? const GuardHomeScreen() : const HomeScreen();
-    return [
-      homeScreen,         // 0 — Home or Guard Dashboard
-      const VisitorsScreen(),   // 1
-      const PaymentsScreen(),   // 2
-      const ComplaintsScreen(), // 3
-      const ProfileScreen(),    // 4
-      const NoticesScreen(),    // 5
-      const FacilitiesScreen(), // 6
-      const ServicesScreen(),   // 7
-      const EventsScreen(),     // 8
-    ];
-  }
+  List<Widget> get _screens => [
+        _isGateOnly ? const GuardHomeScreen() : (_isOffice ? const AdminHomeScreen() : const HomeScreen()), // 0
+        const VisitorsScreen(),                                             // 1
+        const PaymentsScreen(),                                             // 2
+        _isOffice ? const AdminTicketsScreen() : const ComplaintsScreen(),  // 3
+        const ProfileScreen(),                                              // 4
+        const NoticesScreen(),                                              // 5
+        const FacilitiesScreen(),                                           // 6
+        const ServicesScreen(),                                             // 7
+        const EventsScreen(),                                               // 8
+        const AdminRequestsScreen(),                                        // 9
+      ];
 
   void switchTab(int index) => setState(() {
         _currentIndex = index;
@@ -64,23 +55,31 @@ class _MainShellState extends ConsumerState<MainShell> {
       });
 
   /// Tabs are built the first time they are opened, not all at login: every
-  /// screen loads its data in initState, so building all nine fired ~9 API
+  /// screen loads its data in initState, so building all of them fired a burst of API
   /// calls at startup (and resident-only ones for guards).
   final Set<int> _visited = {0};
 
-  // Called from home cards / guard quick actions
-  void openNotices()    => switchTab(_noticesIndex);
-  void openFacilities() => switchTab(_facilitiesIndex);
-  void openServices()   => switchTab(_servicesIndex);
-  void openEvents()     => switchTab(_eventsIndex);
-  void openComplaints() => switchTab(3);
+  /// Open any destination from anywhere (home cards, guard shortcuts, admin attention rows).
+  void openDest(Dest d) {
+    final i = AppNav.tabIndex[d];
+    if (i != null) switchTab(i);
+  }
 
-  bool get _isFeatureTab => _currentIndex >= 5;
+  // Kept for the existing callers.
+  void openNotices()    => openDest(Dest.notices);
+  void openFacilities() => openDest(Dest.facilities);
+  void openServices()   => openDest(Dest.services);
+  void openEvents()     => openDest(Dest.events);
+  void openComplaints() => openDest(Dest.tickets);
 
   @override
   Widget build(BuildContext context) {
-    final isGuard = _isGuard;
+    final user = ref.watch(currentUserProvider);
+    final bar = AppNav.bottomBar(user);
+    final barIndexes = {for (final d in bar) AppNav.tabIndex[d]};
     final screens = _screens;
+    // A tab that is not on the bar (a feature opened from a card) keeps "Home" lit.
+    final lit = barIndexes.contains(_currentIndex) ? _currentIndex : 0;
 
     return Scaffold(
       body: PopScope(
@@ -110,24 +109,15 @@ class _MainShellState extends ConsumerState<MainShell> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _NavItem(
-                  icon: isGuard ? Icons.shield_rounded : Icons.home_rounded,
-                  label: isGuard ? 'Guard' : 'Home',
-                  index: 0,
-                  current: _isFeatureTab ? 0 : _currentIndex,
-                  onTap: switchTab,
-                ),
-                _NavItem(icon: Icons.people_alt_rounded,    label: 'Visitors', index: 1, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
-                // Guard doesn't use Bills/Tickets tabs but they remain for consistency
-                // For guard, Bills → Services, Tickets → Notices
-                if (isGuard) ...[
-                  _NavItem(icon: Icons.build_rounded,           label: 'Services', index: 7, current: _currentIndex, onTap: switchTab),
-                  _NavItem(icon: Icons.campaign_rounded,        label: 'Notices',  index: 5, current: _currentIndex, onTap: switchTab),
-                ] else ...[
-                  _NavItem(icon: Icons.receipt_long_rounded,    label: 'Bills',    index: 2, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
-                  _NavItem(icon: Icons.support_agent_rounded,   label: 'Tickets',  index: 3, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
-                ],
-                _NavItem(icon: Icons.person_rounded,        label: 'Profile',  index: 4, current: _isFeatureTab ? 0 : _currentIndex, onTap: switchTab),
+                for (final d in bar)
+                  _NavItem(
+                    key: Key('nav-${d.name}'),
+                    icon: d == Dest.home && _isGateOnly ? Icons.shield_rounded : AppNav.all[d]!.icon,
+                    label: d == Dest.home && _isGateOnly ? 'Guard' : AppNav.all[d]!.label,
+                    index: AppNav.tabIndex[d]!,
+                    current: lit,
+                    onTap: switchTab,
+                  ),
               ],
             ),
           ),
@@ -143,7 +133,7 @@ class _NavItem extends StatelessWidget {
   final int index, current;
   final ValueChanged<int> onTap;
 
-  const _NavItem({required this.icon, required this.label, required this.index, required this.current, required this.onTap});
+  const _NavItem({super.key, required this.icon, required this.label, required this.index, required this.current, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -153,7 +143,8 @@ class _NavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        constraints: const BoxConstraints(minWidth: 52, minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isActive ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),

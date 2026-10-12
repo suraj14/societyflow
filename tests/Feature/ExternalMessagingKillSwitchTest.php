@@ -149,6 +149,22 @@ class ExternalMessagingKillSwitchTest extends TestCase
         $this->assertTrue(true, 'cancelled without touching the network');
     }
 
+    public function test_sms_and_whatsapp_test_buttons_report_not_sent_and_never_call_the_provider(): void
+    {
+        config(['messaging.enabled' => false]);
+        $society = $this->makeSociety();
+        $admin = $this->makeUserWithRole($society, 'Admin');
+        \App\Models\SystemSetting::set('sms', 'fast2sms_api_key', 'fake-key', 'encrypted', $society->id);
+        \App\Models\SystemSetting::set('whatsapp', 'whatsapp_api_key', 'fake-key', 'encrypted', $society->id);
+        $this->assertNull(SmsService::$transportOverride);
+
+        foreach (['settings.sms.test', 'settings.whatsapp.test'] as $route) {
+            $r = $this->actingAs($admin)->postJson(route($route), ['phone' => '9876543210'])->assertOk();
+            $this->assertFalse($r->json('success'), $route);
+            $this->assertStringNotContainsStringIgnoringCase('delivered', (string) $r->json('message'), $route);
+        }
+    }
+
     public function test_the_test_email_button_never_claims_a_send_that_was_only_logged(): void
     {
         config(['messaging.enabled' => false]);

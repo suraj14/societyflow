@@ -4,7 +4,9 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/status_badge.dart';
+import '../../../core/navigation/app_destinations.dart';
 import '../../access_passes/screens/access_passes_screen.dart';
+import '../../auth/models/user_model.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../shell/main_shell.dart';
 import '../../../core/utils/auto_refresh_mixin.dart';
@@ -71,9 +73,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
               )
             else ...[
               SliverToBoxAdapter(child: _welcomeCard(user)),
-              SliverToBoxAdapter(child: _quickStats(state)),
+              SliverToBoxAdapter(child: _quickStats(state, user)),
               SliverToBoxAdapter(child: _noticeBoard(state)),
-              SliverToBoxAdapter(child: _featureCards(context)),
+              SliverToBoxAdapter(child: _featureCards(context, user, state)),
               SliverToBoxAdapter(child: _recentActivity(state)),
               const SliverToBoxAdapter(child: SizedBox(height: 100)),
             ],
@@ -116,25 +118,34 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
     ),
   );
 
-  Widget _quickStats(HomeState s) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Quick Overview', style: AppTextStyles.h3),
-      const SizedBox(height: 12),
-      Row(children: [
-        Expanded(child: StatCard(title: 'Pending Bills',   value: '${s.pendingBills}',   icon: Icons.receipt_long_rounded,  color: AppColors.warning)),
-        const SizedBox(width: 12),
-        Expanded(child: StatCard(title: 'Visitors Today',  value: '${s.visitorsToday}',  icon: Icons.people_alt_rounded,    color: AppColors.info)),
+  Widget _quickStats(HomeState s, UserModel? user) {
+    final tiles = <Widget>[
+      if (user?.can('bills') ?? false)
+        StatCard(title: 'Pending Bills', value: '${s.pendingBills}', icon: Icons.receipt_long_rounded, color: AppColors.warning),
+      StatCard(title: 'Visitors Today', value: '${s.visitorsToday}', icon: Icons.people_alt_rounded, color: AppColors.info),
+      StatCard(title: 'Open Complaints', value: '${s.openComplaints}', icon: Icons.support_agent_rounded, color: AppColors.error),
+      StatCard(title: 'Notices', value: '${s.activeNotices}', icon: Icons.campaign_rounded, color: AppColors.secondary),
+    ];
+    final rows = <Widget>[];
+    for (var i = 0; i < tiles.length; i += 2) {
+      rows.add(Padding(
+        padding: EdgeInsets.only(bottom: i + 2 < tiles.length ? 12 : 0),
+        child: Row(children: [
+          Expanded(child: tiles[i]),
+          const SizedBox(width: 12),
+          Expanded(child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox()),
+        ]),
+      ));
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Quick Overview', style: AppTextStyles.h3),
+        const SizedBox(height: 12),
+        ...rows,
       ]),
-      const SizedBox(height: 12),
-      Row(children: [
-        Expanded(child: StatCard(title: 'Open Complaints', value: '${s.openComplaints}', icon: Icons.support_agent_rounded, color: AppColors.error)),
-        const SizedBox(width: 12),
-        Expanded(child: StatCard(title: 'Notices',         value: '${s.activeNotices}',  icon: Icons.campaign_rounded,      color: AppColors.secondary)),
-      ]),
-    ]),
-  );
-
+    );
+  }
   Widget _noticeBoard(HomeState s) {
     if (s.notices.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -205,62 +216,55 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with AutoRefreshMixin {
   // ── Feature Cards (Notices, Facilities, Services, Events) ────────────────
   // These screens are accessible from here since they're removed from bottom nav
 
-  Widget _featureCards(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('More Features', style: AppTextStyles.h3),
-      const SizedBox(height: 12),
-      Row(children: [
-        Expanded(child: _FeatureCard(
-          icon: Icons.campaign_rounded,
-          label: 'Notices',
-          color: AppColors.primary,
-          onTap: () => mainShellKey.currentState?.openNotices(),
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _FeatureCard(
-          icon: Icons.meeting_room_rounded,
-          label: 'Facilities',
-          color: AppColors.info,
-          onTap: () => mainShellKey.currentState?.openFacilities(),
-        )),
-      ]),
-      const SizedBox(height: 12),
-      Row(children: [
-        Expanded(child: _FeatureCard(
-          icon: Icons.build_rounded,
-          label: 'Services',
-          color: AppColors.secondary,
-          onTap: () => mainShellKey.currentState?.openServices(),
-        )),
-        const SizedBox(width: 12),
-        Expanded(child: _FeatureCard(
-          icon: Icons.event_rounded,
-          label: 'Events',
-          color: AppColors.warning,
-          onTap: () => mainShellKey.currentState?.openEvents(),
-        )),
-      ]),
-      const SizedBox(height: 12),
-      Row(children: [
-        // Gate passes for this household's regular helpers. The server
-        // decides which passes come back, so a resident sees only their
-        // own property's and an admin the whole society's.
-        Expanded(child: _FeatureCard(
-          icon: Icons.badge_rounded,
-          label: 'Access Passes',
-          color: AppColors.primary,
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AccessPassesScreen()),
-          ),
-        )),
-        const SizedBox(width: 12),
-        const Expanded(child: SizedBox()),
-      ]),
-    ]),
-  );
+  // â”€â”€ More features â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Built from AppNav: only destinations this account may open (the server's capabilities), never one that is
+  // already a bottom-bar tab, and never Notices while the Notice Board above already links to them.
 
+  void _open(BuildContext context, Dest d) {
+    if (d == Dest.accessPasses) {
+      // Gate passes for this household's regular helpers. The server decides which passes come back, so a
+      // resident sees only their own property's and an admin the whole society's.
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const AccessPassesScreen()));
+    } else {
+      mainShellKey.currentState?.openDest(d);
+    }
+  }
+
+  Widget _featureCards(BuildContext context, UserModel? user, HomeState s) {
+    final dests = AppNav.shortcuts(user, promoted: {if (s.notices.isNotEmpty) Dest.notices});
+    if (dests.isEmpty) return const SizedBox.shrink();
+    final rows = <Widget>[];
+    for (var i = 0; i < dests.length; i += 2) {
+      final pair = dests.skip(i).take(2).toList();
+      rows.add(Padding(
+        padding: EdgeInsets.only(bottom: i + 2 < dests.length ? 12 : 0),
+        child: Row(children: [
+          for (var j = 0; j < 2; j++) ...[
+            if (j == 1) const SizedBox(width: 12),
+            Expanded(
+              child: j < pair.length
+                  ? _FeatureCard(
+                      key: Key('feature-${pair[j].name}'),
+                      icon: AppNav.all[pair[j]]!.icon,
+                      label: AppNav.all[pair[j]]!.label,
+                      color: AppNav.all[pair[j]]!.color,
+                      onTap: () => _open(context, pair[j]),
+                    )
+                  : const SizedBox(),
+            ),
+          ],
+        ]),
+      ));
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('More Features', style: AppTextStyles.h3),
+        const SizedBox(height: 12),
+        ...rows,
+      ]),
+    );
+  }
   String _greeting() { final h = DateTime.now().hour; if (h < 12) return 'Morning'; if (h < 17) return 'Afternoon'; return 'Evening'; }
   IconData _actIcon(String? t) { switch (t) { case 'payment': return Icons.receipt_long_rounded; case 'visitor': return Icons.people_alt_rounded; case 'complaint': return Icons.support_agent_rounded; default: return Icons.notifications_rounded; } }
   Color _actColor(String? t) { switch (t) { case 'payment': return AppColors.secondary; case 'visitor': return AppColors.info; case 'complaint': return AppColors.error; default: return AppColors.primary; } }
@@ -275,6 +279,7 @@ class _FeatureCard extends StatelessWidget {
   final VoidCallback onTap;
 
   const _FeatureCard({
+    super.key,
     required this.icon,
     required this.label,
     required this.color,

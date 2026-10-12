@@ -37,6 +37,7 @@
             <!-- Navigation - SAME AS DESKTOP SIDEBAR WITH SUBMENUS -->
             <nav class="flex-1 overflow-y-auto py-4 px-3 sidebar-nav">
                 <div class="space-y-1">
+                    @php ob_start(); @endphp
                     @php
                         use App\Models\SystemSetting;
                         
@@ -340,6 +341,18 @@
                         </a>
                         @endif
                     @endif
+                    @php $sfDrawerExisting = ob_get_clean(); echo $sfDrawerExisting; @endphp
+
+                    {{-- Destinations this account can open on desktop that this drawer never linked (Property, Access
+                         Passes, Guard Shifts, Society Expenses, Utility Bills, Tenant Rent, Visitors for tenants).
+                         Only rows the drawer does not already contain - see App\Support\SidebarMenu::drawerExtras. --}}
+                    @foreach(\App\Support\SidebarMenu::drawerExtras(auth()->user(), $sfDrawerExisting) as $sfX)
+                    <a href="{{ route($sfX['route']) }}" @click="mobileMenuOpen = false" data-drawer-extra="{{ $sfX['route'] }}"
+                       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {{ request()->routeIs(...$sfX['active']) ? 'bg-purple-50 text-purple-600' : 'text-gray-700 hover:bg-gray-50' }}">
+                        <i class="fas {{ $sfX['fa'] }} w-5 text-center"></i>
+                        <span class="ml-3">{{ $sfX['label'] }}</span>
+                    </a>
+                    @endforeach
                 </div>
             </nav>
 

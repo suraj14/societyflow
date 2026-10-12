@@ -30,6 +30,19 @@ class QueryPerformanceTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * These tests exercise the Events API, which - like the web - answers 403 until a society switches the Events
+     * module on (Settings -> Features, default off). Societies made here have it on; the 403 itself is pinned in
+     * MobileCapabilitiesTest.
+     */
+    protected function makeSociety(string $name = 'Test Society'): \App\Models\Society
+    {
+        $society = parent::makeSociety($name);
+        \App\Models\SystemSetting::set('features', 'enable_events', true, 'boolean', $society->id);
+
+        return $society;
+    }
+
     /** Runs $callback and returns how many queries it executed. */
     private function countQueries(callable $callback): int
     {

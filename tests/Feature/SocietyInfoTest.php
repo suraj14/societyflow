@@ -70,10 +70,13 @@ class SocietyInfoTest extends TestCase
             $user = $this->makeUserWithRole($this->society, $role);
             $html = $this->actingAs($user)->get(route('society-rules.index'))->assertOk()->getContent();
 
-            // exactly one sidebar entry and one mobile-menu entry carry the label
-            $this->assertSame(2, substr_count($html, '<span class="ml-3">Society Info</span>'), "$role: one entry in the sidebar + one in the mobile menu");
-            $this->assertStringNotContainsString('<span class="ml-3">Rules &amp; Documents</span>', $html, $role);
-            $this->assertStringNotContainsString('<span class="ml-3">Society Rules</span>', $html, $role);
+            // exactly one sidebar entry (grouped sidebar: <span class="truncate">) and one mobile-menu entry
+            // (<span class="ml-3">) carry the label
+            $this->assertSame(1, substr_count($html, '<span class="truncate">Society Info</span>'), "$role: one entry in the sidebar");
+            $this->assertSame(1, substr_count($html, '<span class="ml-3">Society Info</span>'), "$role: one entry in the mobile menu");
+            foreach (['Rules &amp; Documents', 'Society Rules'] as $old) {
+                $this->assertStringNotContainsString(">$old</span>", $html, "$role: old label $old");
+            }
         }
     }
 
