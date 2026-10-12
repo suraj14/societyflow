@@ -143,7 +143,25 @@ class UserFlatResolver
         return collect();
     }
 
-    /** Whether $flatId is one of the user's units. */
+    /**
+     * The people of one unit: its active tenants' accounts and its owner's account, within the unit's society. Used to tell
+     * the right people about something that happened to the unit (a payment recorded at the office has no user on it).
+     *
+     * @return array{tenants: \Illuminate\Support\Collection<int,User>, owners: \Illuminate\Support\Collection<int,User>}
+     */
+    public static function peopleOfFlat(int $flatId, int $societyId): array
+    {
+        $tenantRows = Tenant::query()->where('society_id', $societyId)->where('flat_id', $flatId)->where('status', 'active')->get(['id', 'user_id']);
+        $ownerId = \App\Models\Flat::query()->where('society_id', $societyId)->whereKey($flatId)->value('owner_id');
+
+        $tenants = $tenantRows->isEmpty() ? collect() : User::query()->where('society_id', $societyId)->where('status', 'active')
+            ->where(fn ($q) => $q->whereIn('id', $tenantRows->pluck('user_id')->filter())->orWhereIn('tenant_id', $tenantRows->pluck('id')))->get();
+        $owners = $ownerId ? User::query()->where('society_id', $societyId)->where('status', 'active')->where('owner_id', $ownerId)->get() : collect();
+
+        return ['tenants' => $tenants, 'owners' => $owners];
+    }
+
+    /** Whether `$flatId is one of the user's units. */
     public static function userHasFlat(User $user, ?int $flatId): bool
     {
         if ($flatId === null) {

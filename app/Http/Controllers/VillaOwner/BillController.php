@@ -37,6 +37,9 @@ class BillController extends Controller
             abort(403);
         }
 
-        return view('villa-owner.bills.show', compact('bill', 'villa'));
+        // the receipt of the payment that settled it (only a verified payment has one)
+        $receiptPayment = $bill->payments()->where('status', 'success')->latest('payment_date')->first();
+
+        return view('villa-owner.bills.show', compact('bill', 'villa', 'receiptPayment'));
     }
 }

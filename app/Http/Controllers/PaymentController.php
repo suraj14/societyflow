@@ -328,24 +328,9 @@ class PaymentController extends Controller
             }
         }
         
-        // Filter data by society for Admin users
-        if ($user->hasRole('Admin')) {
-            $maintenanceBills = MaintenanceBill::where('society_id', $user->society_id)
-                ->whereIn('status', ['pending', 'partial'])
-                ->with(['flat'])
-                ->get();
-            $residents = Resident::whereHas('flat', function($query) use ($user) {
-                $query->where('society_id', $user->society_id);
-            })->with(['flat'])->get();
-        } else {
-            // Super Admin sees all
-            $maintenanceBills = MaintenanceBill::whereIn('status', ['pending', 'partial'])
-                ->with(['flat'])
-                ->get();
-            $residents = Resident::with(['flat'])->get();
-        }
-        
-        return view('payments.create', compact('maintenanceBills', 'residents', 'propertyType', 'properties'));
+        // (This form lists only the signed-in user's own properties; the old unscoped "all bills / all residents" queries here
+        // fed nothing the page shows, and for every role but Admin they read every society's rows.)
+        return view('payments.create', compact('propertyType', 'properties'));
     }
 
     public function store(Request $request)
@@ -362,7 +347,7 @@ class PaymentController extends Controller
                 // picked, bill_type/due_date are resolved from it
                 // server-side below rather than trusted as submitted.
                 'maintenance_bill_id' => 'nullable|exists:maintenance_bills,id',
-                'amount' => 'required|numeric|min:0',
+                'amount' => 'required|numeric|min:0.01',
                 'payment_method' => 'required|in:cash,cheque,online,upi',
                 'payment_date' => 'required|date',
                 'bill_type' => 'required_without:maintenance_bill_id|nullable|string|max:255',
@@ -426,6 +411,27 @@ class PaymentController extends Controller
                 }
             }
 
+            // Never more than the bill still owes (the balance is what the verified payments leave).
+            if ($bill && (float) $request->amount > (float) $bill->balance_amount + 0.009) {
+                return back()->withErrors(['amount' => (float) $bill->balance_amount <= 0
+                    ? 'This bill is already fully paid.'
+                    : 'This is more than the bill still owes (' . number_format((float) $bill->balance_amount, 2) . ').'])->withInput();
+            }
+
+            // The office records money it HAS received: that is a payment. A resident recording one is making a claim the
+            // office has not seen - it stays pending (and the bill unchanged) until an admin verifies it, exactly like a
+            // tenant's rent submission. Without this, any resident could mark their own bill paid.
+            $byOffice = $user->hasAnyRole(['Super Admin', 'Admin', 'Accountant']);
+
+            // The same payment twice in quick succession (a double click, a retried request) is recorded once.
+            $repeat = Payment::where('society_id', $flat->society_id)->where('flat_id', $flatId)
+                ->where('maintenance_bill_id', $bill?->id)->where('amount', $request->amount)->where('payment_method', $request->payment_method)
+                ->whereDate('payment_date', $request->payment_date)->whereIn('status', ['pending', 'success'])
+                ->where('created_at', '>=', now()->subMinutes(10))->exists();
+            if ($repeat) {
+                return redirect()->route('payments.index')->with('info', 'This payment was just recorded - it was not added a second time.');
+            }
+
             // Create payment data
             $paymentData = [
                 'society_id' => $user->hasRole('Admin') ? $user->society_id : $flat->society_id,
@@ -437,7 +443,9 @@ class PaymentController extends Controller
                 'bill_type' => $bill ? ($bill->bill_type ?: 'Maintenance') : $request->bill_type,
                 'due_date' => $bill ? $bill->due_date : $request->due_date,
                 'notes' => $request->notes,
-                'status' => 'success',
+                'status' => $byOffice ? 'success' : 'pending',
+                // a resident's own claim is attributed to them; the office's record is not the office's payment
+                'user_id' => $byOffice ? null : $user->id,
             ];
             
             // Handle file upload. Previously built the stored filename from
@@ -455,10 +463,14 @@ class PaymentController extends Controller
             
             $payment = Payment::create($paymentData);
 
-            // Dispatch event for payment confirmation email
-            PaymentReceived::dispatch($payment);
+            // Only money the office has confirmed is announced (a claim is announced when it is verified: approve()).
+            if ($byOffice) {
+                PaymentReceived::dispatch($payment);
+            }
 
-            return redirect()->route('payments.index')->with('success', 'Payment recorded successfully!');
+            return redirect()->route('payments.index')->with('success', $byOffice
+                ? 'Payment recorded successfully!'
+                : 'Payment submitted. It counts towards the bill once the office has verified it.');
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return back()->withErrors($e->errors())->withInput();
@@ -508,7 +520,7 @@ class PaymentController extends Controller
                 // authority either way - this value only routes which input
                 // carries the id, and is never persisted.
                 'property_type' => 'nullable|in:apartment,villa',
-                'amount' => 'required|numeric|min:0',
+                'amount' => 'required|numeric|min:0.01',
                 'payment_method' => 'required|in:cash,cheque,online,upi',
                 'payment_date' => 'required|date',
                 'bill_type' => 'required|string|max:255',
@@ -595,6 +607,14 @@ class PaymentController extends Controller
             return back()->with('error', 'Only a pending payment can be verified.');
         }
 
+        // Two claims for the same money (a double submission) must not both be verified: the bill never owes less than 0.
+        if ($payment->maintenance_bill_id) {
+            $bill = \App\Models\MaintenanceBill::find($payment->maintenance_bill_id);
+            if ($bill && (float) $payment->amount > (float) $bill->balance_amount + 0.009) {
+                return back()->with('error', 'This payment is more than the bill still owes (' . number_format((float) $bill->balance_amount, 2) . '). It may be a duplicate - reject it, or correct the amount.');
+            }
+        }
+
         $payment->update(['status' => 'success']);
 
         \App\Models\ActivityLog::recordFor($payment, 'payment.approved', ['amount' => (float) $payment->amount, 'maintenance_bill_id' => $payment->maintenance_bill_id]);
@@ -667,7 +687,13 @@ class PaymentController extends Controller
         // Society isolation first, for every role.
         $this->authorizeSocietyAccess($payment);
 
-        if (!$user->hasAnyRole(['Super Admin', 'Admin'])) {
+        // A receipt says the money was received: there is none for a claim the office has not verified, or one that was
+        // declined.
+        if ($payment->status !== 'success') {
+            return back()->with('error', 'A receipt is available once the payment has been verified.');
+        }
+
+        if (!$user->hasAnyRole(['Super Admin', 'Admin', 'Accountant'])) {
             // The payer always sees their own receipt.
             $isPayer = $payment->user_id !== null && (int) $payment->user_id === (int) $user->id;
 
@@ -684,7 +710,11 @@ class PaymentController extends Controller
                     ->exists();
             }
 
-            if (!$isPayer && !$ownsUnit) {
+            // Whoever lives in or owns the unit the payment was made for (a tenant's rent recorded at the office has no
+            // user on it, and it is still their receipt).
+            $residesInUnit = !$isPayer && !$ownsUnit && \App\Support\UserFlatResolver::userHasFlat($user, $payment->flat_id ? (int) $payment->flat_id : null);
+
+            if (!$isPayer && !$ownsUnit && !$residesInUnit) {
                 abort(403, 'Unauthorized access.');
             }
         }

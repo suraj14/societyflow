@@ -50,7 +50,7 @@
                             <p class="text-sm text-red-600">Balance Amount</p>
                             <p class="text-xl font-bold text-red-700">₹{{ number_format($bill->balance_amount, 2) }}</p>
                         </div>
-                        <a href="#" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                        <a href="{{ route('payments.create') }}" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
                             Pay Now
                         </a>
                     </div>
@@ -83,9 +83,9 @@
                     </div>
                 </div>
 
-                @if($bill->status === 'paid')
+                @if($bill->status === 'paid' && !empty($receiptPayment))
                 <div class="mt-6 pt-6 border-t border-gray-200">
-                    <a href="#" class="inline-flex items-center text-green-600 hover:text-green-800">
+                    <a href="{{ route('payments.receipt', $receiptPayment) }}" class="inline-flex items-center text-green-600 hover:text-green-800">
                         <i class="fas fa-download mr-2"></i> Download Receipt
                     </a>
                 </div>

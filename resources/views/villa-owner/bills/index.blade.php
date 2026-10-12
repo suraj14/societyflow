@@ -13,7 +13,7 @@
                 <h2 class="text-3xl font-bold">₹{{ number_format($pendingAmount, 0) }}</h2>
             </div>
             @if($pendingAmount > 0)
-                <a href="#" class="px-4 py-2 bg-white text-red-600 rounded-lg font-medium hover:bg-red-50 transition-colors">
+                <a href="{{ route('payments.create') }}" class="px-4 py-2 bg-white text-red-600 rounded-lg font-medium hover:bg-red-50 transition-colors">
                     Pay Now
                 </a>
             @endif
@@ -67,7 +67,7 @@
                                         <i class="fas fa-eye"></i>
                                     </a>
                                     @if($bill->status !== 'paid')
-                                        <a href="#" class="text-blue-600 hover:text-blue-800" title="Pay">
+                                        <a href="{{ route('payments.create') }}" class="text-blue-600 hover:text-blue-800" title="Pay">
                                             <i class="fas fa-credit-card"></i>
                                         </a>
                                     @endif

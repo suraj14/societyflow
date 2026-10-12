@@ -103,20 +103,35 @@ class BusinessNotifications
 
     public static function paymentReceived(object $payment): void
     {
-        $payer = $payment->user_id ? User::find($payment->user_id) : null;
         $amount = self::money($payment->amount ?? 0);
 
-        if ($payer) {
-            InAppNotifier::send([$payer], 'payment', 'Payment received', "We received your payment of {$amount}.", self::url('payments.show', $payment->id), 'fa-indian-rupee-sign');
-            self::whatsapp('payment', [$payer], $payment->society_id, fn ($u) => [
-                'amount' => $amount, 'resident_name' => $u->name,
-                'payment_date' => $payment->payment_date ? Carbon::parse($payment->payment_date)->format('d M Y') : now()->format('d M Y'),
-                'receipt_ref' => $payment->receipt_number ?? (string) $payment->id,
-            ]);
+        // Who is told "we received your payment": the person who paid; and when the office recorded it (no user on the
+        // payment), the people responsible for that unit - the tenant for rent, the owner for anything else (everyone of
+        // the unit when only the other kind exists). Never the admin who typed it in.
+        $payers = collect();
+        if ($payment->user_id) {
+            $payers = collect([User::find($payment->user_id)])->filter();
+        } elseif ($payment->flat_id) {
+            $people = UserFlatResolver::peopleOfFlat((int) $payment->flat_id, (int) $payment->society_id);
+            $isRent = strtolower((string) $payment->bill_type) === 'rent';
+            $payers = ($isRent ? $people['tenants'] : $people['owners']);
+            if ($payers->isEmpty()) {
+                $payers = $people['tenants']->merge($people['owners'])->unique('id');
+            }
         }
 
-        $staff = self::roleUsers($payment->society_id, ['Admin', 'Accountant'])->reject(fn ($u) => $payer && $u->id === $payer->id);
-        InAppNotifier::send($staff, 'payment', 'Payment received', "{$amount} received" . ($payer ? " from {$payer->name}" : '') . '.', self::url('payments.show', $payment->id), 'fa-indian-rupee-sign');
+        foreach ($payers as $payer) {
+            InAppNotifier::send([$payer], 'payment', 'Payment received', "We received your payment of {$amount}.", self::url('payments.show', $payment->id), 'fa-indian-rupee-sign');
+        }
+        self::whatsapp('payment', $payers->all(), $payment->society_id, fn ($u) => [
+            'amount' => $amount, 'resident_name' => $u->name,
+            'payment_date' => $payment->payment_date ? Carbon::parse($payment->payment_date)->format('d M Y') : now()->format('d M Y'),
+            'receipt_ref' => $payment->receipt_number ?? (string) $payment->id,
+        ]);
+
+        $first = $payers->first();
+        $staff = self::roleUsers($payment->society_id, ['Admin', 'Accountant'])->reject(fn ($u) => $payers->contains('id', $u->id));
+        InAppNotifier::send($staff, 'payment', 'Payment received', "{$amount} received" . ($first ? " from {$first->name}" : '') . '.', self::url('payments.show', $payment->id), 'fa-indian-rupee-sign');
     }
 
     public static function billGenerated(object $bill): void
