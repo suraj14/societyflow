@@ -17,6 +17,8 @@ class SmsService
     public const STATUS_SENT = 'sent';
     public const STATUS_SKIPPED_DISABLED = 'skipped_disabled';
     public const STATUS_SKIPPED_NOT_CONFIGURED = 'skipped_not_configured';
+    /** The same notification already went to this number a moment ago (see App\Support\SendOnce). */
+    public const STATUS_SKIPPED_DUPLICATE = 'skipped_duplicate';
     public const STATUS_FAILED = 'failed';
 
     /** A send that was deliberately not attempted. Keeps the legacy success=true / 'dev_mode' shape. */
@@ -166,6 +168,19 @@ class SmsService
         // single-template behaviour, kept so nothing that worked stops).
         // A Message Templates -> SMS template for this purpose wins; its Message ID decides DLT or Quick SMS.
         $templatePurpose ??= self::templatePurpose($purpose);
+
+        // The same notification to the same number is sent once: an event that fires twice, or a retry after a send that
+        // did succeed, must not text a resident twice. A failed attempt is not remembered, so it can be retried.
+        $once = null;
+        if (!$force) {
+            $once = \App\Support\SendOnce::begin('sms', $societyId, $phone, $templatePurpose, (string) json_encode($values ?: $message));
+            if ($once === null) {
+                Log::info('Duplicate SMS suppressed', ['purpose' => $templatePurpose, 'phone' => self::maskPhone($phone)]);
+
+                return ['success' => false, 'message' => 'Not sent: the same message was already sent to this number a moment ago.', 'status' => self::STATUS_SKIPPED_DUPLICATE, 'sent' => false];
+            }
+        }
+
         $smsTemplate = \App\Models\SmsTemplate::forPurpose($societyId, $templatePurpose);
         $result = $smsTemplate
             ? self::sendByTemplate($templatePurpose, $phone, $values, $societyId, $message)
@@ -187,6 +202,7 @@ class SmsService
         // unchanged (the Log::info/warning calls above and inside
         // sendViaFast2SmsDlt still use maskPhone()).
         $result = self::stamp($result);
+        \App\Support\SendOnce::finish($once, $result['sent']);
         if ($societyId !== null && self::wasSkipped($result)) {
             self::recordSkipped($purpose, $phone, $societyId, (string) ($result['message'] ?? 'not sent'));
 
@@ -434,13 +450,11 @@ class SmsService
     /** GET to Fast2SMS through the shared transport, or the test override (same arguments curlPost would use). */
     private static function fast2smsGet(string $url, string $apiKey, callable $handler): array
     {
-        if (self::$transportOverride !== null) {
-            [$body, $httpCode] = (self::$transportOverride)($url, [], ['authorization: ' . $apiKey]);
+        // The same handling for the real transport and a test's mock: status 0 means nothing came back.
+        [$body, $httpCode] = self::$transportOverride !== null
+            ? (self::$transportOverride)($url, [], ['authorization: ' . $apiKey])
+            : Fast2SmsService::get($url, $apiKey);
 
-            return $handler($body, $httpCode);
-        }
-
-        [$body, $httpCode] = Fast2SmsService::get($url, $apiKey);
         if ($httpCode === 0) {
             if (!empty($body['skipped'])) {
                 Log::notice('SMS suppressed', ['host' => 'www.fast2sms.com']);

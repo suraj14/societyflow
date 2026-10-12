@@ -110,10 +110,21 @@ class WhatsAppService
             'parameters' => array_map(fn ($p) => ['type' => 'text', 'text' => $p], $params),
         ]];
 
+        // The same notification to the same number goes out once: an event that fires twice, or a queue retry after a send
+        // that did succeed, must not message a resident twice. A failed attempt is not remembered, so it can be retried.
+        $once = \App\Support\SendOnce::begin('whatsapp', $societyId, $phone, $purpose, (string) json_encode($params));
+        if ($once === null) {
+            Log::info('Duplicate WhatsApp message suppressed', ['purpose' => $purpose, 'phone' => SmsService::maskPhone($phone)]);
+
+            return ['success' => false, 'skipped' => true, 'status' => 'skipped_duplicate', 'message' => 'Not sent: the same message was already sent to this number a moment ago.'];
+        }
+
         // A synced template has Fast2SMS's integer message_id: send by that. Without one, fall back to name + language.
         $result = $template && $template->message_id
             ? self::sendByMessageId($phone, $template, $params, $societyId, ['purpose' => $purpose])
             : self::sendTemplateMessage($phone, $templateName, $components, $societyId, logContext: ['purpose' => $purpose], language: $template?->language ?: null);
+
+        \App\Support\SendOnce::finish($once, !empty($result['success']) && ($result['message'] ?? null) !== 'dev_mode' && empty($result['skipped']));
 
         // sendTemplateMessage() itself still short-circuits to a dev_mode
         // success when WhatsApp is disabled or the API key/phone number id
@@ -287,13 +298,11 @@ class WhatsAppService
             return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey), 'http_status' => $httpCode, 'raw' => SmsService::rawResponse($body, $apiKey)];
         };
 
-        if (self::$transportOverride !== null) {
-            [$body, $httpCode] = (self::$transportOverride)($url, [], ['authorization: ' . $apiKey]);
+        // The same handling for the real transport and a test's mock: status 0 means nothing came back.
+        [$body, $httpCode] = self::$transportOverride !== null
+            ? (self::$transportOverride)($url, [], ['authorization: ' . $apiKey])
+            : Fast2SmsService::get($url, (string) $apiKey);
 
-            return $handler($body, $httpCode);
-        }
-
-        [$body, $httpCode] = Fast2SmsService::get($url, (string) $apiKey);
         if ($httpCode === 0) {
             if (!empty($body['skipped'])) {
                 Log::notice('WhatsApp suppressed', ['host' => 'www.fast2sms.com']);

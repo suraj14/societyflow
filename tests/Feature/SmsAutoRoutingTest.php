@@ -101,14 +101,16 @@ class SmsAutoRoutingTest extends TestCase
         $this->assertSame('223577', $this->calls[0]['q']['message']);
     }
 
-    public function test_without_a_sender_id_even_a_message_id_goes_out_as_quick_sms(): void
+    public function test_a_message_id_without_a_sender_id_is_refused_and_never_downgraded_to_quick_sms(): void
     {
-        $this->template();
+        $this->template();                                   // Message ID 223577, but no Sender ID is saved
 
-        SmsService::sendOtp('9876543210', '4821', $this->society->id);
+        $r = SmsService::sendOtp('9876543210', '4821', $this->society->id);
 
-        $this->assertSame('q', $this->calls[0]['q']['route']);
-        $this->assertArrayNotHasKey('sender_id', $this->calls[0]['q']);
+        $this->assertFalse($r['success']);
+        $this->assertSame('sender_missing', $r['error_code']);
+        $this->assertStringContainsString('no Sender ID', $r['message']);
+        $this->assertSame([], $this->calls, 'an incomplete DLT setup is reported, not sent as Quick SMS to look successful');
     }
 
     public function test_with_no_template_at_all_the_login_otp_still_goes_out_as_quick_sms(): void
@@ -135,9 +137,9 @@ class SmsAutoRoutingTest extends TestCase
         $this->set('notification_sms_enabled', true);
         SystemSetting::set('sms', 'notification_sms_enabled', true, 'boolean', $this->society->id);
         $this->template();                                                       // OTP template, Message ID 223577
-        $this->template(['name' => 'Notice', 'purpose' => 'notice', 'body' => '{{message}}', 'dlt_message_id' => '223999']);
+        $this->template(['name' => 'Notice', 'purpose' => 'notice', 'body' => '{{notice_title}}', 'dlt_message_id' => '223999']);
 
-        SmsService::sendDltNotification('notification', '9876543210', 'Water cut 2-4 PM', $this->society->id);
+        SmsService::sendDltNotification('notification', '9876543210', 'legacy text', $this->society->id, false, 'notice', ['notice_title' => 'Water cut 2-4 PM']);
 
         $this->assertSame('223999', $this->calls[0]['q']['message']);
         $this->assertSame('Water cut 2-4 PM', $this->calls[0]['q']['variables_values']);
@@ -183,8 +185,10 @@ class SmsAutoRoutingTest extends TestCase
 
     public function test_render_fills_named_and_numbered_placeholders_in_order(): void
     {
-        $this->assertSame(['text' => 'Hi Asha, 12', 'variables' => ['Asha', '12']], Fast2SmsService::render('Hi {{name}}, {{amount}}', ['amount' => '12', 'name' => 'Asha']));
-        $this->assertSame(['text' => 'A=x B=y', 'variables' => ['x', 'y']], Fast2SmsService::render('A={{1}} B={{2}}', ['x', 'y']));
+        $named = Fast2SmsService::render('Hi {{name}}, {{amount}}', ['amount' => '12', 'name' => 'Asha']);
+        $this->assertSame(['Hi Asha, 12', ['Asha', '12'], []], [$named['text'], $named['variables'], $named['missing']]);
+        $listed = Fast2SmsService::render('A={{1}} B={{2}}', ['x', 'y']);
+        $this->assertSame(['A=x B=y', ['x', 'y'], []], [$listed['text'], $listed['variables'], $listed['missing']]);
         $this->assertSame('a/b|c', Fast2SmsService::pipe(['a|b', 'c']), 'a pipe inside a value would split it');
     }
 

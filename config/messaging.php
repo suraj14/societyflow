@@ -22,4 +22,17 @@ return [
     */
     'enabled' => (bool) env('EXTERNAL_MESSAGING_ENABLED', true),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Duplicate suppression window (seconds)
+    |--------------------------------------------------------------------------
+    |
+    | The same notification (same channel, society, recipient number, type and
+    | content) that was already sent successfully is not sent again inside this
+    | window - see App\Support\SendOnce. Covers an event that fires twice and a
+    | queue retry after a send that did go out.
+    |
+    */
+    'duplicate_window' => (int) env('MESSAGING_DUPLICATE_WINDOW', 300),
+
 ];

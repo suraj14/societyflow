@@ -766,15 +766,14 @@ class SettingsController extends Controller
             ? $request->fast2sms_route
             : ($request->boolean('fast2sms_use_otp_service') ? 'otp' : 'dlt');
         SystemSetting::set('sms', 'fast2sms_route', $route ?: 'dlt', 'string', $societyId);
-        if ($request->filled('fast2sms_sender_id')) {
-            SystemSetting::set('sms', 'fast2sms_sender_id', $request->fast2sms_sender_id, 'string', $societyId);
+        // Sender ID and the default Message ID are optional plain config: a field that is sent empty clears the value
+        // (so a default can be removed); a field that is not sent at all leaves it alone.
+        foreach (['fast2sms_sender_id' => 'strtoupper', 'fast2sms_template_id' => null, 'fast2sms_otp_id' => null, 'fast2sms_entity_id' => null] as $field => $normalise) {
+            if ($request->has($field)) {
+                $value = trim((string) $request->input($field, ''));
+                SystemSetting::set('sms', $field, $normalise ? $normalise($value) : $value, 'string', $societyId);
+            }
         }
-        if ($request->filled('fast2sms_template_id')) {
-            SystemSetting::set('sms', 'fast2sms_template_id', $request->fast2sms_template_id, 'string', $societyId);
-        }
-        // Approved Smart OTP template ID. Plain config, not a secret.
-        SystemSetting::set('sms', 'fast2sms_otp_id', trim((string) $request->input('fast2sms_otp_id', '')), 'string', $societyId);
-        SystemSetting::set('sms', 'fast2sms_entity_id', trim((string) $request->input('fast2sms_entity_id', '')), 'string', $societyId);
 
         // Per-purpose channels. 'otp_sms_enabled' mirrors 'sms_enabled' (the
         // flag SmsService::sendOtp has always read) under the clearer name
@@ -807,7 +806,7 @@ class SettingsController extends Controller
 
         \App\Support\ChannelStatus::clear('sms', $societyId);
 
-        return redirect()->route('settings.index', ['tab' => 'sms'])->with('success', 'SMS settings saved. Use "Connect & Verify" to check them.');
+        return redirect()->route('settings.index', ['tab' => 'sms'])->with('success', 'SMS settings saved. Press "Send Test SMS" below to see Fast2SMS\'s reply.');
     }
 
     public function testSms(Request $request)
