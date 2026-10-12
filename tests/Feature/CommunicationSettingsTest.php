@@ -385,15 +385,17 @@ class CommunicationSettingsTest extends TestCase
             ->assertJson(['success' => true]);
 
         $sent = null;
-        WhatsAppService::$transportOverride = function ($url, $data) use (&$sent) { $sent = $data; return [['messages' => [['id' => 'wamid.1']]], 200]; };
+        $url = null;
+        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'request_id' => 'r1'], 200]; };
 
         $result = WhatsAppService::sendNotification('payment', '9876543210', ['resident_name' => 'Tara', 'amount' => "\u{20B9}1,200.00", 'society_name' => 'Royal Eden'], $this->society);
 
         $this->assertTrue($result['success']);
-        $this->assertSame('payment_completed', $sent['data']['template']['name'] ?? $sent['template']['name']);
-        $template = $sent['template'] ?? $sent['data']['template'];
-        $this->assertSame('en', $template['language']['code'], "the template's own language, not the en_US default");
-        $this->assertSame(["\u{20B9}1,200.00"], array_column($template['components'][0]['parameters'], 'text'));
+        // synced templates are sent by Fast2SMS's integer message_id (the simple API), with the mapped values piped
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+        $this->assertSame((string) $ok->message_id, $q['message_id']);
+        $this->assertNotSame('meta_payment_completed', $q['message_id']);
+        $this->assertSame("\u{20B9}1,200.00", $q['variables_values']);
         $this->assertDatabaseHas('email_logs', ['channel' => 'whatsapp', 'trigger_action' => 'payment', 'status' => 'sent']);
     }
 
@@ -427,14 +429,16 @@ class CommunicationSettingsTest extends TestCase
     {
         $this->connectWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is here')]);
         $tpl = WhatsAppTemplate::where('name', 'visitor_alert')->first();
-        $sent = null;
-        WhatsAppService::$transportOverride = function ($url, $data) use (&$sent) { $sent = $data; return [['messages' => [['id' => 'wamid.2']]], 200]; };
+        $url = null;
+        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'request_id' => 'r2'], 200]; };
 
         $r = $this->actingAs($this->admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id])->assertOk();
 
         $this->assertTrue($r->json('success'));
-        $this->assertSame(['Test 1', 'Test 2'], array_column($sent['template']['components'][0]['parameters'], 'text'));
-        $this->assertSame('919876543210', $sent['to']);
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
+        $this->assertSame('Test 1|Test 2', $q['variables_values']);
+        $this->assertSame('919876543210', $q['numbers']);
+        $this->assertSame((string) $tpl->message_id, $q['message_id']);
 
         WhatsAppService::$transportOverride = fn () => [['error' => ['message' => '(#132001) Template name does not exist in the translation']], 400];
         $fail = $this->actingAs($this->admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id])->assertOk();

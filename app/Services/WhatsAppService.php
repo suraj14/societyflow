@@ -110,7 +110,10 @@ class WhatsAppService
             'parameters' => array_map(fn ($p) => ['type' => 'text', 'text' => $p], $params),
         ]];
 
-        $result = self::sendTemplateMessage($phone, $templateName, $components, $societyId, logContext: ['purpose' => $purpose], language: $template?->language ?: null);
+        // A synced template has Fast2SMS's integer message_id: send by that. Without one, fall back to name + language.
+        $result = $template && $template->message_id
+            ? self::sendByMessageId($phone, $template, $params, $societyId, ['purpose' => $purpose])
+            : self::sendTemplateMessage($phone, $templateName, $components, $societyId, logContext: ['purpose' => $purpose], language: $template?->language ?: null);
 
         // sendTemplateMessage() itself still short-circuits to a dev_mode
         // success when WhatsApp is disabled or the API key/phone number id
@@ -139,7 +142,9 @@ class WhatsAppService
             'parameters' => array_map(fn ($p) => ['type' => 'text', 'text' => $p], $params),
         ]] : [];
 
-        $result = self::sendTemplateMessage($phone, $template->name, $components, $societyId, logContext: ['purpose' => 'test'], language: $template->language ?: null);
+        $result = $template->message_id
+            ? self::sendByMessageId($phone, $template, $params, $societyId, ['purpose' => 'test'])
+            : self::sendTemplateMessage($phone, $template->name, $components, $societyId, logContext: ['purpose' => 'test'], language: $template->language ?: null);
         if (($result['message'] ?? null) !== 'dev_mode') {
             self::recordDelivery('test', $phone, $societyId, $result);
         }
@@ -239,6 +244,54 @@ class WhatsAppService
 
     // ── Shared send path ────────────────────────────────────────────────────
 
+    /**
+     * Fast2SMS "Send Template Message (Simple)":
+     *   GET /dev/whatsapp?message_id=<int>&phone_number_id=..&numbers=..&variables_values=a|b
+     * (docs.fast2sms.com/reference/sendwhatsappmessage). It takes the integer Fast2SMS message_id from the
+     * template sync - never the long Meta template_id. Success is {status: true, request_id}.
+     *
+     * @param list<string> $params
+     */
+    private static function sendByMessageId(string $phone, \App\Models\WhatsAppTemplate $template, array $params, ?int $societyId, array $logContext): array
+    {
+        if (!self::isEnabled($societyId)) {
+            return ['success' => true, 'message' => 'dev_mode'];
+        }
+
+        $apiKey = self::getSetting('whatsapp_api_key', null, $societyId);
+        $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
+        if (empty($apiKey) || empty($phoneNumberId)) {
+            Log::info('WhatsApp not configured - message not sent', array_merge($logContext, ['phone' => SmsService::maskPhone($phone)]));
+
+            return ['success' => true, 'message' => 'dev_mode'];
+        }
+
+        // pipe is the separator, so it cannot appear inside a value
+        $values = implode('|', array_map(fn ($p) => str_replace('|', '/', (string) $p), $params));
+        $query = ['message_id' => (int) $template->message_id, 'phone_number_id' => $phoneNumberId, 'numbers' => self::toE164($phone)];
+        if ($values !== '') {
+            $query['variables_values'] = $values;
+        }
+
+        $handler = function ($body, $httpCode) use ($phone, $apiKey, $logContext) {
+            if ($httpCode === 200 && filter_var($body['status'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                return ['success' => true, 'message' => 'WhatsApp message sent', 'request_id' => $body['request_id'] ?? null];
+            }
+
+            $error = $body['error']['message']
+                ?? (is_array($body['message'] ?? null) ? implode(', ', $body['message']) : ($body['message'] ?? "HTTP {$httpCode}"));
+            Log::warning('WhatsApp send rejected', array_merge($logContext, [
+                'provider' => 'fast2sms_whatsapp', 'http_status' => $httpCode,
+                'phone' => SmsService::maskPhone($phone), 'provider_msg' => SmsService::safeProviderMessage((string) $error, $apiKey),
+            ]));
+
+            return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey), 'http_status' => $httpCode];
+        };
+
+        return self::curlPost('https://www.fast2sms.com/dev/whatsapp?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986),
+            [], ['authorization: ' . $apiKey], $handler, get: true);
+    }
+
     private static function sendTemplateMessage(string $phone, ?string $templateName, array $components, ?int $societyId, array $logContext, ?string $language = null): array
     {
         if (!self::isEnabled($societyId)) {
@@ -334,7 +387,7 @@ class WhatsAppService
     }
 
     /** Same transport the SMS service uses: real curl, or the test override. */
-    private static function curlPost(string $url, array $data, array $headers, callable $handler): array
+    private static function curlPost(string $url, array $data, array $headers, callable $handler, bool $get = false): array
     {
         if (self::$transportOverride !== null) {
             [$body, $httpCode] = (self::$transportOverride)($url, $data, $headers);
@@ -354,10 +407,8 @@ class WhatsAppService
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_TIMEOUT        => 15,
                 CURLOPT_SSL_VERIFYPEER => true,
-                CURLOPT_POST           => true,
-                CURLOPT_POSTFIELDS     => json_encode($data),
                 CURLOPT_HTTPHEADER     => $headers,
-            ]);
+            ] + ($get ? [CURLOPT_HTTPGET => true] : [CURLOPT_POST => true, CURLOPT_POSTFIELDS => json_encode($data)]));
             $result   = curl_exec($ch);
             $curlErr  = curl_error($ch);
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);

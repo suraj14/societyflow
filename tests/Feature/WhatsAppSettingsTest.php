@@ -202,6 +202,59 @@ class WhatsAppSettingsTest extends TestCase
         $this->assertStringNotContainsString(self::KEY, $result['message']);
     }
 
+    // ── Template send by Fast2SMS message_id ────────────────────────────────
+
+    private function syncedTemplate($admin, array $over = []): \App\Models\WhatsAppTemplate
+    {
+        return \App\Models\WhatsAppTemplate::create($over + ['society_id' => $admin->society_id, 'external_id' => '2012345678901234', 'message_id' => '8340', 'name' => 'visitor_arrived', 'status' => 'APPROVED', 'language' => 'en', 'var_count' => 2, 'body_text' => 'Hi {{1}}, {{2}}']);
+    }
+
+    public function test_a_synced_template_is_sent_by_its_integer_message_id_never_the_meta_template_id(): void
+    {
+        $admin = $this->admin();
+        $this->save($admin, ['whatsapp_api_key' => self::KEY]);
+        $tpl = $this->syncedTemplate($admin);
+        $this->fakeTransport(['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'abc123'], 200, $sent);
+
+        $result = WhatsAppService::sendTestTemplate($tpl, '98765 43210', $admin->society_id);
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('abc123', $result['request_id']);
+        parse_str(parse_url($sent['url'], PHP_URL_QUERY), $q);
+        $this->assertStringStartsWith('https://www.fast2sms.com/dev/whatsapp?', $sent['url']);
+        $this->assertSame('8340', $q['message_id']);
+        $this->assertSame('100594425479261', $q['phone_number_id']);
+        $this->assertSame('919876543210', $q['numbers']);
+        $this->assertSame('Test 1|Test 2', $q['variables_values']);
+        $this->assertStringNotContainsString('2012345678901234', $sent['url'], 'the long Meta template_id is never sent');
+        $this->assertSame(['authorization: ' . self::KEY], $sent['headers']);
+    }
+
+    public function test_a_message_id_send_rejection_shows_the_fast2sms_reason_without_the_key(): void
+    {
+        $admin = $this->admin();
+        $this->save($admin, ['whatsapp_api_key' => self::KEY]);
+        $tpl = $this->syncedTemplate($admin);
+        $this->fakeTransport(['status' => false, 'message' => 'Invalid template ID ' . self::KEY], 400);
+
+        $result = WhatsAppService::sendTestTemplate($tpl, '9876543210', $admin->society_id);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Invalid template ID', $result['message']);
+        $this->assertStringNotContainsString(self::KEY, $result['message']);
+    }
+
+    public function test_a_template_without_a_message_id_still_uses_the_name_based_send(): void
+    {
+        $admin = $this->admin();
+        $this->save($admin, ['whatsapp_api_key' => self::KEY]);
+        $tpl = $this->syncedTemplate($admin, ['message_id' => null]);
+        $this->fakeTransport(['messages' => [['id' => 'wamid.x']]], 200, $sent);
+
+        $this->assertTrue(WhatsAppService::sendTestTemplate($tpl, '9876543210', $admin->society_id)['success']);
+        $this->assertSame('visitor_arrived', $sent['data']['template']['name']);
+    }
+
     // ── Settings → Test WhatsApp button ─────────────────────────────────────
 
     public function test_test_button_reports_disabled_rather_than_success(): void
