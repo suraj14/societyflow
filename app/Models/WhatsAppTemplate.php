@@ -2,13 +2,18 @@
 
 namespace App\Models;
 
+use App\Support\WhatsAppPurposes;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * A society's view of its own approved WhatsApp Business templates, synced
- * from Fast2SMS/Meta by `WhatsAppTemplateSyncService`. See that class and
- * the creating migration for where this data actually comes from.
+ * A WhatsApp message template the society uses for one notification. The admin copies an approved template from the
+ * provider portal and pastes it in (Message Templates -> WhatsApp -> New Template): its provider name / Fast2SMS
+ * Message ID, language, body text and which value fills each {{n}}. Nothing is fetched from the provider.
+ *
+ * `source` says where the row came from: 'manual' (typed in here) or 'synced' (rows imported by the earlier
+ * sync feature - kept, editable, never overwritten). A manual row is NOT provider-approved just because it was saved:
+ * `isVerified()` is true only for a row whose approval was read from the provider.
  */
 class WhatsAppTemplate extends Model
 {
@@ -20,24 +25,33 @@ class WhatsAppTemplate extends Model
     // naming convention this project doesn't otherwise follow.
     protected $table = 'whatsapp_templates';
 
+    public const SOURCE_MANUAL = 'manual';
+    public const SOURCE_SYNCED = 'synced';
+
     protected $fillable = [
         'society_id',
+        'purpose',
         'external_id',
         'message_id',
         'phone_number_id',
         'name',
         'friendly_name',
         'status',
+        'is_active',
+        'source',
         'language',
         'category',
         'var_count',
+        'variable_map',
         'body_text',
         'synced_at',
     ];
 
     protected $casts = [
-        'synced_at' => 'datetime',
-        'var_count' => 'integer',
+        'synced_at'    => 'datetime',
+        'var_count'    => 'integer',
+        'is_active'    => 'boolean',
+        'variable_map' => 'array',
     ];
 
     public function society(): BelongsTo
@@ -48,6 +62,11 @@ class WhatsAppTemplate extends Model
     public function scopeBySociety($query, ?int $societyId)
     {
         return $query->where('society_id', $societyId);
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true);
     }
 
     /** Meta says APPROVED, Fast2SMS's lookup says Approved - accept both. */
@@ -61,6 +80,17 @@ class WhatsAppTemplate extends Model
         return strtoupper((string) $this->status) === 'APPROVED';
     }
 
+    public function isManual(): bool
+    {
+        return $this->source === self::SOURCE_MANUAL;
+    }
+
+    /** Provider approval actually read from the provider - never true for something an admin only typed in. */
+    public function isVerified(): bool
+    {
+        return !$this->isManual() && $this->isApproved();
+    }
+
     /** What the Communication Center shows - never the raw `name` or `external_id`. */
     public function displayName(): string
     {
@@ -70,5 +100,54 @@ class WhatsAppTemplate extends Model
     public static function humanize(string $technicalName): string
     {
         return ucwords(str_replace(['_', '-'], ' ', $technicalName));
+    }
+
+    public function purposeLabel(): string
+    {
+        return $this->purpose ? (WhatsAppPurposes::all()[$this->purpose]['label'] ?? ucfirst(str_replace('_', ' ', $this->purpose))) : 'Not assigned';
+    }
+
+    /** The template a notification uses in a society: its newest active one. */
+    public static function forPurpose(?int $societyId, string $purpose): ?self
+    {
+        return static::where('society_id', $societyId)->where('purpose', $purpose)->where('is_active', true)->orderByDesc('id')->first();
+    }
+
+    /** Make this the only active template of its purpose in its society. */
+    public function makeTheActiveOne(): void
+    {
+        static::where('society_id', $this->society_id)->where('purpose', $this->purpose)->where('id', '!=', $this->id)->where('is_active', true)->update(['is_active' => false]);
+        $this->forceFill(['is_active' => true])->save();
+    }
+
+    /** Which value fills {{1}}, {{2}} ...: the saved order, else the notification's default order. */
+    public function variableFields(): array
+    {
+        $map = is_array($this->variable_map) ? array_values($this->variable_map) : [];
+        if (count($map) === (int) $this->var_count && $map !== []) {
+            return $map;
+        }
+
+        return $this->purpose ? array_slice(array_keys(WhatsAppPurposes::all()[$this->purpose]['fields'] ?? []), 0, (int) $this->var_count) : [];
+    }
+
+    /** The body with each {{n}} replaced by an example value of the field chosen for it (the saved text is untouched). */
+    public function preview(): string
+    {
+        $fields = $this->variableFields();
+
+        return (string) preg_replace_callback('/\{\{\s*(\d+)\s*\}\}/', function ($m) use ($fields) {
+            $field = $fields[((int) $m[1]) - 1] ?? null;
+
+            return $field ? WhatsAppPurposes::sample($field) : $m[0];
+        }, (string) $this->body_text);
+    }
+
+    /** The numbers used as {{n}} in a body, in order of appearance, without repeats. */
+    public static function placeholderNumbers(string $body): array
+    {
+        preg_match_all('/\{\{\s*(\d+)\s*\}\}/', $body, $m);
+
+        return array_values(array_unique(array_map('intval', $m[1])));
     }
 }

@@ -112,7 +112,7 @@ class ProfileScreen extends ConsumerWidget {
             onPressed: () async {
               Navigator.pop(context);
               await ref.read(authProvider.notifier).logout();
-              if (context.mounted) Navigator.pushReplacementNamed(context, '/login');
+              if (context.mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
             },
             style: ElevatedButton.styleFrom(backgroundColor: AppColors.error, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             child: const Text('Logout', style: TextStyle(color: Colors.white)),

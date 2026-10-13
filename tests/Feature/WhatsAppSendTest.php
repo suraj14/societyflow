@@ -209,7 +209,7 @@ class WhatsAppSendTest extends TestCase
         $r = $this->send();
 
         $this->assertFalse($r['success']);
-        $this->assertStringContainsString('No WhatsApp template configured', $r['message']);
+        $this->assertStringContainsString('No active WhatsApp template configured', $r['message']);
         $this->assertSame([], $this->requests);
     }
 

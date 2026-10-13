@@ -25,7 +25,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       await ref.read(authProvider.notifier).login(email: _emailCtrl.text.trim(), password: _passwordCtrl.text);
-      if (mounted) Navigator.pushReplacementNamed(context, '/home');
+      // clear the whole stack: after signing in, Back must never return to a login / OTP screen
+      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(

@@ -67,19 +67,6 @@ class Fast2SmsConnectionStatusTest extends TestCase
         $this->assertSame('1209719742234591', SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', null, $this->society->id), 'the settings are saved regardless');
     }
 
-    public function test_a_skipped_template_refresh_does_not_overwrite_the_last_real_result(): void
-    {
-        SystemSetting::set('whatsapp', 'whatsapp_enabled', true, 'boolean', $this->society->id);
-        ChannelStatus::record('whatsapp', $this->society->id, true, 'Fast2SMS accepted the API key and Phone Number ID');
-
-        $r = $this->actingAs($this->admin)->postJson(route('settings.whatsapp.sync'))->assertOk();
-
-        $r->assertJson(['success' => false, 'skipped' => true]);
-        $this->assertStringContainsString('Not checked', $r->json('message'));
-        $this->assertStringNotContainsString('internet', $r->json('message'));
-        $this->assertTrue(ChannelStatus::get('whatsapp', $this->society->id)['ok'], 'not checking is not a failure');
-    }
-
     public function test_a_real_network_failure_says_which_kind_and_is_recorded_as_a_failure(): void
     {
         config(['messaging.enabled' => true]);

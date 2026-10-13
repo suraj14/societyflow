@@ -154,7 +154,7 @@ class WhatsAppSettingsTest extends TestCase
         $result = WhatsAppService::sendNotification('visitor', '9876543210', ['x'], $admin->society_id);
 
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('No WhatsApp template', $result['message']);
+        $this->assertStringContainsString('No active WhatsApp template', $result['message']);
         $this->assertNull($sent, 'no request may be sent without a template name');
     }
 
@@ -282,7 +282,7 @@ class WhatsAppSettingsTest extends TestCase
         $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => 999999])->assertOk();
 
         $this->assertFalse($resp->json('success'));
-        $this->assertStringContainsString('Choose an approved template', $resp->json('message'));
+        $this->assertStringContainsString('Choose a saved template', $resp->json('message'));
     }
 
     public function test_test_button_sends_the_chosen_template_by_message_id_and_reports_the_provider_reply(): void

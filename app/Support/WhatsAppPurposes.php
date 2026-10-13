@@ -72,6 +72,26 @@ class WhatsAppPurposes
         ];
     }
 
+    /**
+     * What a manager can attach a template to. `service_request` is left out: Service Requests is no longer a workflow, so
+     * no new template can be made for it (a row that already carries it keeps working and still shows its label).
+     */
+    public static function selectable(): array
+    {
+        return array_diff_key(self::all(), ['service_request' => true]);
+    }
+
+    /** An example value for a field, for previews only (never sent). */
+    public static function sample(string $field): string
+    {
+        return [
+            'visitor_name' => 'Ravi (courier)', 'visit_date' => '15 Oct, 10:00 AM', 'complaint_ref' => 'CMP-1042', 'complaint_title' => 'Water leakage',
+            'complaint_status' => 'In progress', 'service_name' => 'Plumbing', 'request_status' => 'Assigned', 'amount' => '2,700', 'due_date' => '15 Oct 2026',
+            'bill_ref' => 'MB-2026-0042', 'payment_date' => '12 Oct 2026', 'receipt_ref' => 'RCP-0042', 'event_name' => 'Diwali get-together',
+            'event_date' => '25 Oct, 6:00 PM', 'event_status' => 'New event',
+        ][$field] ?? TemplateVariables::sample($field);
+    }
+
     public static function exists(string $purpose): bool
     {
         return isset(self::all()[$purpose]);

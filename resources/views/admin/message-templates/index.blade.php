@@ -26,6 +26,8 @@
         <div class="shrink-0">
             @if ($channel === 'sms')
                 <a href="{{ route('admin.message-templates.sms.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
+            @elseif ($channel === 'whatsapp')
+                <a href="{{ route('admin.message-templates.whatsapp.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
             @elseif ($channel === 'email')
                 <a href="{{ route('admin.email-templates.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
             @endif

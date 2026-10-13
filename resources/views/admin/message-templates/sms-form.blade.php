@@ -44,9 +44,12 @@
         </div>
     @endif
 
-    <form method="POST" action="{{ $action }}" class="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6 space-y-5">
+    <form method="POST" action="{{ $action }}" class="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6 space-y-5" x-data="{ saving: false }" @submit="if (saving) { $event.preventDefault(); } else { saving = true; }">
         @csrf
-        @if ($editing) @method('PUT') @endif
+        @if ($editing)
+            @method('PUT')
+            <input type="hidden" name="loaded" value="{{ $template->updated_at?->timestamp }}">
+        @endif
 
         <div>
             <label for="t-name" class="block text-sm font-medium text-gray-700 mb-1.5">Template Name <span class="text-red-500">*</span></label>
@@ -111,10 +114,10 @@
         </div>
 
         <div>
-            <label for="t-mid" class="block text-sm font-medium text-gray-700 mb-1.5">Fast2SMS Message ID (DLT, optional)</label>
+            <label for="t-mid" class="block text-sm font-medium text-gray-700 mb-1.5">Fast2SMS Message ID (DLT)</label>
             <input id="t-mid" type="text" name="dlt_message_id" value="{{ old('dlt_message_id', $template->dlt_message_id) }}" inputmode="numeric" maxlength="14" placeholder="e.g. 223577" class="{{ $sfInput }}">
-            <p class="text-xs text-gray-500 mt-1">Enter the Message ID of your approved Fast2SMS DLT template. Set the matching Sender ID in
-                <a href="{{ route('settings.index', ['tab' => 'sms']) }}" class="underline">SMS Settings</a>. The message content and variable order must match the approved DLT template.
+            <p class="text-xs text-gray-500 mt-1">Paste the Message ID of your approved SMS template from Fast2SMS DLT Manager. The message text and variable order must match the approved DLT template. Configure the matching Sender ID in
+                <a href="{{ route('settings.index', ['tab' => 'sms']) }}" class="underline">SMS Settings</a>.
                 Leave the Message ID empty only when Quick SMS is intended.</p>
             <p class="text-xs mt-1.5 {{ $routing['sender_id'] === '' ? 'text-amber-800' : 'text-gray-500' }}">
                 @if ($routing['sender_id'] === '')
@@ -130,7 +133,7 @@
 
         <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-1">
             <a href="{{ route('admin.message-templates.index', ['channel' => 'sms']) }}" class="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold text-center hover:bg-gray-50">Cancel</a>
-            <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-sm font-semibold shadow hover:from-purple-700 hover:to-indigo-700">Save Changes</button>
+            <button type="submit" :disabled="saving" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-sm font-semibold shadow hover:from-purple-700 hover:to-indigo-700 disabled:opacity-60">Save Changes</button>
         </div>
     </form>
 </div>

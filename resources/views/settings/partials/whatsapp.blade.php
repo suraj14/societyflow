@@ -9,9 +9,9 @@
     $sfWaHasKey = $sfWaOwnKey || $sfWaUsesSmsKey;
     $sfWaConfigured = $sfWaHasKey && !empty($sfWa['whatsapp_phone_number_id']);
     $sfWaEnabled = (bool) ($sfWa['whatsapp_enabled'] ?? false);
-    $sfWaTemplates = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->approved()->orderBy('name')->get();
-    $sfWaPurposes = \App\Support\WhatsAppPurposes::all();
-    $sfWaInUse = collect($sfWaPurposes)->filter(fn ($p, $k) => !empty($sfWa["whatsapp_{$k}_template_name"]))->count();
+    $sfWaTemplates = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->orderBy('friendly_name')->orderBy('name')->get();
+    $sfWaPurposes = \App\Support\WhatsAppPurposes::selectable();
+    $sfWaInUse = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->distinct()->count('purpose');
     $sfInput = 'w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500';
     $sfWaJs = $sfWaTemplates->map(fn ($t) => ['id' => $t->id, 'label' => $t->displayName(), 'vars' => (int) $t->var_count, 'body' => (string) $t->body_text])->values();
 @endphp
@@ -93,7 +93,7 @@
             </div>
 
             <p class="rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-xs text-green-900">
-                <i class="fas fa-lightbulb mr-1"></i> Messages go through your approved WhatsApp Business account. Outside the 24-hour customer window, WhatsApp only delivers approved templates - so every message here is a template. Choose them in
+                <i class="fas fa-lightbulb mr-1"></i> Messages go through your approved WhatsApp Business account. Outside the 24-hour customer window, WhatsApp only delivers approved templates - so every message here is a template. Add and manage them in
                 <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp']) }}" class="underline font-medium">Message Templates &rarr; WhatsApp</a>.
             </p>
         </div>
@@ -106,10 +106,10 @@
     {{-- 2. Test WhatsApp --}}
     <div class="rounded-2xl border border-green-200 bg-green-50/60 p-5 sm:p-6" x-data="sfWaTest(@js(route('settings.whatsapp.test-template')), @js($sfWaJs))" x-init="reset()">
         <h3 class="font-semibold text-gray-900 flex items-center gap-2"><i class="fa-brands fa-whatsapp text-green-600"></i> Test WhatsApp</h3>
-        <p class="text-sm text-gray-600 mt-1 mb-4">Sends one approved template with your saved settings and shows Fast2SMS's reply. Nothing is sent until you press the button.</p>
+        <p class="text-sm text-gray-600 mt-1 mb-4">Sends one of your saved templates with your saved settings and shows Fast2SMS's reply. Nothing is sent until you press the button.</p>
 
         @if ($sfWaTemplates->isEmpty())
-            <p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">No approved template yet. Open <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp']) }}" class="underline font-medium">Message Templates &rarr; WhatsApp</a> and press Refresh.</p>
+            <p class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">No template saved yet. Add one in <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp']) }}" class="underline font-medium">Message Templates &rarr; WhatsApp</a>.</p>
         @else
             <form @submit.prevent="send()" class="grid grid-cols-1 sm:grid-cols-2 gap-3" data-allow-resubmit>
                 <div>

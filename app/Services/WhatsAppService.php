@@ -75,23 +75,35 @@ class WhatsAppService
      */
     public static function sendNotification(string $purpose, string $phone, array $values, ?int $societyId = null): array
     {
-        $templateName = self::getSetting("whatsapp_{$purpose}_template_name", null, $societyId);
+        // The template the admin made active for this notification (Message Templates -> WhatsApp). The earlier settings key
+        // is only a fallback for a society whose choice was saved before templates were managed as records.
+        $template = \App\Models\WhatsAppTemplate::forPurpose($societyId, $purpose);
+        $templateName = $template?->name ?: self::getSetting("whatsapp_{$purpose}_template_name", null, $societyId);
 
         if (empty($templateName)) {
             // No real attempt was possible - same as SmsService::sendDltNotification's
             // own "not configured" early return, this does not write a
             // Delivery Log row either; an admin who has not set up WhatsApp
             // at all should not see a growing list of "failed" rows for it.
-            return ['success' => false, 'message' => "No WhatsApp template configured for '{$purpose}'. Set one in Settings \u{2192} WhatsApp."];
+            return ['success' => false, 'status' => 'skipped_not_configured', 'message' => "No active WhatsApp template configured for '{$purpose}'. Add one in Message Templates \u{2192} WhatsApp."];
         }
 
-        $template = \App\Models\WhatsAppTemplate::where('society_id', $societyId)->where('name', $templateName)->first();
+        $template ??= \App\Models\WhatsAppTemplate::where('society_id', $societyId)->where('name', $templateName)->first();
+
+        if (!array_is_list($values)) {
+            $fields = $template?->variableFields() ?: \App\Support\WhatsAppPurposes::variableMap($purpose, (int) ($template?->var_count ?? count($values)), $societyId);
+            // A value the event did not supply is a failure to send, never a placeholder or a guess.
+            $missing = array_values(array_filter($fields, fn ($key) => !array_key_exists($key, $values)));
+            if ($missing) {
+                return ['success' => false, 'status' => 'failed', 'message' => "Not sent: this notification did not supply " . implode(', ', $missing) . ' for the template.'];
+            }
+        }
 
         $params = array_is_list($values)
             ? $values
             : array_map(
                 fn ($key) => $values[$key] ?? '',
-                \App\Support\WhatsAppPurposes::variableMap($purpose, (int) ($template?->var_count ?? count($values)), $societyId)
+                $template?->variableFields() ?: \App\Support\WhatsAppPurposes::variableMap($purpose, (int) ($template?->var_count ?? count($values)), $societyId)
             );
         // Meta rejects an empty parameter outright.
         $params = array_map(fn ($p) => trim((string) $p) === '' ? '-' : (string) $p, $params);

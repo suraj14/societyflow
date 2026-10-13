@@ -8,7 +8,6 @@ use App\Models\WhatsAppTemplate;
 use App\Services\Fast2SmsAccount;
 use App\Services\SmsService;
 use App\Services\WhatsAppService;
-use App\Services\WhatsAppTemplateSyncService;
 use App\Support\ChannelStatus;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -42,7 +41,6 @@ class CommunicationSettingsTest extends TestCase
         Fast2SmsAccount::$transportOverride = null;
         SmsService::$transportOverride = null;
         WhatsAppService::$transportOverride = null;
-        WhatsAppTemplateSyncService::$transportOverride = null;
         parent::tearDown();
     }
 
@@ -81,13 +79,15 @@ class CommunicationSettingsTest extends TestCase
         SystemSetting::set('whatsapp', 'whatsapp_enabled', true, 'boolean', $this->society);
     }
 
-    /** Key + Phone Number ID saved, then "Refresh from Fast2SMS" with these templates on the number. */
+    /** Key + Phone Number ID saved, and these templates entered by hand (the shape waTemplate() describes). */
     private function syncWhatsApp(array $templates): void
     {
         $this->saveWhatsAppKey();
         SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '7001001001001001', 'string', $this->society);
-        $this->fakeAccount(['whatsapp?type=template' => [['success' => true, 'data' => [$this->waNumber('7001001001001001', '+919000000001', $templates)]], 200]]);
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.sync'))->assertOk()->assertJson(['success' => true]);
+        foreach ($templates as $t) {
+            WhatsAppTemplate::create(['society_id' => $this->society, 'external_id' => 'manual-' . $t['template_name'], 'message_id' => (string) $t['message_id'], 'name' => $t['template_name'],
+                'friendly_name' => $t['template_name'], 'status' => 'LOCAL', 'source' => 'manual', 'language' => $t['language'], 'var_count' => $t['var_count'], 'body_text' => $t['components'][0]['text']]);
+        }
     }
 
     // ── Settings structure ──────────────────────────────────────────────────
@@ -204,103 +204,6 @@ class CommunicationSettingsTest extends TestCase
 
     // ── WhatsApp ────────────────────────────────────────────────────────────
 
-    public function test_refreshing_syncs_this_numbers_templates_with_message_id_variables_and_body(): void
-    {
-        $this->syncWhatsApp([
-            $this->waTemplate('payment_completed', 1, 'Dear user, Your last payment completed successfully amount: {{1}} Thank you.'),
-            $this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is at the gate.'),
-            $this->waTemplate('promo', 1, 'Sale {{1}}', '7001001001001001', 'Rejected'),
-        ]);
-
-        $this->assertSame(3, WhatsAppTemplate::bySociety($this->society)->count());
-        $this->assertSame(2, WhatsAppTemplate::bySociety($this->society)->approved()->count());
-        $tpl = WhatsAppTemplate::where('name', 'payment_completed')->first();
-        $this->assertSame(1, $tpl->var_count);
-        $this->assertSame('en', $tpl->language);
-        $this->assertNotEmpty($tpl->message_id);
-        $this->assertStringContainsString('amount: {{1}}', $tpl->body_text);
-
-        $html = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertOk()->getContent();
-        $this->assertStringContainsString('Payment Completed', $html, 'the approved template is offered for the test');
-        $this->assertStringNotContainsString('meta_payment_completed', $html, 'Meta template IDs stay internal');
-        $this->assertStringNotContainsString(self::KEY, $html);
-    }
-
-    public function test_refreshing_keeps_only_templates_of_the_saved_phone_number_id(): void
-    {
-        $this->saveWhatsAppKey();
-        SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '7002', 'string', $this->society);
-        $this->fakeAccount([
-            'whatsapp?type=template' => [['success' => true, 'data' => [
-                $this->waNumber('7001', '+919000000001', [$this->waTemplate('only_on_one', 1, 'X {{1}}', '7001')]),
-                $this->waNumber('7002', '+919000000002', [$this->waTemplate('only_on_two', 1, 'X {{1}}', '7002')]),
-            ]], 200],
-        ]);
-
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.sync'))->assertOk()->assertJson(['success' => true]);
-
-        $this->assertSame(['only_on_two'], WhatsAppTemplate::bySociety($this->society)->pluck('name')->all());
-        $this->assertStringContainsString('phone_number_id=7002', implode(' ', $this->providerCalls), 'the documented phone_number_id filter is sent');
-    }
-
-    public function test_assigning_a_template_checks_variables_and_drives_the_real_send(): void
-    {
-        $this->syncWhatsApp([
-            $this->waTemplate('payment_completed', 1, 'Dear user, amount: {{1}}'),
-            $this->waTemplate('huge', 9, '{{1}}{{2}}{{3}}{{4}}{{5}}{{6}}{{7}}{{8}}{{9}}'),
-        ]);
-        $ok = WhatsAppTemplate::where('name', 'payment_completed')->first();
-        $huge = WhatsAppTemplate::where('name', 'huge')->first();
-
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.assign'), ['purpose' => 'payment', 'template_id' => $huge->id, 'variables' => array_fill(0, 9, 'amount')])
-            ->assertJson(['success' => false]);
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.assign'), ['purpose' => 'payment', 'template_id' => $ok->id, 'variables' => []])
-            ->assertJson(['success' => false]);
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.assign'), ['purpose' => 'payment', 'template_id' => $ok->id, 'variables' => ['amount']])
-            ->assertJson(['success' => true]);
-
-        $url = null;
-        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'request_id' => 'r1'], 200]; };
-
-        $result = WhatsAppService::sendNotification('payment', '9876543210', ['resident_name' => 'Tara', 'amount' => "\u{20B9}1,200.00", 'society_name' => 'Royal Eden'], $this->society);
-
-        $this->assertTrue($result['success']);
-        // synced templates are sent by Fast2SMS's integer message_id (the simple API), with the mapped values piped
-        parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
-        $this->assertSame((string) $ok->message_id, $q['message_id']);
-        $this->assertNotSame('meta_payment_completed', $q['message_id']);
-        $this->assertSame('7001001001001001', $q['phone_number_id']);
-        $this->assertSame('919876543210', $q['numbers']);
-        $this->assertSame("\u{20B9}1,200.00", $q['variables_values']);
-        $this->assertDatabaseHas('email_logs', ['channel' => 'whatsapp', 'trigger_action' => 'payment', 'status' => 'sent']);
-    }
-
-    public function test_sync_repairs_assignments_saved_as_display_names(): void
-    {
-        $this->saveWhatsAppKey();
-        SystemSetting::set('whatsapp', 'whatsapp_payment_template_name', 'Payment Completed', 'string', $this->society);
-        SystemSetting::set('whatsapp', 'whatsapp_visitor_template_name', 'Something Unknown', 'string', $this->society);
-
-        $this->syncWhatsApp([$this->waTemplate('payment_completed', 1, 'amount: {{1}}')]);
-
-        $this->assertSame('payment_completed', SystemSetting::get('whatsapp', 'whatsapp_payment_template_name', null, $this->society));
-        $this->assertSame('Something Unknown', SystemSetting::get('whatsapp', 'whatsapp_visitor_template_name', null, $this->society), 'unmatched values are left alone, never guessed');
-        // the purpose -> template mapping lives on the Message Templates page (the settings page only links to it)
-        $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->assertSee('Needs a new template');
-    }
-
-    public function test_saving_whatsapp_settings_keeps_template_assignments(): void
-    {
-        SystemSetting::set('whatsapp', 'whatsapp_payment_template_name', 'payment_completed', 'string', $this->society);
-
-        $resp = $this->actingAs($this->admin)->post(route('settings.whatsapp.update'), [
-            'whatsapp_enabled' => '1', 'whatsapp_api_key' => self::KEY, 'whatsapp_phone_number_id' => '7001001001001001',
-        ]);
-        $resp->assertRedirect('/settings?tab=whatsapp');
-
-        $this->assertSame('payment_completed', SystemSetting::get('whatsapp', 'whatsapp_payment_template_name', null, $this->society));
-    }
-
     public function test_test_whatsapp_sends_the_chosen_template_with_typed_or_sample_values(): void
     {
         $this->syncWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is here')]);
@@ -356,8 +259,8 @@ class CommunicationSettingsTest extends TestCase
     {
         $tenant = $this->makeUserWithRole(\App\Models\Society::find($this->society), 'Tenant');
 
-        foreach (['settings.sms.update', 'settings.sms.test', 'settings.whatsapp.update', 'settings.whatsapp.sync', 'settings.whatsapp.assign',
-                  'settings.whatsapp.unassign', 'settings.whatsapp.test-template', 'settings.email.test'] as $route) {
+        foreach (['settings.sms.update', 'settings.sms.test', 'settings.whatsapp.update',
+                  'settings.whatsapp.test-template', 'settings.email.test'] as $route) {
             $this->actingAs($tenant)->postJson(route($route), [])->assertForbidden();
         }
     }

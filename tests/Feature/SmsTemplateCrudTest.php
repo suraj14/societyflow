@@ -52,9 +52,9 @@ class SmsTemplateCrudTest extends TestCase
         foreach (['otp', 'notice_title', 'society_name', 'person_name', 'document_title', 'resident_name'] as $variable) {
             $this->assertStringContainsString($variable, $html, "{$variable} is offered as a variable");
         }
-        $this->assertStringContainsString('Enter the Message ID of your approved Fast2SMS DLT template', $html);
-        $this->assertStringContainsString('The message content and variable order must match the approved DLT template', $html);
-        $this->assertStringContainsString('Fast2SMS Message ID (DLT, optional)', $html);
+        $this->assertStringContainsString('Paste the Message ID of your approved SMS template from Fast2SMS DLT Manager', $html);
+        $this->assertStringContainsString('The message text and variable order must match the approved DLT template', $html);
+        $this->assertStringContainsString('Fast2SMS Message ID (DLT)', $html);
         $this->assertStringContainsString('Preview', $html);
         $this->assertStringContainsString('/320', $html, 'the live character count');
     }
@@ -286,5 +286,58 @@ class SmsTemplateCrudTest extends TestCase
         $this->assertNull(SmsTemplate::first()->society_id);
         $this->assertNotNull(SmsTemplate::forPurpose(null, 'notice'));
         $this->assertNull(SmsTemplate::forPurpose($this->a->id, 'notice'), 'a platform template is not a society\'s template');
+    }
+
+    // ── manual entry: stale forms, exact wording, no provider contact ───────
+
+    public function test_a_stale_edit_form_does_not_overwrite_a_newer_save(): void
+    {
+        $t = $this->make(['name' => 'Original']);
+        $stale = (string) $t->fresh()->updated_at->timestamp;
+        \Carbon\Carbon::setTestNow(now()->addMinute());
+        $t->forceFill(['name' => 'Changed by someone else'])->save();
+
+        $this->actingAs($this->admin)->put(route('admin.message-templates.sms.update', $t), $this->payload(['name' => 'My old edit', 'loaded' => $stale]))
+            ->assertSessionHasErrors('name');
+
+        \Carbon\Carbon::setTestNow();
+        $this->assertSame('Changed by someone else', $t->fresh()->name);
+    }
+
+    public function test_the_edit_form_carries_the_version_it_loaded(): void
+    {
+        $t = $this->make();
+
+        $this->actingAs($this->admin)->get(route('admin.message-templates.sms.edit', $t))->assertOk()
+            ->assertSee('name="loaded" value="' . $t->updated_at->timestamp . '"', false);
+    }
+
+    public function test_the_pasted_approved_wording_is_stored_exactly_including_spacing_around_placeholders(): void
+    {
+        $text = 'Dear {{resident_name}} , notice: {{notice_title}} . Thank you,  {{society_name}}';
+
+        $this->actingAs($this->admin)->post(route('admin.message-templates.sms.store'), $this->payload(['body' => $text]))->assertRedirect();
+
+        $this->assertSame($text, SmsTemplate::latest('id')->firstOrFail()->body, 'no normalising of the approved text');
+    }
+
+    public function test_managing_sms_templates_never_contacts_a_provider(): void
+    {
+        \Illuminate\Support\Facades\Http::fake();
+        $called = [];
+        \App\Services\SmsService::$transportOverride = function () use (&$called) { $called[] = 'sms'; return [[], 200]; };
+        \App\Services\Fast2SmsAccount::$transportOverride = function () use (&$called) { $called[] = 'account'; return [[], 200]; };
+
+        $this->actingAs($this->admin)->post(route('admin.message-templates.sms.store'), $this->payload())->assertRedirect();
+        $t = SmsTemplate::firstOrFail();
+        $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'sms']))->assertOk();
+        $this->actingAs($this->admin)->put(route('admin.message-templates.sms.update', $t), $this->payload(['name' => 'Renamed']));
+        $this->actingAs($this->admin)->post(route('admin.message-templates.sms.toggle', $t));
+        $this->actingAs($this->admin)->delete(route('admin.message-templates.sms.destroy', $t));
+
+        \App\Services\SmsService::$transportOverride = null;
+        \App\Services\Fast2SmsAccount::$transportOverride = null;
+        $this->assertSame([], $called);
+        \Illuminate\Support\Facades\Http::assertNothingSent();
     }
 }

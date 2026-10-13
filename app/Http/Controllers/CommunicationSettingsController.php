@@ -2,21 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\SystemSetting;
 use App\Models\WhatsAppTemplate;
 use App\Services\SmsService;
 use App\Services\WhatsAppService;
-use App\Services\WhatsAppTemplateSyncService;
 use App\Support\ChannelStatus;
 use App\Support\ExternalMessaging;
-use App\Support\WhatsAppPurposes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 /**
- * The WhatsApp template actions behind Message Templates -> WhatsApp and Settings -> WhatsApp: refresh the approved
- * templates from Fast2SMS, choose which template a notification uses, and send a test. Credentials themselves are
+ * The optional "Test WhatsApp" behind Settings -> WhatsApp: send one saved template to a number the manager types.
+ * Templates themselves are entered by hand (MessageTemplatesController) - there is no sync or refresh. Credentials are
  * saved by SettingsController::updateWhatsApp(); everything here reads the SAVED values, so nothing a manager sees is
  * taken on trust from the browser. Every answer is {success, message, details?, raw?}: a plain message for the
  * manager, the provider's own words as details / raw response.
@@ -38,71 +34,7 @@ class CommunicationSettingsController extends Controller
         return response()->json(['success' => false, 'message' => $message, 'details' => $details, 'raw' => $raw] + ($skipped ? ['skipped' => true, 'status' => 'not_sent'] : []));
     }
 
-    // ── WhatsApp templates ──────────────────────────────────────────────────
-
-    /** Refresh the approved templates (with their Fast2SMS message_id, variable count and body) from Fast2SMS. */
-    public function whatsappSync(): JsonResponse
-    {
-        $result = WhatsAppTemplateSyncService::sync($this->societyId());
-
-        return response()->json(['success' => $result['success'], 'message' => $result['message'], 'details' => $result['detail'] ?? null, 'reload' => $result['success']]
-            + (!empty($result['skipped']) ? ['skipped' => true, 'status' => 'not_sent'] : []));
-    }
-
-    /** Attach an approved template to one notification type, with its {{n}} mapping. */
-    public function whatsappAssign(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'purpose'     => ['required', Rule::in(array_keys(WhatsAppPurposes::all()))],
-            'template_id' => 'required|integer',
-            'variables'   => 'nullable|array',
-            'variables.*' => 'string',
-        ]);
-        $societyId = $this->societyId();
-
-        $template = WhatsAppTemplate::bySociety($societyId)->find($data['template_id']);
-        if (!$template) {
-            return $this->fail('Template not found. Refresh the templates and try again.');
-        }
-        if (!$template->isApproved()) {
-            return $this->fail('Only approved templates can be used.');
-        }
-
-        $fields = WhatsAppPurposes::all()[$data['purpose']]['fields'];
-        $variables = array_values($data['variables'] ?? []);
-
-        if ($template->var_count > count($fields)) {
-            return $this->fail("This template needs {$template->var_count} values, but this notification can fill at most " . count($fields) . '. Choose a simpler template.');
-        }
-        if (count($variables) !== $template->var_count) {
-            return $this->fail("This template has {$template->var_count} variable(s); choose a value for each one.");
-        }
-        foreach ($variables as $v) {
-            if (!array_key_exists($v, $fields)) {
-                return $this->fail('One of the chosen values is not available for this notification.');
-            }
-        }
-
-        SystemSetting::set('whatsapp', "whatsapp_{$data['purpose']}_template_name", $template->name, 'string', $societyId);
-        SystemSetting::set('whatsapp', "whatsapp_{$data['purpose']}_variables", $variables, 'json', $societyId);
-
-        return response()->json([
-            'success' => true,
-            'message' => '"' . WhatsAppPurposes::all()[$data['purpose']]['label'] . "\" will now be sent on WhatsApp using \"{$template->displayName()}\".",
-            'reload'  => true,
-        ]);
-    }
-
-    public function whatsappUnassign(Request $request): JsonResponse
-    {
-        $data = $request->validate(['purpose' => ['required', Rule::in(array_keys(WhatsAppPurposes::all()))]]);
-        $societyId = $this->societyId();
-
-        SystemSetting::set('whatsapp', "whatsapp_{$data['purpose']}_template_name", '', 'string', $societyId);
-        SystemSetting::set('whatsapp', "whatsapp_{$data['purpose']}_variables", [], 'json', $societyId);
-
-        return response()->json(['success' => true, 'message' => 'WhatsApp turned off for this notification.', 'reload' => true]);
-    }
+    // ── Test WhatsApp ───────────────────────────────────────────────────────
 
     /**
      * Sends one approved template to a number the manager types, filled with the values they typed (separated by |) or
@@ -122,9 +54,9 @@ class CommunicationSettingsController extends Controller
             return $this->fail('WhatsApp is turned off. Switch on "Enabled", save, then test again.');
         }
 
-        $template = WhatsAppTemplate::bySociety($societyId)->approved()->find($data['template_id']);
+        $template = WhatsAppTemplate::bySociety($societyId)->find($data['template_id']);
         if (!$template) {
-            return $this->fail('Choose an approved template to test with. Templates come from Message Templates > WhatsApp > Refresh.');
+            return $this->fail('Choose a saved template to test with. Add one in Message Templates > WhatsApp.');
         }
 
         // No values typed: the service fills sample values ("Test 1", "Test 2", ...).

@@ -9,7 +9,6 @@ use App\Models\SystemSetting;
 use App\Models\WhatsAppTemplate;
 use App\Services\Fast2SmsAccount;
 use App\Services\SmsService;
-use App\Services\WhatsAppTemplateSyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -40,7 +39,6 @@ class MessageTemplatesPageTest extends TestCase
     {
         Fast2SmsAccount::$transportOverride = null;
         SmsService::$transportOverride = null;
-        WhatsAppTemplateSyncService::$transportOverride = null;
         parent::tearDown();
     }
 
@@ -213,67 +211,12 @@ class MessageTemplatesPageTest extends TestCase
 
     // ── WhatsApp tab ────────────────────────────────────────────────────────
 
-    public function test_whatsapp_cards_show_status_message_id_language_variables_usage_and_the_unmapped_warning(): void
-    {
-        $this->wa(['name' => 'visitor_ok', 'friendly_name' => 'Visitor approved', 'message_id' => '8340', 'external_id' => '2012345678901234', 'language' => 'en_US', 'var_count' => 3]);
-        $this->wa(['name' => 'old_one', 'status' => 'REJECTED']);
-        SystemSetting::set('whatsapp', 'whatsapp_visitor_template_name', 'visitor_ok', 'string', $this->a->id);
-
-        $html = $this->page(['channel' => 'whatsapp'])->assertOk()->getContent();
-
-        $this->assertStringContainsString('Visitor approved', $html);
-        $this->assertStringContainsString('WA: 8340', $html, 'the Fast2SMS message_id is the ID shown');
-        $this->assertStringNotContainsString('2012345678901234', $html, 'the long Meta template_id stays internal');
-        $this->assertStringContainsString('en_US', $html);
-        $this->assertStringContainsString('Rejected', $html);
-        $this->assertStringContainsString('3 variables', $html);
-        $this->assertStringContainsString('From Fast2SMS', $html);
-        $this->assertStringContainsString('No WhatsApp template is chosen for', $html);
-        $this->assertMatchesRegularExpression('/Used for:\s*<strong[^>]*>Visitor approved/', $html);
-    }
-
-    public function test_a_whatsapp_template_without_a_message_id_says_to_refresh(): void
-    {
-        $this->wa(['name' => 'legacy_row', 'message_id' => null]);
-
-        $this->page(['channel' => 'whatsapp'])->assertOk()->assertSee('No message ID - refresh');
-    }
-
     public function test_whatsapp_templates_of_another_society_are_not_listed(): void
     {
         $this->wa(['name' => 'mine_tpl', 'friendly_name' => 'Mine Visible'], $this->a);
         $this->wa(['name' => 'theirs_tpl', 'friendly_name' => 'Theirs Hidden'], $this->b);
 
         $this->page(['channel' => 'whatsapp'])->assertOk()->assertSee('Mine Visible')->assertDontSee('Theirs Hidden');
-    }
-
-    public function test_the_whatsapp_mapping_and_refresh_live_here_and_the_settings_page_links_to_them(): void
-    {
-        $this->wa(['name' => 'visitor_ok', 'friendly_name' => 'Visitor approved']);
-
-        $settings = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertOk();
-        $settings->assertDontSee('Notifications on WhatsApp')->assertDontSee('Use this template')->assertSee('Message Templates');
-        $settings->assertSee(route('admin.message-templates.index', ['channel' => 'whatsapp']), false);
-        $settings->assertDontSee('Connect &amp; Verify', false)->assertDontSee('Connect & Verify', false)->assertDontSee('Sync Approved Templates');
-
-        $this->page(['channel' => 'whatsapp'])->assertOk()->assertSee('Use a template')->assertSee('Refresh from Fast2SMS')->assertSee('Notifications on WhatsApp');
-    }
-
-    public function test_refresh_on_the_whatsapp_tab_brings_in_the_approved_templates(): void
-    {
-        config(['messaging.enabled' => true]);
-        SystemSetting::set('whatsapp', 'whatsapp_api_key', 'unit-test-key-not-real', 'encrypted', $this->a->id);
-        SystemSetting::set('whatsapp', 'whatsapp_phone_number_id', '1209719742234591', 'string', $this->a->id);
-        Fast2SmsAccount::$transportOverride = fn () => [['success' => true, 'data' => [[
-            'waba_id' => 'w1', 'phone_number_id' => '1209719742234591', 'templates' => [[
-                'message_id' => 8340, 'template_id' => '2012345678901234', 'template_name' => 'visitor_arrived', 'phone_number_id' => '1209719742234591',
-                'category' => 'UTILITY', 'status' => 'APPROVED', 'language' => 'en', 'var_count' => 2, 'components' => [['type' => 'BODY', 'text' => 'Hi {{1}}, {{2}} is at the gate']],
-            ]],
-        ]]], 200];
-
-        $this->actingAs($this->admin)->postJson(route('settings.whatsapp.sync'))->assertOk()->assertJson(['success' => true]);
-
-        $this->page(['channel' => 'whatsapp'])->assertOk()->assertSee('WA: 8340')->assertSee('Hi {{1}}, {{2}} is at the gate')->assertSee('2 variables');
     }
 
     // ── Email tab ───────────────────────────────────────────────────────────
@@ -321,7 +264,6 @@ class MessageTemplatesPageTest extends TestCase
         $stub = function () use (&$called) { $called = true; return [['return' => true], 200]; };
         Fast2SmsAccount::$transportOverride = $stub;
         SmsService::$transportOverride = $stub;
-        WhatsAppTemplateSyncService::$transportOverride = $stub;
         SystemSetting::set('sms', 'fast2sms_api_key', 'super-secret-sms-key', 'encrypted', $this->a->id);
         SystemSetting::set('whatsapp', 'whatsapp_api_key', 'super-secret-wa-key', 'encrypted', $this->a->id);
 

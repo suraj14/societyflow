@@ -386,6 +386,13 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     Route::put('message-templates/sms/{smsTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'updateSms'])->name('admin.message-templates.sms.update');
     Route::post('message-templates/sms/{smsTemplate}/toggle', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'toggleSms'])->name('admin.message-templates.sms.toggle');
     Route::delete('message-templates/sms/{smsTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'destroySms'])->name('admin.message-templates.sms.destroy');
+    // WhatsApp templates are entered by hand (copied from the provider portal): no sync, no refresh.
+    Route::get('message-templates/whatsapp/create', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'createWhatsApp'])->name('admin.message-templates.whatsapp.create');
+    Route::post('message-templates/whatsapp', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'storeWhatsApp'])->name('admin.message-templates.whatsapp.store');
+    Route::get('message-templates/whatsapp/{whatsappTemplate}/edit', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'editWhatsApp'])->name('admin.message-templates.whatsapp.edit');
+    Route::put('message-templates/whatsapp/{whatsappTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'updateWhatsApp'])->name('admin.message-templates.whatsapp.update');
+    Route::post('message-templates/whatsapp/{whatsappTemplate}/toggle', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'toggleWhatsApp'])->name('admin.message-templates.whatsapp.toggle');
+    Route::delete('message-templates/whatsapp/{whatsappTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'destroyWhatsApp'])->name('admin.message-templates.whatsapp.destroy');
     Route::post('settings/society', [App\Http\Controllers\SettingsController::class, 'updateSociety'])->name('settings.society.update');
     Route::post('settings/app', [App\Http\Controllers\SettingsController::class, 'updateApp'])->name('settings.app.update');
     Route::post('settings/language', [App\Http\Controllers\SettingsController::class, 'updateLanguage'])->name('settings.language.update');
@@ -400,9 +407,6 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     Route::post('settings/sms/test', [App\Http\Controllers\SettingsController::class, 'testSms'])->name('settings.sms.test');
     Route::post('settings/whatsapp', [App\Http\Controllers\SettingsController::class, 'updateWhatsApp'])->name('settings.whatsapp.update');
     // WhatsApp templates come from Fast2SMS: refresh them, choose what each notification uses, and send a test.
-    Route::post('settings/whatsapp/sync', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappSync'])->name('settings.whatsapp.sync');
-    Route::post('settings/whatsapp/assign', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappAssign'])->name('settings.whatsapp.assign');
-    Route::post('settings/whatsapp/unassign', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappUnassign'])->name('settings.whatsapp.unassign');
     Route::post('settings/whatsapp/test-template', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappTest'])->name('settings.whatsapp.test-template');
     Route::post('settings/security', [App\Http\Controllers\SettingsController::class, 'updateSecurity'])->name('settings.security.update');
     Route::post('settings/clear-cache', [App\Http\Controllers\SettingsController::class, 'clearCache'])->name('settings.clear-cache');
