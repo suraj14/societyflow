@@ -63,6 +63,12 @@ class User extends Authenticatable
         return $this->belongsTo(Tenant::class);
     }
 
+    /** The reset link goes out as a queued, retried notification (see ResetPasswordNotification). */
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new \App\Notifications\ResetPasswordNotification($token));
+    }
+
     public function resident(): HasOne
     {
         return $this->hasOne(Resident::class)->where('status', 'active');

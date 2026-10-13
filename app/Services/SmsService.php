@@ -87,16 +87,11 @@ class SmsService
         $enabled  = self::getSetting('sms_enabled', false, $societyId);
         $provider = self::getSetting('sms_provider', 'fast2sms', $societyId);
 
+        // "Integration active" is the master switch. A key in the server environment used to turn it on again for OTP
+        // (and behaved differently once the configuration was cached); it no longer can: off means nothing is sent.
         if (!$enabled) {
-            // Check if Fast2SMS is configured via .env — if so, treat as enabled
-            $envKey = env('FAST2SMS_API_KEY');
-            if (!empty($envKey)) {
-                $provider = 'fast2sms';
-                // proceed — don't return dev_mode
-            } else {
-                Log::info("SMS disabled - no message sent", ["phone" => self::maskPhone($phone)]);
-                return self::skipped(self::STATUS_SKIPPED_DISABLED, ['otp' => $otp]);
-            }
+            Log::info("SMS disabled - no message sent", ["phone" => self::maskPhone($phone)]);
+            return self::skipped(self::STATUS_SKIPPED_DISABLED, ['otp' => $otp]);
         }
 
         // A forced route is for the Settings "Test OTP"/"Test DLT SMS"
@@ -290,7 +285,7 @@ class SmsService
      * and the length is capped. The stored key itself is scrubbed too, in
      * case a provider ever echoed it back.
      */
-    public static function safeProviderMessage(string $message, ?string $secret = null): string
+    public static function safeProviderMessage(string $message, ?string $secret = null, bool $maskNumbers = false): string
     {
         if ($secret !== null && $secret !== '') {
             $message = str_replace($secret, '[redacted]', $message);
@@ -298,6 +293,11 @@ class SmsService
 
         $message = preg_replace('/authorization\s*:\s*\S+/i', 'authorization: [redacted]', $message) ?? $message;
         $message = preg_replace('/[A-Za-z0-9_\-]{20,}/', '[redacted]', $message) ?? $message;
+        // A provider that echoes the request back ("invalid OTP 4821") must not put a live one-time code, or a phone number,
+        // into a log or a message: on the OTP route every run of four or more digits is hidden.
+        if ($maskNumbers) {
+            $message = preg_replace('/\d{4,}/', '[number]', $message) ?? $message;
+        }
         $message = trim(preg_replace('/\s+/', ' ', $message) ?? '');
 
         return mb_substr($message !== '' ? $message : 'no response from provider', 0, 160);
@@ -587,7 +587,7 @@ class SmsService
                 'route'        => $route,
                 'http_status'  => $httpCode,
                 'phone'        => self::maskPhone($phone),
-                'provider_msg' => self::safeProviderMessage((string) $error, $apiKey),
+                'provider_msg' => self::safeProviderMessage((string) $error, $apiKey, $route === 'otp'),
             ]);
 
             // The docs define exactly two failures: 401 "Invalid Authorization key" and 400 (e.g. "Invalid OTP ID").
@@ -599,7 +599,7 @@ class SmsService
                 default => 'rejected',
             };
 
-            return ['success' => false, 'message' => self::safeProviderMessage((string) $error, $apiKey), 'error_code' => $code, 'provider_status' => $httpCode, 'raw' => self::rawResponse($body, $apiKey)];
+            return ['success' => false, 'message' => self::safeProviderMessage((string) $error, $apiKey, $route === 'otp'), 'error_code' => $code, 'provider_status' => $httpCode, 'raw' => self::rawResponse($body, $apiKey)];
         };
     }
 
@@ -781,20 +781,20 @@ class SmsService
         $val = SystemSetting::get('sms', $key, null, null);
         if ($val !== null && $val !== '') return $val;
 
-        // Fall back to .env values for Fast2SMS
-        $envMap = [
-            'fast2sms_api_key'    => 'FAST2SMS_API_KEY',
-            'fast2sms_route'      => 'FAST2SMS_ROUTE',
-            'fast2sms_sender_id'  => 'FAST2SMS_SENDER_ID',
-            'fast2sms_template_id'=> 'FAST2SMS_TEMPLATE_ID',
-            'fast2sms_otp_id'     => 'FAST2SMS_OTP_ID',
-            'fast2sms_flash'      => 'FAST2SMS_FLASH',
-            'sms_enabled'         => null, // no env fallback for enabled flag
-            'sms_provider'        => 'SMS_PROVIDER',
+        // Platform-wide fallback from the environment, read through config/sms.php (env() itself returns null once the
+        // configuration is cached). There is deliberately no fallback for the enabled flag.
+        $configMap = [
+            'fast2sms_api_key'    => 'sms.fast2sms.api_key',
+            'fast2sms_route'      => 'sms.fast2sms.route',
+            'fast2sms_sender_id'  => 'sms.fast2sms.sender_id',
+            'fast2sms_template_id'=> 'sms.fast2sms.template_id',
+            'fast2sms_otp_id'     => 'sms.fast2sms.otp_id',
+            'fast2sms_flash'      => 'sms.fast2sms.flash',
+            'sms_provider'        => 'sms.provider',
         ];
 
-        if (isset($envMap[$key]) && $envMap[$key] !== null) {
-            $envVal = env($envMap[$key]);
+        if (isset($configMap[$key])) {
+            $envVal = config($configMap[$key]);
             if ($envVal !== null && $envVal !== '') return $envVal;
         }
 

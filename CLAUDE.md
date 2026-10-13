@@ -129,6 +129,9 @@ Regression suites: `tests/Feature/WebTenantIsolationTest.php`,
 - Don't weaken `VerifyCsrfToken` (the `tokensMatch` override was removed deliberately).
 - CORS origins come from `CORS_ALLOWED_ORIGINS`; default `*` is for local dev only.
 - Push: FCM **v1** via `FirebaseService` only. The legacy `fcm/send` endpoint is dead.
+- **One-time codes** (`App\Models\MobileOtp`): issued and spent only through `MobileOtp::issue()` / `check()` (4 digits from `random_int`, stored as an HMAC, one use, 5 min, 5 wrong tries, per-purpose, atomic). The code appears in an API answer only when `OTP_EXPOSE_DEV_CODE=true` on a local/development/testing server - never in production, never in a log. Unknown numbers get the same answer as known ones.
+- **No `env()` outside `config/`** (it is null after `config:cache`): read `config('sms.*')`, `config('otp.*')` etc. `SmsConfigCacheSafetyTest` fails the build otherwise.
+- `email_logs.variables` never holds a password, reset link or code (`EmailLog::scrubbed`); the notification job payload is encrypted (`ShouldBeEncrypted`).
 - **Never seed, QA, or browser-test against a DB with real provider credentials without EXTERNAL_MESSAGING_ENABLED=false.** Per-society SMTP/SMS/WhatsApp settings are stored in system_settings, and the mail layer applies them over MAIL_MAILER at send time - MAIL_MAILER=log alone does not stop a real send. The flag (config/messaging.php) forces mail to log and suppresses SMS/WhatsApp calls; RoyalEdenDemoSeeder refuses to run without it. Test copies should also blank credentials.
 
 ## 8. Testing requirements

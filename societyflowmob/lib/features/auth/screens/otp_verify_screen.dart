@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -41,7 +42,7 @@ class _OtpVerifyScreenState extends ConsumerState<OtpVerifyScreen> {
   @override
   void initState() {
     super.initState();
-    _devOtp = widget.devOtp;
+    _devOtp = kReleaseMode ? null : widget.devOtp;
     _startCountdown();
     if (_devOtp != null && _devOtp!.length == OtpVerifyScreen.codeLength) {
       _controller.text = _devOtp!;

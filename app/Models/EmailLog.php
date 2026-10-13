@@ -17,6 +17,44 @@ class EmailLog extends Model
      */
     public const SKIPPED_PREFIX = 'Skipped: ';
 
+    /**
+     * Template variables that are secrets: a first password, a reset link or token, a one-time code. They are used to
+     * render the message that is sent, and are NEVER written to the delivery log - the log (and the admin screen that
+     * prints it) used to keep the temporary password of every new account in plain text.
+     */
+    public const SENSITIVE_VARIABLES = ['temporary_password', 'password', 'new_password', 'reset_token', 'reset_url', 'token', 'otp', 'code', 'api_key', 'secret'];
+
+    public const HIDDEN = '[hidden]';
+
+    /** @param array<string,mixed>|null $variables */
+    public static function scrubbed(?array $variables): ?array
+    {
+        if ($variables === null) {
+            return null;
+        }
+        foreach ($variables as $key => $value) {
+            if (in_array(strtolower((string) $key), self::SENSITIVE_VARIABLES, true) && $value !== null && $value !== '') {
+                $variables[$key] = self::HIDDEN;
+            }
+        }
+
+        return $variables;
+    }
+
+    public function setVariablesAttribute($value): void
+    {
+        if (is_string($value)) {
+            $value = json_decode($value, true);
+        }
+        $this->attributes['variables'] = $value === null ? null : json_encode(self::scrubbed((array) $value));
+    }
+
+    /** The message carried a secret that was not kept, so it cannot be rebuilt (and re-sent) from this row. */
+    public function hasHiddenValues(): bool
+    {
+        return in_array(self::HIDDEN, (array) $this->variables, true);
+    }
+
     public function isSkipped(): bool
     {
         return $this->status === 'failed' && str_starts_with((string) $this->error_message, self::SKIPPED_PREFIX);

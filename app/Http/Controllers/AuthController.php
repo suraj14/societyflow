@@ -172,7 +172,15 @@ class AuthController extends Controller
             'email' => 'required|email',
         ]);
 
-        Password::sendResetLink($request->only('email'));
+        // The same answer whether or not the account exists AND whether or not the mail could be sent: a transport failure
+        // used to surface as a server error for registered addresses only, which both broke the page and revealed which
+        // addresses are registered. A failure is logged for the operator (class only: an SMTP message can name the server
+        // or user) and, with a queue worker, retried by the queued notification.
+        try {
+            Password::sendResetLink($request->only('email'));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Password reset email could not be sent', ['exception' => get_class($e)]);
+        }
 
         return back()->with('success', 'If an account exists for that email, a password reset link has been sent.');
     }

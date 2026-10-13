@@ -1,9 +1,14 @@
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/http_service.dart';
 import '../../../core/config/api_config.dart';
 import '../../../core/utils/storage_service.dart';
 import '../models/otp_account_choice.dart';
 import '../models/user_model.dart';
+
+/// The one-time code a DEVELOPMENT server may put in its answer. A release build never reads it, so even a server that
+/// wrongly exposes it cannot make the app display or pre-fill a code: in production the code arrives by SMS only.
+String? devOtpFrom(Map<String, dynamic>? data, {bool release = kReleaseMode}) => release ? null : data?['otp']?.toString();
 
 class AuthState {
   final UserModel? user;
@@ -109,7 +114,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
     if (result.success) {
       // Only a development server returns the code; never keep a stale one.
-      final devOtp = result.data?['otp']?.toString();
+      final devOtp = devOtpFrom(result.data);
       state = devOtp != null ? state.copyWith(devOtp: devOtp) : state.copyWith(clearDevOtp: true);
     } else {
       state = state.copyWith(clearDevOtp: true);
@@ -173,7 +178,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       body: {'email': email},
     );
     if (result.success) {
-      final devOtp = result.data?['otp']?.toString();
+      final devOtp = devOtpFrom(result.data);
       if (devOtp != null) state = state.copyWith(devOtp: devOtp);
     } else {
       throw Exception(result.message.isNotEmpty ? result.message : 'Could not send OTP');

@@ -157,7 +157,9 @@ class Fast2SmsOtpContractTest extends TestCase
         $this->postJson('/api/v1/auth/send-otp', ['phone' => self::PHONE])->assertOk();
         $delivered = $this->sentOtp();
 
-        $this->assertSame($delivered, MobileOtp::where('phone', self::PHONE)->latest('id')->value('otp'));
+        $stored = MobileOtp::where('phone', self::PHONE)->latest('id')->value('otp');
+        $this->assertNotSame($delivered, $stored, 'stored as a keyed hash, not as the code');
+        $this->assertSame(MobileOtp::hashCode(self::PHONE, 'login', $delivered), $stored);
         $this->postJson('/api/v1/auth/verify-otp', ['phone' => self::PHONE, 'otp' => $delivered])->assertOk()->assertJsonPath('success', true);
     }
 
@@ -182,7 +184,7 @@ class Fast2SmsOtpContractTest extends TestCase
         for ($i = 4; $i >= 0; $i--) {
             $r = $this->postJson('/api/v1/auth/verify-otp', ['phone' => self::PHONE, 'otp' => $wrong]);
             $r->assertStatus(422);
-            $this->assertStringContainsString("$i attempt(s) remaining", $r->json('message'));
+            $this->assertStringContainsString('not valid or has expired', $r->json('message'));   // one answer for every kind of bad code
         }
 
         $late = $this->postJson('/api/v1/auth/verify-otp', ['phone' => self::PHONE, 'otp' => $code]);

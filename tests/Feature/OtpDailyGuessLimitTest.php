@@ -27,8 +27,7 @@ class OtpDailyGuessLimitTest extends TestCase
     {
         $phone = '9444444444';
         $this->residentWithPhone($phone);
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => $phone])->assertOk();
-        $otp = MobileOtp::where('phone', $phone)->latest()->first()->otp;
+        $otp = $this->postJson('/api/v1/auth/send-otp', ['phone' => $phone])->assertOk()->json('otp');
 
         // Exhaust the daily ceiling directly, as a run of wrong guesses across
         // several 15-minute windows would have.
@@ -45,8 +44,7 @@ class OtpDailyGuessLimitTest extends TestCase
     {
         $phone = '9555555555';
         $this->residentWithPhone($phone);
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => $phone])->assertOk();
-        $otp   = MobileOtp::where('phone', $phone)->latest()->first()->otp;
+        $otp   = $this->postJson('/api/v1/auth/send-otp', ['phone' => $phone])->assertOk()->json('otp');
         $wrong = $otp === '0000' ? '1111' : '0000';
 
         $this->postJson('/api/v1/auth/verify-otp', ['phone' => $phone, 'otp' => $wrong])

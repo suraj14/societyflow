@@ -238,3 +238,23 @@ Kept brief; full detail in commit messages `git log 5913335..HEAD`.
 - P2-45 No refund / reversal workflow; Admin delete of a verified payment is audited (`payment.deleted`) but is the only reversal - open, product decision.
 - P3-14 Migrations `2026_10_13_000001/2` verified on SQLite (copy of the pre-migration backup) and MariaDB 10.4 (throwaway) with data; `down()` of the second refuses on a rent+maintenance same-month clash by design. Production still needs backup + `php artisan migrate --force` - operator.
 - P3-15 Shard runner now lives in `scripts/run-test-shards.ps1` and records real exit codes.
+
+## 2026-10-13 round 3 and 4 (mobile UX, manual templates, OTP / e-mail / SMS / WhatsApp readiness)
+Done and tested (details and root causes in `SOCIETYFLOW_STABILIZATION.md`, Rounds 3-4):
+- P1-104 Quick overview cards each open a list built from the card's own rule; Needs attention rows open the list they counted; Service Requests removed from web / mobile UI (backend kept); Services is a Call / WhatsApp directory; admin duty board; back-navigation and sign-in stack fixes; manual WhatsApp templates (no sync / refresh); SMS form wording and stale-edit guard - **done 2026-10-13** (`AdminCardListsTest`, `ServiceDirectoryOnlyTest`, `WhatsAppTemplateCrudTest`, Flutter suites).
+- P1-105 One-time codes: hashed, purpose-bound, atomic one use, 30 s cooldown, per-IP limit, identical answers for known / unknown numbers, dev code only with `OTP_EXPOSE_DEV_CODE` on a non-production server - **done** (`OtpLifecycleTest`, `otp_flow_test`).
+- P1-106 **MariaDB/MySQL implicit `ON UPDATE CURRENT_TIMESTAMP`** on `mobile_otps.expires_at`, `notice_reads.read_at`, `society_document_acknowledgements.acknowledged_at` - **done** (migration `2026_10_14_000004`, `TimestampAutoUpdateTest`). Production must run it; times already overwritten are not recoverable.
+- P1-107 Temporary passwords no longer stored in `email_logs.variables` and no longer shown on the log screen; queue payload encrypted; reset link queued with retry and a failure-safe page - **done** (`EmailDeliveryTest`, migration `2026_10_14_000003` hides old values).
+- P1-108 `env()` outside `config/` (broke the SMS .env fallback under `config:cache`) and the env-key bypass of "Integration active" - **done** (`SmsConfigCacheSafetyTest`).
+
+Open:
+- P1-109 **Live delivery verification** of OTP SMS, notification SMS (Quick and DLT), WhatsApp and e-mail with an approved tester and rotated credentials - **blocked** (credentials P1-95, an approved recipient, approved DLT / WhatsApp templates). Procedure: `MESSAGING_STAGING_AND_DEPLOYMENT.md` part A.
+- P1-110 **Physical-device run** of the post-hardening OTP journey, the dashboard card taps, Android Back and the directory's Call / WhatsApp launch - NOT TESTED (phone unplugged at the end of the session).
+- P2-46 `/auth/register` and `/auth/check-account` still answer 404 for an unknown e-mail / phone pair (enumeration).
+- P2-47 No `jobs` / `failed_jobs` migration: create them (`queue:failed-table`) before using a real queue, and run a supervised worker.
+- P2-48 Delivery receipts (DLR) are not read; "sent" means accepted by the provider.
+- P2-49 A Fast2SMS OTP template with extra `{#var#}` placeholders needs `variables_values` - not implemented.
+- P2-50 Decide whether the password-reset mail should use the society's SMTP (it uses the server's default mailer).
+- P2-51 Create the release keystore (`android/key.properties`); the development build is debug-signed.
+- P3-16 Production deployed commit / `APP_ENV` / `APP_DEBUG` unknown from here (only `/api/v1/health` was read, 200 over HTTPS).
+- P3-17 Backend Service Requests (table, routes, notification code) retained for compatibility with installed apps and history: decide retention before removing.

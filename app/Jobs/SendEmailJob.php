@@ -32,6 +32,13 @@ class SendEmailJob implements ShouldQueue
      */
     public function handle(): void
     {
+        // A password or link that was never stored cannot be rebuilt: sending "[hidden]" to a person would be worse than not sending.
+        if ($this->emailLog->hasHiddenValues()) {
+            $this->emailLog->markAsFailed('Not re-sent: this message carried a password or link that is not stored.');
+
+            return;
+        }
+
         try {
             // Load society-specific email configuration
             EmailConfigurationService::loadAndApplySettings($this->emailLog->society_id);

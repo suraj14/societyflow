@@ -47,8 +47,7 @@ class MobileUserPayloadParityTest extends TestCase
         $byPassword = $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'correct-horse-battery-staple'])
             ->assertOk()->json('user');
 
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => '9811113333'])->assertOk();
-        $otp = MobileOtp::where('phone', '9811113333')->latest()->first()->otp;
+        $otp = $this->postJson('/api/v1/auth/send-otp', ['phone' => '9811113333'])->assertOk()->json('otp');
         $byOtp = $this->postJson('/api/v1/auth/verify-otp', ['phone' => '9811113333', 'otp' => $otp])
             ->assertOk()->json('user');
 

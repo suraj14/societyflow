@@ -99,8 +99,9 @@ class AuthSecurityTest extends TestCase
         $flat    = $this->makeFlat($society, $this->makeBuilding($society));
         $user    = $this->makeResidentUser($society, $flat, ['status' => 'inactive']);
 
+        // the same answer as for any number: nothing tells the caller this account exists - and no code is made
         $this->postJson('/api/v1/auth/send-otp', ['phone' => $user->phone])
-            ->assertStatus(404);
+            ->assertOk()->assertJsonMissingPath('otp');
 
         $this->assertSame(0, MobileOtp::where('phone', $user->phone)->count());
     }
@@ -114,12 +115,11 @@ class AuthSecurityTest extends TestCase
         $send = $this->postJson('/api/v1/auth/send-otp', ['phone' => '9222222222']);
         $send->assertOk();
 
-        $otp = MobileOtp::where('phone', '9222222222')->latest()->first();
-        $this->assertNotNull($otp);
+        $this->assertNotNull(MobileOtp::where('phone', '9222222222')->latest()->first());
 
         $verify = $this->postJson('/api/v1/auth/verify-otp', [
             'phone' => '9222222222',
-            'otp'   => $otp->otp,
+            'otp'   => $send->json('otp'),
         ]);
         $verify->assertOk()->assertJsonPath('success', true);
         $this->assertNotEmpty($verify->json('token'));
@@ -132,10 +132,9 @@ class AuthSecurityTest extends TestCase
         $flat    = $this->makeFlat($society, $this->makeBuilding($society));
         $this->makeResidentUser($society, $flat, ['phone' => '9333333333']);
 
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => '9333333333'])->assertOk();
+        $sent = $this->postJson('/api/v1/auth/send-otp', ['phone' => '9333333333'])->assertOk();
 
-        $otp = MobileOtp::where('phone', '9333333333')->latest()->first();
-        $wrong = $otp->otp === '1234' ? '4321' : '1234';
+        $wrong = $sent->json('otp') === '1234' ? '4321' : '1234';
 
         $this->postJson('/api/v1/auth/verify-otp', [
             'phone' => '9333333333',
@@ -169,12 +168,11 @@ class AuthSecurityTest extends TestCase
 
         $oldToken = $user->createToken('mobile-app')->plainTextToken;
 
-        $this->postJson('/api/v1/auth/forgot-password', ['email' => $user->email])->assertOk();
-        $otp = MobileOtp::where('phone', '9444444444')->latest()->first();
+        $forgot = $this->postJson('/api/v1/auth/forgot-password', ['email' => $user->email])->assertOk();
 
         $res = $this->postJson('/api/v1/auth/reset-password', [
             'email'                 => $user->email,
-            'otp'                   => $otp->otp,
+            'otp'                   => $forgot->json('otp'),
             'password'              => 'brandnewpass',
             'password_confirmation' => 'brandnewpass',
         ]);

@@ -59,7 +59,7 @@ See the end of this file (filled in from the live run).
 - Token stored in `shared_preferences` (app-private storage, not encrypted at rest). Acceptable for a non-rooted device; `flutter_secure_storage` would be the hardening step.
 - 401 → session cleared and user returned to login (`ApiService.onSessionExpired`).
 - No passwords/OTP/tokens are logged by the app (`dev.log` prints method + URL only); the backend no longer logs OTPs either.
-- Dev OTP is only returned by the API in `local`/`development` environments.
+- The one-time code is returned by the API ONLY when `OTP_EXPOSE_DEV_CODE=true` **and** the environment is `local`/`development`/`testing` (`MobileOtp::exposesDevCode()`); never in `production` or `staging`. A release build of the app ignores a code in the response anyway (`devOtpFrom`). Codes are stored as a keyed hash, one use, 5 minutes, 5 wrong tries, 30 s resend cooldown.
 - No debug routes; `debugShowCheckedModeBanner: false`.
 
 ## 8. Known limitations / blockers

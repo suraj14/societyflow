@@ -98,12 +98,20 @@ class EmailLogController extends BaseController
             return redirect()->back()->with('error', 'Maximum retry attempts exceeded.');
         }
 
+        // A password or reset link is never kept in the log, so there is nothing to rebuild the message from.
+        if ($emailLog->hasHiddenValues()) {
+            return redirect()->back()->with('error', 'This email carried a password or link that is not stored, so it cannot be re-sent from here. Reset the user\'s password to send a new one.');
+        }
+
+        $template = $emailLog->emailTemplate;
+        if (!$template) {
+            return redirect()->back()->with('error', 'The template for this email no longer exists, so it cannot be re-sent.');
+        }
+
         try {
-            $template = $emailLog->emailTemplate;
-            if ($template) {
-                \App\Jobs\SendEmailJob::dispatch($emailLog, $template);
-                return redirect()->back()->with('success', 'Email retry queued successfully.');
-            }
+            \App\Jobs\SendEmailJob::dispatch($emailLog, $template);
+
+            return redirect()->back()->with('success', 'Email retry queued successfully.');
         } catch (\Exception $e) {
             return redirect()->back()->with('error', 'Failed to queue retry: ' . $e->getMessage());
         }

@@ -31,6 +31,9 @@
         <env name="DB_FOREIGN_KEYS" value="true"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="EXTERNAL_MESSAGING_ENABLED" value="false"/>
+        <!-- The suite signs in with the code the API returns, which only a local/development/testing server that opted in does. -->
+        <env name="OTP_EXPOSE_DEV_CODE" value="true"/>
+        <env name="OTP_RESEND_COOLDOWN" value="0"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="FAST2SMS_API_KEY" value=""/>

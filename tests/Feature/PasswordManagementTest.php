@@ -38,7 +38,7 @@ class PasswordManagementTest extends TestCase
         $response = $this->post('/forgot-password', ['email' => 'lokesh@test.local']);
 
         $response->assertRedirect();
-        Notification::assertSentTo($user, ResetPassword::class);
+        Notification::assertSentTo($user, \App\Notifications\ResetPasswordNotification::class);   // Laravel's reset message, queued and retried
     }
 
     public function test_forgot_password_gives_the_same_response_for_an_unknown_email(): void

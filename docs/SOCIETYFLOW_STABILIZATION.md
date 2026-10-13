@@ -112,7 +112,7 @@ the operator checklist is the addendum in [CREDENTIAL_ROTATION.md](CREDENTIAL_RO
 | 11764 | `g:\xampp\mysql\bin\mysqld.exe --defaults-file=g:\xampp\mysql\bin\my.ini --standalone` | 3306 | `G:/xampp/mysql/data` (from `my.ini`) | `xampp-control.exe` | the user's XAMPP - **do not stop from here** |
 | 22728 | `G:\xampp\mysql\bin\mysqld.exe --no-defaults --datadir=<scratchpad>\mariadb_throwaway --port=3307` | 3307 | scratchpad `mariadb_throwaway` | an assistant shell | the throwaway test server started in this session |
 
-### Test evidence (final, after the last code change; shard runner now records each process's real exit code)
+### Test evidence for Round 2 (superseded by the Round 4 evidence below; the shard runner records each process's real exit code)
 
 Runner: `scripts/run-test-shards.ps1 -Engine sqlite|mariadb -Shards N -OutDir ...` (waits for every phpunit process, reads
 `Process.ExitCode`, treats a missing summary as failure, exits non-zero if any shard did). Smoke-tested first on two classes.
@@ -128,20 +128,125 @@ Runner: `scripts/run-test-shards.ps1 -Engine sqlite|mariadb -Shards N -OutDir ..
 
 Skips are the engine-specific tests and the baseline-capture helper (unchanged).
 
+## Round 3 (2026-10-13): mobile dashboard, direct services, guard visibility, manual templates
+
+| # | Area | Finding / root cause | Fix (main files) | Regression test | Status |
+|---|---|---|---|---|---|
+| 14 | **Quick overview cards** | Properties, Occupied, Vacant, Residents, Pending dues and Collected this month had **no tap handler and no destination** (no list screen or endpoint existed for the office). *Visitors today* opened the whole Visitors tab (every visitor, not today's: count and list disagreed). *Open tickets* worked only by switching a hidden tab. Cards were a bare `GestureDetector`: no ripple, no screen-reader role | `Api/AdminListApiController` (`/admin/units`, `/residents`, `/visitors`, `/bills`, `/collections`, `/guard-shifts`) built from `SocietyOverview`'s own rules; Flutter `admin_lists.dart`; `AppCard` is now one `InkWell` touch target with ripple + `Semantics(button)`; `SocietyOverview::visitors_today` uses the society's day | `AdminCardListsTest` (15: every card's total / amount equals its list, society isolation, role, verified-money-only, day boundaries); Flutter `role_navigation_test` "Admin dashboard cards" (8 cards x destination + back, header totals, loading/empty/error/403, load-more, semantics) | FIXED AND TESTED (device tap run: see Round 4) |
+| 15 | **Needs attention** | "New complaints" counted `status=open` but opened the *unresolved* list (open + in progress); "Overdue bills" row went nowhere; a Service-requests row existed | each row opens the list it counted (`complaints?status=open`, `visitors?scope=pending`, `bills?scope=overdue`, bookings); the Service-requests row is gone (API, web, and ignored client-side if an older server still sends it) | same tests + `AdminNeedsAttentionPanelTest` (changed deliberately) | FIXED AND TESTED |
+| 16 | **Service Requests removed from the UI** | Product decision. Removed: web Services "My Requests" button, web admin "Service requests to assign" attention row, mobile Requests->Services tab and assign/start/complete UI, the resident "Request" sheet, the `assign_service_requests` destination gate, new WhatsApp templates for `service_request`. **Kept on purpose**: the `service_requests` table and every historical row, the backend routes and notification code (`/api/v1/service-requests*`, `service-requests.*` web routes) so installed older apps do not break, provider records, complaints, maintenance tickets, facility bookings | `ServiceController` view, `DashboardController`, `admin_requests_screen.dart` (Bookings only), `services_screen.dart`, `WhatsAppPurposes::selectable()` | `ServiceDirectoryOnlyTest` (7), Flutter "the office has Bookings only" | FIXED AND TESTED. Whether to delete the backend later needs a data-retention decision |
+| 17 | **Services = direct-contact directory** | Category tiles -> provider list -> "ask the office" request sheet | flat list of this society's active providers: name, category, phone, price or "Price not specified", availability, **Call** (`tel:`) and **WhatsApp** (`https://wa.me/<digits>`, nothing pre-filled, nothing sent); a number outside 7-15 digits shows "No phone number listed"; search/category chips only when they help (more than 6 providers / more than one category) | Flutter `mobile_qa_test` Services group (6, with a recording launcher: exact `tel:` / `wa.me` URLs), `ServiceDirectoryOnlyTest` | FIXED AND TESTED (launch on a phone: not done, no device) |
+| 18 | **Guard / shift visibility** | The admin dashboard listed only guards already checked in | `GuardShiftService::dutyBoard()`: today's roster (+ an overnight shift still running) with `on_duty` only when a check-in row exists, `not_checked_in`, `scheduled`, `completed`, `absent`, `missed`, plus an `issue` for an inactive guard account or overlapping shifts; dashboard section "Guards today" + "View all" screen; society timezone and overnight windows via `Shift::windowStartingOn`. Data sources: `shift_assignments` (status, checked_in_at, checked_out_at), `shifts` (start/end), `gates`, `users`. The guard's own screen already showed gate / shift / status (`TodayShiftCard`, unchanged) | `AdminCardListsTest` (assigned is not present - mutation checked, overnight, inactive guard, overlap, society scope, no per-guard queries) | FIXED AND TESTED |
+| 19 | **Back navigation** | (a) a destination not on the bottom bar (Notices, Facilities, Services, Events) was a hidden tab with no back arrow; (b) after signing in, `pushReplacementNamed('/home')` left the OTP / login screens under Home, so Back showed a login screen to a signed-in admin (**seen on the phone**); same for register and logout; (c) forms discarded typed input silently; (d) the five-item bottom bar overflowed at 360 px with large text | `MainShell.openDest` pushes such destinations as routes; login / register / logout use `pushNamedAndRemoveUntil`; `DiscardGuard` on the complaint sheet and booking screen; bottom items share the width | Flutter `back_navigation_test`, `auth_stack_test`, role-navigation shell test | FIXED AND TESTED (Android Back by hand: only the sign-in stack case was seen on a device) |
+| 20 | **Message templates, manual** | WhatsApp templates could only be created by "Refresh from Fast2SMS" | WhatsApp templates are typed in like SMS ones: name, notification type, approved template name, Fast2SMS Message ID, language, text, which value fills each `{{n}}`, Active/Inactive, preview, Edit / Switch off / Delete (an active template must be switched off before delete), one active per type and society, stale-edit guard, double-submit guard. Saved templates are labelled **Not verified** (only a provider can approve one). Refresh / Sync / assign / unassign routes, controller actions and `WhatsAppTemplateSyncService` are removed; the 19 imported templates in the dev database were kept (editable, deletable) and the two attachments that existed became active templates (migration `2026_10_14_000001`). SMS form wording is the specified Message-ID help text. The send path uses the active template, in the chosen variable order, and fails (no placeholder text, no guess) if the event did not supply a value | `WhatsAppTemplateCrudTest` (25, incl. mutation check), `SmsTemplateCrudTest` (+4, 36), browser run 97/97 at 390/360/320/1366 | FIXED AND TESTED, MOCKED ONLY (no real send) |
+
+## Round 4 (2026-10-13): OTP, email, SMS and WhatsApp production readiness
+
+### Findings (file paths, root cause, severity) and what was done
+
+| ID | Sev | Finding and root cause | Fix (files) | Test | Status |
+|---|---|---|---|---|---|
+| O1 | High | **The one-time code could be returned in an API answer on any server whose `APP_ENV` was `local`/`development`/`testing`** (`OtpAuthController` tested the environment name only). That is what a phone showed as "Development server: code ...". The development `.env` says `APP_ENV=production`, so the server that showed it was running with a different environment than the file: the one I watched on the phone this session was my own isolated test server started with `APP_ENV=local`; **where the earlier "5228" screenshot came from could not be established from here**. The code was also appended to the *message* text when the SMS failed. (Do not assume a configuration default proves what a running server uses.) | `config/otp.php`, `MobileOtp::exposesDevCode()`: needs `OTP_EXPOSE_DEV_CODE=true` **and** a local/development/testing environment **and** not production; never staging; the `Dev OTP:` message text is gone; the app ignores a code in the response in a release build (`devOtpFrom`) | `OtpLifecycleTest` (production and staging never return it even with the flag; default off; mutation checked), Flutter `otp_flow_test` | FIXED AND TESTED |
+| O2 | High | Codes were stored **in plain text** (`mobile_otps.otp`) and read back in tests | HMAC-SHA256 with the app key over phone + purpose + code; column widened; waiting codes retired by the migration (`2026_10_14_000002`) | `OtpLifecycleTest`, `NewMigrationsSafetyTest` | FIXED AND TESTED |
+| O3 | High | A login code and a password-reset code shared one table and one phone number: **a login code could be spent on a password reset** | `purpose` column, bound into the hash; issuing a code retires older ones | `OtpLifecycleTest` | FIXED AND TESTED |
+| O4 | Med | Code lookup, attempts and "mark used" were separate steps: two simultaneous correct submissions could both succeed | one transaction, conditional `UPDATE ... WHERE is_used = 0` (one winner), atomic attempt counter | `OtpLifecycleTest` (spent exactly once) | FIXED AND TESTED |
+| O5 | Med | **Account enumeration**: unknown number -> 404 "No active account", registered -> 200; different wording for no-code / expired / wrong; no per-IP limit, so a script could walk number lists | same answer for known and unknown numbers (no SMS for unknown), one answer for every bad code, per-IP limit (20/hour), 30 s resend cooldown (`otp_cooldown`, `retry_after`), 3 per number per 10 min kept, daily guess ceiling kept | `OtpLifecycleTest` + 7 existing OTP suites updated for the new wording / hashed storage | FIXED AND TESTED. Still enumerable: `/auth/register` and `/auth/check-account` answer 404 for unknown e-mail/phone pairs (not changed) |
+| D1 | **High** | **MariaDB / MySQL silently rewrote timestamp columns on every UPDATE.** With `explicit_defaults_for_timestamp` off (MariaDB 10.4, MySQL 5.7 default) a NOT NULL `timestamp` without a default becomes `... ON UPDATE CURRENT_TIMESTAMP`. `mobile_otps.expires_at` was one: every wrong guess or "mark used" overwrote the expiry with the database clock (local zone, read back as UTC = hours in the future), so **an expired code stayed valid**; `notice_reads.read_at` and `society_document_acknowledgements.acknowledged_at` were the other two (a recorded time could be overwritten). SQLite never shows it; only the MariaDB run of the new lifecycle test did (it failed on MariaDB 6 of 6 times, passed on SQLite) | migration `2026_10_14_000004` (explicit default, no "on update"; no-op on SQLite). Already-overwritten read / acknowledgement times cannot be reconstructed | `TimestampAutoUpdateTest` (asks the database's own catalogue; passes on both engines), `OtpLifecycleTest` on MariaDB | FIXED AND TESTED (MariaDB) |
+| O6 | Med | A provider that echoes the request (`"invalid OTP 4821"`) put the live code into `laravel.log` (the key was redacted, the code was not) | `SmsService::safeProviderMessage(..., maskNumbers)` on the OTP route | `OtpLifecycleTest::test_neither_the_code_nor_the_key_reaches_the_log` (it failed before the fix) | FIXED AND TESTED |
+| S1 | High | `SmsService` called `env()` outside `config/`: after `php artisan config:cache` (normal production step) the .env fallback for the Fast2SMS key / route / sender / template / OTP id silently stops, while it works on a laptop | `config/sms.php`, `SmsService::getSetting` reads `config()`; a test fails the build if `env()` appears in `app/` | `SmsConfigCacheSafetyTest` | FIXED AND TESTED |
+| S2 | High | A Fast2SMS key in the server environment switched "Integration active" **back on** for OTP, so a society that had turned SMS off still had codes sent (and cached/uncached servers behaved differently) | removed; off means off | `SmsConfigCacheSafetyTest` | FIXED AND TESTED |
+| E1 | High | `email_logs.variables` kept every template variable, **including each new account's temporary password**, and the Delivery Log detail page printed it | `EmailLog::scrubbed` ("[hidden]"), retry refuses such a message, `SendEmailJob` never sends "[hidden]", migration `2026_10_14_000003` hides what is already stored (irreversible; the dev database held none, production is unknown) | `EmailDeliveryTest`, `NewMigrationsSafetyTest` (mutation checked) | FIXED AND TESTED |
+| E2 | Med | The notification job (`DispatchEventNotification`) carries the same variables in its queue payload | `ShouldBeEncrypted` | `EmailDeliveryTest` | FIXED AND TESTED (the same `APP_KEY` must be on every worker) |
+| E3 | Med | Password-reset link: an SMTP failure threw a **server error for registered addresses only** (a page failure and an enumeration oracle); sent inline, never retried | `ResetPasswordNotification` (queued, 3 tries with back-off); `AuthController::forgotPassword` answers identically and logs only the exception class | `EmailDeliveryTest` (failing transport; mutation checked), 3 older tests re-pointed at the new class | FIXED AND TESTED, MOCKED ONLY |
+| E4 | Low | Email retry with no template returned an empty page | explicit message | `EmailDeliveryTest` | FIXED AND TESTED |
+| E5 | Info | The `password_reset` template / `PasswordReset` listener is a documented dead path: the link is Laravel's own notification through the server's default mailer (`MAIL_*`), **not** the society's SMTP. `jobs` / `failed_jobs` tables have no migration in this repository | documented; the deployment checklist says how to create the failed-jobs table | - | NOT CHANGED (design) |
+| W1 | Med | WhatsApp send used the legacy settings key; templates could not be managed | see Round 3 #20; the send path uses the active record, the chosen variable order, and fails on a missing value | `WhatsAppTemplateCrudTest` | FIXED AND TESTED, MOCKED ONLY |
+| P1 | Info | Provider contract re-checked against docs.fast2sms.com on 2026-10-13 (pages read, no request sent): `POST https://www.fast2sms.com/dev/otp/send`, header `Authorization`, JSON `mobile` (10 digits), `otp_id`, optional `otp`, `otp_expiry` (1-10080), `otp_length`, `variables_values`; 200 `{return:true, request_id}`; documented errors 400 "Invalid OTP ID" and 401 "Invalid Authorization key". `POST /dev/otp/verify` exists but is **not used**: SocietyFlow supplies and checks its own code. Our request sends `mobile`, `otp_id`, `otp`, `otp_expiry` exactly | `Fast2SmsOtpContractTest` (14) | not changed | VERIFIED AGAINST DOCS; an OTP template with extra `{#var#}` placeholders would need `variables_values` (not supported, not tested) |
+
+### Which "dev shortcuts" exist now
+Only `OTP_EXPOSE_DEV_CODE` (above). There is no hard-coded code, no bypass of verification, no simulated success in production code paths. `dev_mode` is the word for "nothing was attempted" and now always means *not sent*.
+
+### Event / channel map (only events that exist in the code)
+
+"Template" = what the send needs. "Missing / inactive" = what happens then. Status: **mocked** = automated test with fake HTTP/mail, **log** = verified through the log mail driver in a browser, **not live** = never sent to a real provider.
+
+| Event (dispatch point) | Channels | Template used | Variables | Recipients and scope | Missing / inactive template | Status |
+|---|---|---|---|---|---|---|
+| OTP login / OTP password reset (`OtpAuthController`) | SMS | Fast2SMS **OTP ID** (Settings -> SMS, route OTP) - not a Message Template, not a DLT Message ID | the code | the one number asked for, only if exactly one active account has it | 503 `sms_not_configured` / `sms_failed`, the code is retired | mocked, not live |
+| Web password reset link (`AuthController`) | email | Laravel reset message (server default mailer) | token + email | the account's own address | identical page; failure logged; queued retry | mocked + log (browser 44/44), not live |
+| New account (`UserCreated`) | email | `user_registered` | name, temporary password, login URL | the new user | warning logged, nothing sent | mocked, not live |
+| Notice published | email, SMS, WhatsApp, in-app | email `notice_published`; SMS purpose `notice`; WhatsApp `notice` | title, society | residents of the notice's society/audience (roles scoped) | not sent, logged "skipped" | mocked, not live |
+| Payment verified (`PaymentReceived`, only after an admin verifies) | email, WhatsApp, in-app | `payment_success`; WhatsApp `payment` | amount, receipt, date | the payer(s) of that unit | not sent | mocked, not live |
+| Bill generated / due reminder | email, WhatsApp (generated) | `bill_generated`; WhatsApp `bill`; reminder slug `bill-due-reminder` | amount, due date, bill no. | residents of the unit | not sent | mocked, not live |
+| Complaint created / status changed | email, WhatsApp (status), in-app | `ticket_updated`, slug `ticket-created`; WhatsApp `complaint` | ref, title, status | creator (status), admins (created) | not sent | mocked, not live |
+| Visitor approved / denied | email, WhatsApp (approved), in-app | `visitor_approved`; slug `visitor-denied`; WhatsApp `visitor` | visitor, date | the host resident | not sent | mocked, not live |
+| Gate pass created / revoked | email (both), SMS (revoked only, purpose `gate_pass`), WhatsApp (both, purpose `access_pass`) | `access_pass_created/revoked`; SMS template; WhatsApp `access_pass` | person, status | the pass creator | not sent | mocked, not live |
+| Event announced / changed | email, WhatsApp, in-app | `event_created`, `event_changed`; WhatsApp `event` | name, date, what happened | owners of the event's audience | not sent | mocked, not live |
+| Society document published | email, SMS, WhatsApp, in-app | `society_document_published`; SMS `document`; WhatsApp `document` | title, version | residents | not sent | mocked, not live |
+| Facility booking decided / cancelled / removed by the office | email, in-app | `facility_booking_status_updated` | facility, date, status | the requester (office actions); the office (resident cancels) | not sent | mocked, not live |
+| Guard roster change | in-app only | none (no approved external template) | shift, gate, date | that guard only | n/a | mocked |
+| Service request events | email (legacy, UI removed) | `service-request-*` | - | - | - | kept for compatibility, not exercised by any screen |
+
+Every channel respects: the global `EXTERNAL_MESSAGING_ENABLED`, the society's "Integration active" switch, `NotificationRules` opt-outs, duplicate suppression (`SendOnce` for SMS/WhatsApp, unique job keys for email), and society scoping of recipients.
+
+### Journeys actually completed (and not)
+
+| Journey | Done? | How |
+|---|---|---|
+| OTP request -> wrong code -> right code -> replay -> cooldown -> unknown number, over real HTTP | yes | `Invoke-WebRequest` against a running server on :8124 (`APP_ENV=local`, `OTP_EXPOSE_DEV_CODE=true`, kill switch on so no SMS left): send 200 generic message + code; resend at once 429 `otp_cooldown` `retry_after` 30; unknown number 200 generic, no code; wrong code 422 generic; right code 200 + token; replay 422 |
+| The same, on the app | **no (physical)** | earlier in the session a phone was connected: I signed in by e-mail on it (isolated server), saw the admin dashboard, the Needs-attention rows and the Quick overview cards, and found the stack bug of Round 3 #19; the OTP screen on the phone showed the development line from my own test server. The phone was unplugged before the post-hardening OTP run, so **the OTP journey, the card taps and the Call / WhatsApp launch were NOT completed on a physical device** |
+| Flutter OTP client against the real server answers | yes (mocked transport, real bodies) | `otp_flow_test` replays the exact JSON captured from the running server through the real `AuthNotifier` |
+| Web password reset in Chrome at 390/360/320/1366 px | yes | request link (also for an unknown address), mailed link taken from the log mailer, open, weak password refused, reset, link reuse refused, sign in with the new password: 44/44 checks |
+| A real SMS, WhatsApp message or e-mail received on a device | **no** | nothing real was sent; see `MESSAGING_STAGING_AND_DEPLOYMENT.md` part A |
+
+### Provider calls
+
+Mocked: every SMS, WhatsApp and SMTP interaction in the test suites (recording transports, `Http::fake`, `Mail::fake`, a transport that throws, the outbound guard in `tests/TestCase.php`). Actual requests made by the assistant in this round: a read-only `GET https://societyflow.joboapps.com/api/v1/health` (200, HTTPS, HSTS) and reading two public documentation pages. No SMS, OTP, WhatsApp or e-mail was sent to anyone; **real receipt is not confirmed for any channel**.
+
+### Test evidence for this round
+
+Runner for both PHP suites: `scripts/run-test-shards.ps1` (waits for every phpunit process, reads each real `Process.ExitCode`, treats a shard with no summary as failed, exits non-zero if any shard did). Final runs, after the last code change:
+
+| Suite | Command | Result | Exit codes |
+|---|---|---|---|
+| PHP, SQLite in memory, 8 shards | `scripts/run-test-shards.ps1 -Engine sqlite -Shards 8 -OutDir ...` | **2112 tests, 11864 assertions, 0 failures, 0 errors, 6 skipped** | 8 of 8 = 0 |
+| PHP, MariaDB 10.4 (throwaway server :3307, own data directory), 6 shards | `scripts/run-test-shards.ps1 -Engine mariadb -Shards 6 -OutDir ...` | **2112 tests, 11863 assertions, 0 failures, 0 errors, 3 skipped** | 6 of 6 = 0 |
+| Flutter tests | `flutter test` | **252 passed** | 0 |
+| Flutter analyze | `flutter analyze` | 2 known info-level `value` deprecations, 0 errors / warnings | 1 (the two infos only) |
+| Flutter release build | `flutter build apk --release` | built `app-release.apk` (104.8 MB). **Debug-signed**: there is no `android/key.properties` in this checkout, so it is not a store build | 0 |
+| PHP lint, changed files | `php -l` | clean | 0 |
+| `git diff --check` | | clean | 0 |
+
+Skips: five engine-specific tests / helpers that were skipped before, plus `TimestampAutoUpdateTest` on SQLite (MySQL-only behaviour).
+
+**The MariaDB run earned its keep.** The first MariaDB run of this round failed one test (`OtpLifecycleTest`, shard exit 1) that passed on SQLite: finding D1 above. It was reproduced six times in isolation, traced to the engine's implicit `ON UPDATE CURRENT_TIMESTAMP`, fixed by migration `2026_10_14_000004`, and the whole suite was re-run (the table above is that re-run).
+
+Mutation checks (the test must fail when the protection is removed; each was restored and re-run green): production gate of the dev code (6 failures), the scrub of secrets from the e-mail log (5), the try/catch around the reset-link send (1), "assigned is not present" in the duty board, verified-money-only collections, an inactive WhatsApp template being used (2), a dead dashboard card (2). One mutation survived by design: ignoring `purpose` when spending a code still fails, because the purpose is also inside the hash (defence in depth).
+
+Browser (real Chrome, isolated copy, messaging off, widths 390 / 360 / 320 / 1366): password + SMS + WhatsApp settings + Message Templates + guard roster 124/124 (Round 2 run); manual WhatsApp / SMS template CRUD and pages 97/97; **web password-reset journey 44/44** (request incl. unknown address, mailed link read from the log mailer, weak password refused, reset, link reuse refused, sign in with the new password). Only template / settings / roster / reset endpoints were called; no send, test, connect or refresh endpoint.
+
+Development database (`database/database.sqlite`): migrated after verified backups (`database-pre-migrate-whatsapp-20261013.sqlite`, `database-pre-migrate-otp-email-20261013.sqlite` in `C:\Users\USER\SocietyFlow-backups`); 19 imported WhatsApp templates kept, 2 existing attachments carried over, 0 stored secrets found in its e-mail log, 1 waiting code retired. A read-only `GET /api/v1/health` on the production host answered 200 over HTTPS (HSTS, Cloudflare).
+
+
 ## Remaining limitations (not claimed fixed)
 
-- Release status stays **READY FOR STAGING, NOT READY FOR PRODUCTION**. Blockers: credential rotation (operator), staging delivery
-  verification with approved recipients, Android device run, mobile payment-claim flow decision, Society Expenses / utility bill
-  deep audit, load testing.
-- Live SMS / WhatsApp / email delivery: **not tested**. The DLR delivery check is not implemented (response format undocumented).
-- Android device / emulator: **not tested** (none available). Flutter widget/unit tests only.
-- Shift notices are in-app only; an external channel needs an approved DLT / WhatsApp template and its own toggle.
-- Admin deleting a verified payment is allowed (audited) - there is no refund / reversal workflow; adding one is a product decision.
+- Release status stays **READY FOR STAGING, NOT READY FOR PRODUCTION**.
+- **Live delivery is unverified for OTP SMS, notification SMS, WhatsApp and every e-mail.** Prerequisites: rotated credentials, an approved tester number and mailbox, approved DLT / WhatsApp templates, `EXTERNAL_MESSAGING_ENABLED=true` on staging only. Procedure: `MESSAGING_STAGING_AND_DEPLOYMENT.md`.
+- Delivery receipts (DLR) are not read: "sent" always means *accepted by the provider*.
+- Physical Android: the post-hardening OTP journey and the Call / WhatsApp launch of the directory were not run on a device (none connected at the end). A release build compiles (see evidence) but it is debug-signed here: no `key.properties` in this checkout.
+- An OTP template with several `{#var#}` placeholders needs `variables_values`; not implemented.
+- `/auth/register` and `/auth/check-account` still reveal whether an e-mail/phone pair exists.
+- `jobs` / `failed_jobs` tables have no migration; with a real queue they must be created.
+- The password-reset mail uses the server's default mailer, not the society's SMTP.
+- The production server's deployed commit, `APP_ENV` and `APP_DEBUG` are unknown from here (only its health endpoint was read).
+- Shift notices are in-app only; Accountant stays read-only on payments; there is no refund workflow; mobile "Pay Rent" is view-only.
 - No claim is made that the application has zero bugs; this document lists what was found, fixed and verified.
 
 ## Operator actions
 
-- `php artisan migrate --force` for the two new migrations (`2026_10_13_000001`, `2026_10_13_000002`) after a backup. The dev DB was migrated after a backup.
-- Rotate the Fast2SMS key that was pasted in chat (not done by me). `.env` was not touched.
-- Password minimum is now 8 everywhere (mobile used to accept 6).
-- SMS notifications now require the "Integration active" master switch.
+- Back up, then `php artisan migrate --force` for the pending migrations (`2026_10_13_000001`, `2026_10_13_000002`, `2026_10_14_000001..4`). The development database was migrated after verified backups (`C:\Users\USER\SocietyFlow-backups\database-pre-migrate-whatsapp-20261013.sqlite`, `...-otp-email-20261013.sqlite`).
+- **Development login by OTP now needs real SMS or an explicit opt-in**: a local server shows the code only with `OTP_EXPOSE_DEV_CODE=true` in its own environment *and* `APP_ENV=local` (not set by the assistant; `.env` untouched). The development `.env` says `APP_ENV=production`, so the :8000 server will send a real SMS (when messaging is enabled and SMS is configured) and never show the code.
+- Rotate the exposed Fast2SMS key (`CREDENTIAL_ROTATION.md`); enter keys only through Settings.
+- Create the failed-jobs table before using a real queue; run a supervised worker.
+- Set `APP_URL` to the HTTPS domain, `APP_DEBUG=false`, `LOG_LEVEL` no lower than `warning`.
+- Password minimum is 8 everywhere; SMS notifications need the "Integration active" switch; resident payments are pending claims; Accountant cannot verify.

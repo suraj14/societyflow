@@ -19,11 +19,10 @@ class OtpPhoneFormatTest extends TestCase
 
     private function loginByOtp(string $typed): \Illuminate\Testing\TestResponse
     {
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => $typed])->assertOk();
-        $otp = MobileOtp::where('phone', '9811112222')->latest()->first();
-        $this->assertNotNull($otp, 'the OTP is filed under the bare 10-digit number');
+        $send = $this->postJson('/api/v1/auth/send-otp', ['phone' => $typed])->assertOk();
+        $this->assertNotNull(MobileOtp::where('phone', '9811112222')->latest()->first(), 'the OTP is filed under the bare 10-digit number');
 
-        return $this->postJson('/api/v1/auth/verify-otp', ['phone' => $typed, 'otp' => $otp->otp]);
+        return $this->postJson('/api/v1/auth/verify-otp', ['phone' => $typed, 'otp' => $send->json('otp')]);
     }
 
     /** @dataProvider storedFormats */
@@ -73,7 +72,8 @@ class OtpPhoneFormatTest extends TestCase
         // trunk-0 form): the SQL suffix narrowing must not accept it.
         $this->makeUserWithRole($society, 'Tenant', ['phone' => '19811112222']);
 
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => '9811112222'])->assertStatus(404);
+        // an unknown number gets the same answer as a known one - and no code, no SMS
+        $this->postJson('/api/v1/auth/send-otp', ['phone' => '9811112222'])->assertOk()->assertJsonMissingPath('otp');
         $this->assertSame(0, MobileOtp::count());
     }
 

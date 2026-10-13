@@ -6,6 +6,7 @@ use App\Models\EmailLog;
 use App\Services\DynamicEmailService;
 use App\Support\NotificationRules;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -32,7 +33,12 @@ use Illuminate\Support\Facades\Log;
  * afterCommit()) is real and takes effect the moment a worker environment
  * is configured, with no further code change.
  */
-class DispatchEventNotification implements ShouldQueue, ShouldBeUnique
+/**
+ * ShouldBeEncrypted: this job carries the template variables, which for a new account include the temporary password.
+ * On a real queue (redis, a worker) the stored payload is encrypted with the application key, so neither the queue nor
+ * a failed job holds it in the clear. (The same APP_KEY must be on every worker.)
+ */
+class DispatchEventNotification implements ShouldQueue, ShouldBeUnique, ShouldBeEncrypted
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 

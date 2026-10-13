@@ -48,10 +48,9 @@ class OtpAmbiguousPhoneTest extends TestCase
     /** Send + verify as the current app does; returns the verify response. */
     private function verifyAsChooserApp()
     {
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => $this->phone, 'can_choose_account' => true])->assertOk();
-        $otp = MobileOtp::where('phone', $this->phone)->latest()->first();
+        $send = $this->postJson('/api/v1/auth/send-otp', ['phone' => $this->phone, 'can_choose_account' => true])->assertOk();
 
-        return $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $otp->otp, 'can_choose_account' => true]);
+        return $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $send->json('otp'), 'can_choose_account' => true]);
     }
 
     // ── builds without an account chooser: refused, never guessed ─────────
@@ -84,14 +83,13 @@ class OtpAmbiguousPhoneTest extends TestCase
         $society = $this->makeSociety();
         $this->makeUserWithRole($society, 'Admin', ['phone' => $this->phone]);
 
-        $this->postJson('/api/v1/auth/send-otp', ['phone' => $this->phone])->assertOk();
-        $otp = MobileOtp::where('phone', $this->phone)->latest()->first();
+        $send = $this->postJson('/api/v1/auth/send-otp', ['phone' => $this->phone])->assertOk();
 
         // A second account picks up the same number before the code is
         // verified (e.g. an office data-entry change mid-flow).
         $this->makeUserWithRole($society, 'Guard', ['phone' => $this->phone]);
 
-        $r = $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $otp->otp]);
+        $r = $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $send->json('otp')]);
 
         $r->assertStatus(409)->assertJson(['success' => false]);
         $this->assertStringNotContainsString('token', $r->getContent());

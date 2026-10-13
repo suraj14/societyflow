@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Notifications\ResetPasswordNotification;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -40,12 +41,12 @@ class PasswordResetEdgeCasesTest extends TestCase
 
         $this->post('/forgot-password', ['email' => $user->email])->assertSessionHas('success');
 
-        Notification::assertSentTo($user, ResetPassword::class, function (ResetPassword $n) use ($user) {
+        Notification::assertSentTo($user, ResetPasswordNotification::class, function (ResetPassword $n) use ($user) {
             $mail = $n->toMail($user);
 
             return str_contains($mail->actionUrl, '/reset-password/' . $n->token) && str_contains($mail->actionUrl, urlencode($user->email));
         });
-        Notification::assertSentToTimes($user, ResetPassword::class, 1);
+        Notification::assertSentToTimes($user, ResetPasswordNotification::class, 1);   // Laravel's reset message, queued and retried
     }
 
     public function test_the_confirmation_messages_are_actually_shown_to_the_person(): void
@@ -71,7 +72,7 @@ class PasswordResetEdgeCasesTest extends TestCase
         $again = $this->post('/forgot-password', ['email' => $user->email]);
 
         $again->assertSessionHas('success');   // identical wording: the throttle is not an oracle
-        Notification::assertSentToTimes($user, ResetPassword::class, 1);
+        Notification::assertSentToTimes($user, ResetPasswordNotification::class, 1);   // Laravel's reset message, queued and retried
     }
 
     public function test_an_expired_token_is_refused_and_the_password_is_unchanged(): void

@@ -45,9 +45,25 @@ class OtpAuthController extends Controller
 
         $phone = $this->mobileNumber($request->phone);
 
+        // Per IP first: a script walking a list of numbers is stopped before it learns anything about any of them.
+        $ipKey = 'otp-send-ip:' . $request->ip();
+        if (RateLimiter::tooManyAttempts($ipKey, (int) config('otp.send_per_ip_hour', 20))) {
+            return response()->json(['success' => false, 'message' => 'Too many OTP requests. Try again later.'], 429);
+        }
+        RateLimiter::hit($ipKey, 3600);
+
+        // Resend cooldown: one code per number per 30 seconds (the app's Resend button waits the same time).
+        $cooldownKey = 'otp-cooldown:' . $phone;
+        $cooldown = (int) config('otp.resend_cooldown_seconds', 30);
+        if ($cooldown > 0 && RateLimiter::tooManyAttempts($cooldownKey, 1)) {
+            $seconds = RateLimiter::availableIn($cooldownKey);
+
+            return response()->json(['success' => false, 'code' => 'otp_cooldown', 'retry_after' => $seconds, 'message' => "Please wait {$seconds} seconds before asking for another code."], 429);
+        }
+
         // Rate limit: max 3 OTP requests per phone per 10 minutes
         $rateLimitKey = 'otp-send:' . $phone;
-        if (RateLimiter::tooManyAttempts($rateLimitKey, 3)) {
+        if (RateLimiter::tooManyAttempts($rateLimitKey, (int) config('otp.send_per_phone', 3))) {
             $seconds = RateLimiter::availableIn($rateLimitKey);
             return response()->json([
                 'success' => false,
@@ -55,15 +71,17 @@ class OtpAuthController extends Controller
             ], 429);
         }
         RateLimiter::hit($rateLimitKey, 600); // 10 min window
+        if ($cooldown > 0) {
+            RateLimiter::hit($cooldownKey, $cooldown);
+        }
 
-        // Check if an active account has this phone.
         $accounts = $this->activeAccountsFor($phone);
 
+        // The same answer whether or not an account has this number, so numbers cannot be tested for membership; no code
+        // is made and no SMS is sent for a number nobody has.
+        $answer = ['success' => true, 'message' => 'If this number is registered, a code has been sent to ' . $this->maskPhone($phone) . '.'];
         if ($accounts->isEmpty()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No active account found with this mobile number. Please contact your society admin.',
-            ], 404);
+            return response()->json($answer);
         }
 
         // Several active accounts share this number. An app build that can
@@ -82,22 +100,9 @@ class OtpAuthController extends Controller
             ], 409);
         }
 
-        // Invalidate any existing unused OTPs for this phone
-        MobileOtp::where('phone', $phone)->where('is_used', false)->update(['is_used' => true]);
+        [$otpRow, $otp] = MobileOtp::issue($phone, MobileOtp::PURPOSE_LOGIN);
 
-        // Generate 4-digit OTP
-        $otp = str_pad(random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
-
-        MobileOtp::create([
-            'phone'      => $phone,
-            'otp'        => $otp,
-            'attempts'   => 0,
-            'is_used'    => false,
-            'expires_at' => now()->addMinutes(MobileOtp::TTL_MINUTES),
-        ]);
-
-        // Send OTP via the SMS settings of the account's society (Fast2SMS;
-        // falls back to dev mode if not configured). A number on accounts in
+        // Send OTP via the SMS settings of the account's society (Fast2SMS). A number on accounts in
         // several societies is tried society by society until one provider
         // accepts it, so one society's broken setup does not lock out a
         // person another of their societies can reach.
@@ -110,35 +115,29 @@ class OtpAuthController extends Controller
             }
         }
 
-        $responseData = ['success' => true, 'message' => 'OTP sent successfully to ' . $this->maskPhone($phone)];
+        $responseData = $answer;
 
-        // DEV ONLY — OTP is exposed in the response strictly in local/development.
-        // Never in production or staging, even when the SMS provider is
-        // unconfigured or fails ('dev_mode' fallback previously leaked it).
-        // 'testing' is the automated suite (never deployed), which has no SMS
-        // provider; it behaves like local so OTP flows can be exercised.
-        $isDevEnv = app()->environment(['local', 'development', 'testing']);
-
-        if ($isDevEnv) {
+        // DEV ONLY: the code is returned in the response only when this server is local / development / testing AND
+        // OTP_EXPOSE_DEV_CODE is on (config/otp.php). Never in production or staging, whatever else is configured.
+        $exposeDevCode = MobileOtp::exposesDevCode();
+        if ($exposeDevCode) {
             $responseData['otp'] = $otp;
         }
 
-        // Outside local/dev the OTP only ever reaches the user by SMS, so a
-        // send that did not happen must be reported as a failure. This used to
-        // answer success:true ("Could not send SMS") whenever Fast2SMS rejected
-        // the request or SMS was not configured, and the app then waited on an
-        // OTP screen for a code that was never sent.
+        // Everywhere else the code only ever reaches the person by SMS, so a send that did not happen is a failure -
+        // reported as one, and the code is retired (there is nothing to type).
         $notSent = empty($smsResult['sent']);
         $skipped = SmsService::wasSkipped($smsResult);   // switched off / not set up: nothing was attempted
 
-        if ($notSent && !$isDevEnv) {
+        if ($notSent && !$exposeDevCode) {
             Log::warning('OTP SMS not sent', [
                 'society_id' => $societyIds->implode(','),
                 'reason'     => $skipped ? (string) ($smsResult['status'] ?? 'sms_not_configured') : 'provider_rejected',
                 'provider'   => SmsService::safeProviderMessage((string) ($smsResult['message'] ?? '')),
             ]);
-            MobileOtp::where('phone', $phone)->where('is_used', false)->update(['is_used' => true]);
+            $otpRow->retire();
             RateLimiter::clear($rateLimitKey); // our failure, not the user's attempt
+            RateLimiter::clear($cooldownKey);
 
             return response()->json([
                 'success' => false,
@@ -147,10 +146,6 @@ class OtpAuthController extends Controller
                     ? 'OTP login by SMS is not set up for your society yet. Please log in with email and password, or ask your society office.'
                     : 'We could not send the OTP SMS right now. Please try again in a minute, or log in with email and password.',
             ], 503);
-        }
-
-        if ($notSent) {
-            $responseData['message'] = 'Could not send SMS. Dev OTP: ' . $otp;
         }
 
         return response()->json($responseData);
@@ -191,38 +186,19 @@ class OtpAuthController extends Controller
             ], 429);
         }
 
-        $otpRecord = MobileOtp::where('phone', $phone)
-            ->where('is_used', false)
-            ->latest()
-            ->first();
-
-        if (!$otpRecord) {
-            return response()->json(['success' => false, 'message' => 'No OTP found. Please request a new one.'], 422);
-        }
-
-        if ($otpRecord->isExpired()) {
-            return response()->json(['success' => false, 'message' => 'OTP has expired. Please request a new one.'], 422);
-        }
-
-        if ($otpRecord->attempts >= 5) {
-            return response()->json(['success' => false, 'message' => 'Too many incorrect attempts. Please request a new OTP.'], 422);
-        }
-
-        if ($otpRecord->otp !== $request->otp) {
-            $otpRecord->incrementAttempts();
+        // One answer for every kind of bad code (wrong, expired, already used, replaced by a newer one, or guessed too
+        // often) and for a number that never asked for one: nothing here tells an attacker which numbers are registered.
+        if (!MobileOtp::check($phone, MobileOtp::PURPOSE_LOGIN, (string) $request->otp)) {
             RateLimiter::hit($rateLimitKey, 900);
             RateLimiter::hit($dailyKey, 86400);
-            $remaining = 5 - $otpRecord->fresh()->attempts;
-            return response()->json([
-                'success' => false,
-                'message' => "Invalid OTP. {$remaining} attempt(s) remaining.",
-            ], 422);
+
+            return response()->json(['success' => false, 'message' => 'That code is not valid or has expired. Check it, or request a new one.'], 422);
         }
 
-        // OTP is valid
-        $otpRecord->markUsed();
+        // OTP is valid (and spent: check() used it up)
         RateLimiter::clear($rateLimitKey);
         RateLimiter::clear('otp-send:' . $phone);
+        RateLimiter::clear('otp-cooldown:' . $phone);
 
         // Find the account(s). Same rule as sendOtp: a number that (by now)
         // matches more than one active account is never resolved by picking
@@ -355,22 +331,25 @@ class OtpAuthController extends Controller
 
         $phone = $this->normalizePhone($user->phone);
 
-        MobileOtp::where('phone', $phone)->where('is_used', false)->update(['is_used' => true]);
+        // Same resend cooldown as the login code (the response is identical, so this reveals nothing).
+        $cooldownKey = 'otp-cooldown:' . $phone;
+        $cooldown = (int) config('otp.resend_cooldown_seconds', 30);
+        if ($cooldown > 0) {
+            if (RateLimiter::tooManyAttempts($cooldownKey, 1)) {
+                return response()->json($generic);
+            }
+            RateLimiter::hit($cooldownKey, $cooldown);
+        }
 
-        $otp = str_pad(random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
+        [$otpRow, $otp] = MobileOtp::issue($phone, MobileOtp::PURPOSE_RESET);
 
-        MobileOtp::create([
-            'phone'      => $phone,
-            'otp'        => $otp,
-            'attempts'   => 0,
-            'is_used'    => false,
-            'expires_at' => now()->addMinutes(MobileOtp::TTL_MINUTES),
-        ]);
-
-        SmsService::sendOtp($phone, $otp, $user->society_id ?? null);
-
+        $sms = SmsService::sendOtp($phone, $otp, $user->society_id ?? null);
+        if (empty($sms['sent']) && !MobileOtp::exposesDevCode()) {
+            $otpRow->retire();   // nothing was delivered, so there is no code to type
+            Log::warning('Password-reset OTP SMS not sent', ['society_id' => $user->society_id, 'reason' => (string) ($sms['status'] ?? 'provider_rejected')]);
+        }
         $responseData = $generic;
-        if (app()->environment(['local', 'development'])) {
+        if (MobileOtp::exposesDevCode()) {
             $responseData['otp'] = $otp;
         }
 
@@ -411,23 +390,10 @@ class OtpAuthController extends Controller
 
         $phone = $this->normalizePhone($user->phone);
 
-        $otpRecord = MobileOtp::where('phone', $phone)
-            ->where('is_used', false)
-            ->latest()
-            ->first();
-
-        if (!$otpRecord || $otpRecord->isExpired() || $otpRecord->attempts >= 5) {
-            return response()->json(['success' => false, 'message' => 'Invalid or expired OTP. Please request a new one.'], 422);
+        if (!MobileOtp::check($phone, MobileOtp::PURPOSE_RESET, (string) $request->otp)) {
+            return response()->json(['success' => false, 'message' => 'That code is not valid or has expired. Check it, or request a new one.'], 422);
         }
-
-        if ($otpRecord->otp !== $request->otp) {
-            $otpRecord->incrementAttempts();
-            return response()->json(['success' => false, 'message' => 'Invalid OTP.'], 422);
-        }
-
-        $otpRecord->markUsed();
         RateLimiter::clear($rateLimitKey);
-
         $user->update([
             'password'      => \Illuminate\Support\Facades\Hash::make($request->password),
             'last_login_at' => now(),

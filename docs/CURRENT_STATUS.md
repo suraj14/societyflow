@@ -4,6 +4,13 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-13 - mobile UX, manual templates, OTP / e-mail / SMS / WhatsApp production readiness
+
+Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Rounds 3-4; procedure for real delivery and deployment: [MESSAGING_STAGING_AND_DEPLOYMENT.md](MESSAGING_STAGING_AND_DEPLOYMENT.md).
+- Fixed and tested: every Quick overview card opens its own list; Services is a direct Call / WhatsApp directory; Service Requests UI removed; admin guard duty board; manual WhatsApp templates (no sync); one-time codes hashed / one-use / cooldown / no enumeration / no code outside a dev server; temporary passwords no longer stored in the e-mail log; reset-link failure handling; SMS `env()` / master-switch defects; **MariaDB-only defect where a one-time code never expired once guessed against** (found by the MariaDB run).
+- Evidence: SQLite 2112 tests / 11864 assertions / 0 failures / 6 skipped, 8 of 8 shard exit codes 0; MariaDB 10.4 2112 / 11863 / 0 / 3 skipped, 6 of 6 exit 0; Flutter 252 pass (exit 0), analyze = the 2 known infos; release APK builds (debug-signed); Chrome 124/124 + 97/97 + 44/44 at 390/360/320/1366.
+- NOT done: any real SMS / WhatsApp / e-mail / OTP delivery (none was sent; receipt unconfirmed for every channel); the post-hardening OTP journey on a physical phone (unplugged); production deploy (not attempted).
+- Operator: back up and migrate (`2026_10_13_000001..2026_10_14_000004`), rotate credentials, set `APP_URL`/`APP_DEBUG`/`LOG_LEVEL`, create the failed-jobs table, then follow part A of the staging document.
 ## 2026-10-12 (round 2) - production-readiness gaps closed where feasible
 
 Committed on `production-readiness` (after 356c9d5). **READY FOR STAGING, NOT READY FOR PRODUCTION.** Detail: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) (Round 2).

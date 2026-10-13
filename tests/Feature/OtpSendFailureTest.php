@@ -79,11 +79,13 @@ class OtpSendFailureTest extends TestCase
         $r->assertJson(['success' => true]);
         $r->assertJsonMissingPath('otp');
         $this->assertSame('https://www.fast2sms.com/dev/otp/send', $sent['url']);
-        $otp = MobileOtp::where('phone', $this->phone)->where('is_used', false)->first();
-        $this->assertSame($otp->otp, $sent['data']['otp']);
-        $this->assertSame(4, strlen($otp->otp));
+        $code = $sent['data']['otp'];
+        $row = MobileOtp::where('phone', $this->phone)->where('is_used', false)->first();
+        $this->assertSame(1, preg_match('/^[1-9][0-9]{3}$/', $code), 'four digits');
+        $this->assertNotSame($code, $row->otp, 'the table never holds the code as typed');
+        $this->assertSame(64, strlen($row->otp));
 
-        $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $otp->otp])
+        $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $code])
             ->assertOk()->assertJsonPath('success', true);
     }
 }
