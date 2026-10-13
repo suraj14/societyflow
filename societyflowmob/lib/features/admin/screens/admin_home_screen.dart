@@ -11,7 +11,9 @@ import '../../auth/providers/auth_provider.dart';
 import '../../home/providers/home_provider.dart';
 import '../../shell/main_shell.dart';
 import '../providers/admin_provider.dart';
+import 'admin_lists.dart';
 import 'admin_requests_screen.dart';
+import 'admin_tickets_screen.dart';
 
 /// The society office on a phone: what needs a decision first, the society at a glance, the handful of
 /// operations used every day, and what is new. Everything comes from `/admin/dashboard` (and the notice feed);
@@ -49,22 +51,27 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
     }
   }
 
+  /// Every destination here is a real screen pushed on the stack, so the app bar's back arrow and Android Back both
+  /// return to this dashboard.
+  void _push(Widget screen) => Navigator.push(context, MaterialPageRoute(builder: (_) => screen));
+
+  /// Each Needs attention row opens the list that holds exactly the rows it counted.
   void _openAttention(AdminAttention a) {
     switch (a.key) {
       case 'bookings':
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRequestsScreen(initialTab: 0)));
-      case 'service_requests':
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRequestsScreen(initialTab: 1)));
+        _push(const AdminRequestsScreen());
       case 'complaints':
-        _go(Dest.tickets);
+        _push(const AdminTicketsScreen(initialFilter: 'open')); // the row counts NEW complaints (status open)
       case 'visitors':
-        _go(Dest.visitors);
+        _push(AdminListScreen.visitors(scope: 'pending'));
+      case 'bills':
+        _push(AdminListScreen.bills(scope: 'overdue'));
       default:
-        break; // e.g. overdue bills: there is no mobile bills list for the office, so the row is information only
+        break;
     }
   }
 
-  bool _opensSomething(String key) => const {'bookings', 'service_requests', 'complaints', 'visitors'}.contains(key);
+  bool _opensSomething(String key) => const {'bookings', 'complaints', 'visitors', 'bills'}.contains(key);
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +110,7 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
             SliverToBoxAdapter(child: _overview(s)),
             if (shortcuts.isNotEmpty) SliverToBoxAdapter(child: _quickActions(shortcuts)),
             if (notices.isNotEmpty) SliverToBoxAdapter(child: _latestNotices(notices)),
-            if (s.guardsOnDuty.isNotEmpty) SliverToBoxAdapter(child: _guards(s)),
+            if (s.guardDuty != null) SliverToBoxAdapter(child: _guards(s)),
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
         ]),
@@ -154,7 +161,9 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
       );
 
   Widget _attention(AdminDashboardState s) {
-    if (s.attention.isEmpty) {
+    // Service requests are no longer a workflow; an older server may still send that row - never show it.
+    final attention = s.attention.where((a) => a.key != 'service_requests').toList();
+    if (attention.isEmpty) {
       return _section(
         'Needs attention',
         const AppCard(
@@ -170,7 +179,7 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
     return _section(
       'Needs attention',
       Column(children: [
-        for (final a in s.attention)
+        for (final a in attention)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: AppCard(
@@ -197,8 +206,10 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
   String _money(num? v) => v == null ? '-' : '₹${_n(v)}';
 
   Widget _overview(AdminDashboardState s) {
-    Widget tile(String title, String value, IconData icon, Color color, {VoidCallback? onTap}) => Expanded(
+    Widget tile(String title, String value, IconData icon, Color color, {required VoidCallback onTap}) => Expanded(
           child: AppCard(
+            key: Key('overview-${title.toLowerCase().replaceAll(' ', '-')}'),
+            semanticLabel: '$title: $value. Opens the list.',
             onTap: onTap,
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -215,25 +226,25 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
       'Quick overview',
       Column(children: [
         Row(children: [
-          tile('Properties', _n(s.kpi('units')), Icons.home_work_rounded, AppColors.info),
+          tile('Properties', _n(s.kpi('units')), Icons.home_work_rounded, AppColors.info, onTap: () => _push(AdminListScreen.units())),
           const SizedBox(width: 10),
-          tile('Occupied', _n(s.kpi('occupied_units')), Icons.meeting_room_rounded, AppColors.secondary),
+          tile('Occupied', _n(s.kpi('occupied_units')), Icons.meeting_room_rounded, AppColors.secondary, onTap: () => _push(AdminListScreen.units(state: 'occupied'))),
           const SizedBox(width: 10),
-          tile('Vacant', _n(s.kpi('vacant_units')), Icons.door_front_door_outlined, AppColors.textSecondary),
+          tile('Vacant', _n(s.kpi('vacant_units')), Icons.door_front_door_outlined, AppColors.textSecondary, onTap: () => _push(AdminListScreen.units(state: 'vacant'))),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          tile('Residents', _n(s.kpi('residents')), Icons.groups_rounded, AppColors.primary),
+          tile('Residents', _n(s.kpi('residents')), Icons.groups_rounded, AppColors.primary, onTap: () => _push(AdminListScreen.residents())),
           const SizedBox(width: 10),
-          tile('Visitors today', _n(s.kpi('visitors_today')), Icons.people_alt_rounded, AppColors.info, onTap: () => _go(Dest.visitors)),
+          tile('Visitors today', _n(s.kpi('visitors_today')), Icons.people_alt_rounded, AppColors.info, onTap: () => _push(AdminListScreen.visitors(scope: 'today'))),
           const SizedBox(width: 10),
-          tile('Open tickets', _n(s.kpi('open_tickets')), Icons.support_agent_rounded, AppColors.error, onTap: () => _go(Dest.tickets)),
+          tile('Open tickets', _n(s.kpi('open_tickets')), Icons.support_agent_rounded, AppColors.error, onTap: () => _push(const AdminTicketsScreen())),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          tile('Pending dues', _money(s.kpi('pending_dues')), Icons.account_balance_wallet_outlined, AppColors.warning),
+          tile('Pending dues', _money(s.kpi('pending_dues')), Icons.account_balance_wallet_outlined, AppColors.warning, onTap: () => _push(AdminListScreen.bills())),
           const SizedBox(width: 10),
-          tile('Collected this month', _money(s.kpi('monthly_revenue')), Icons.payments_outlined, AppColors.secondary),
+          tile('Collected this month', _money(s.kpi('monthly_revenue')), Icons.payments_outlined, AppColors.secondary, onTap: () => _push(AdminListScreen.collections())),
         ]),
       ]),
     );
@@ -287,22 +298,28 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> with AutoRefr
         ]),
       );
 
-  Widget _guards(AdminDashboardState s) => _section(
-        'Guards on duty',
-        Column(children: [
-          for (final g in s.guardsOnDuty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: AppCard(
-                padding: const EdgeInsets.all(12),
-                child: Row(children: [
-                  const Icon(Icons.shield_rounded, color: AppColors.secondary, size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text((g['guard'] ?? 'Guard').toString(), style: AppTextStyles.label, overflow: TextOverflow.ellipsis)),
-                  Flexible(child: Text([if (g['gate'] != null) g['gate'], if (g['since'] != null) 'since ${g['since']}'].join('  '), style: AppTextStyles.caption, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end)),
-                ]),
-              ),
-            ),
+  Widget _guards(AdminDashboardState s) {
+    final duty = s.guardDuty!;
+    final counts = Map<String, dynamic>.from((duty['counts'] as Map?) ?? const {});
+    final items = [for (final i in ((duty['items'] as List?) ?? const [])) Map<String, dynamic>.from(i as Map)];
+    final total = (counts['total'] as num?)?.toInt() ?? items.length;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          const Expanded(child: Text('Guards today', style: AppTextStyles.h3, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          TextButton(key: const Key('guards-view-all'), onPressed: () => _push(const AdminGuardShiftsScreen()), child: const Text('View all', style: TextStyle(color: AppColors.primary, fontSize: 12))),
         ]),
-      );
-}
+        if (items.isEmpty)
+          const AppCard(padding: EdgeInsets.all(14), child: Text('No guard is rostered today.', style: AppTextStyles.body2))
+        else ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text('${counts['on_duty'] ?? 0} on duty of $total rostered', key: const Key('guards-summary'), style: AppTextStyles.caption),
+          ),
+          for (final g in items) Padding(padding: const EdgeInsets.only(bottom: 8), child: GuardDutyTile(item: g)),
+        ],
+      ]),
+    );
+  }}

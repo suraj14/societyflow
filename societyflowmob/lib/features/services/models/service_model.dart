@@ -42,7 +42,14 @@ class ServiceProviderModel {
     this.charges = 0, this.priceType, required this.rating, required this.status,
   });
 
-  bool get hasPhone => phone != null && phone!.replaceAll(RegExp(r'[^0-9]'), '').length >= 6;
+  /// A number worth dialling: 7 to 15 digits (E.164 allows at most 15). Anything else shows "no phone listed" rather than a dead button.
+  bool get hasPhone {
+    final digits = (phone ?? '').replaceAll(RegExp(r'[^0-9]'), '').length;
+    return digits >= 7 && digits <= 15;
+  }
+
+  /// The category the directory groups and filters by.
+  String get categoryLabel => (serviceName ?? '').trim().isEmpty ? 'General' : serviceName!.trim();
 
   /// "₹500 / month" style label, or null when no price is listed.
   String? get priceLabel {

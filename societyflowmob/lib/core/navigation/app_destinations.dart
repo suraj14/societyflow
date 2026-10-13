@@ -38,7 +38,7 @@ class AppNav {
     Dest.facilities:   Destination(Dest.facilities, 'Facilities', Icons.meeting_room_rounded, AppColors.info, anyOf: ['view_facilities']),
     Dest.services:     Destination(Dest.services, 'Services', Icons.build_rounded, AppColors.secondary, anyOf: ['services_directory']),
     Dest.events:       Destination(Dest.events, 'Events', Icons.event_rounded, AppColors.warning, anyOf: ['events']),
-    Dest.requests:     Destination(Dest.requests, 'Requests', Icons.inbox_rounded, AppColors.secondary, anyOf: ['review_bookings', 'assign_service_requests']),
+    Dest.requests:     Destination(Dest.requests, 'Bookings', Icons.event_available_rounded, AppColors.secondary, anyOf: ['review_bookings']),
     Dest.accessPasses: Destination(Dest.accessPasses, 'Access Passes', Icons.badge_rounded, AppColors.primary, anyOf: ['access_passes']),
   };
 

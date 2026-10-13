@@ -62,8 +62,20 @@ class _MainShellState extends ConsumerState<MainShell> {
   /// Open any destination from anywhere (home cards, guard shortcuts, admin attention rows).
   void openDest(Dest d) {
     final i = AppNav.tabIndex[d];
-    if (i != null) switchTab(i);
+    if (i == null) return;
+    final user = ref.read(currentUserProvider);
+
+    // A destination that is NOT on this account's bottom bar (Notices, Facilities, Services, Events ... opened from a
+    // card) is pushed as its own route: the app bar then shows a back arrow and Android Back returns to where the user
+    // came from. Switching to a hidden tab left those screens with no visible way back.
+    if (d != Dest.home && !AppNav.bottomBar(user).contains(d) && navigator != null) {
+      navigator!.push(MaterialPageRoute(builder: (_) => _screens[i]));
+      return;
+    }
+    switchTab(i);
   }
+
+  NavigatorState? get navigator => mounted ? Navigator.maybeOf(context) : null;
 
   // Kept for the existing callers.
   void openNotices()    => openDest(Dest.notices);
@@ -109,14 +121,17 @@ class _MainShellState extends ConsumerState<MainShell> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
+                // Equal shares of the width: five items overflowed a narrow phone (or a large system font) when each kept its own minimum width.
                 for (final d in bar)
-                  _NavItem(
-                    key: Key('nav-${d.name}'),
-                    icon: d == Dest.home && _isGateOnly ? Icons.shield_rounded : AppNav.all[d]!.icon,
-                    label: d == Dest.home && _isGateOnly ? 'Guard' : AppNav.all[d]!.label,
-                    index: AppNav.tabIndex[d]!,
-                    current: lit,
-                    onTap: switchTab,
+                  Expanded(
+                    child: _NavItem(
+                      key: Key('nav-${d.name}'),
+                      icon: d == Dest.home && _isGateOnly ? Icons.shield_rounded : AppNav.all[d]!.icon,
+                      label: d == Dest.home && _isGateOnly ? 'Guard' : AppNav.all[d]!.label,
+                      index: AppNav.tabIndex[d]!,
+                      current: lit,
+                      onTap: switchTab,
+                    ),
                   ),
               ],
             ),
@@ -143,8 +158,8 @@ class _NavItem extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        constraints: const BoxConstraints(minWidth: 52, minHeight: 48),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         decoration: BoxDecoration(
           color: isActive ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
@@ -154,7 +169,7 @@ class _NavItem extends StatelessWidget {
           children: [
             Icon(icon, color: isActive ? AppColors.primary : AppColors.textHint, size: 22),
             const SizedBox(height: 3),
-            Text(label, style: TextStyle(fontSize: 10, fontWeight: isActive ? FontWeight.w700 : FontWeight.w400, color: isActive ? AppColors.primary : AppColors.textHint)),
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, fontWeight: isActive ? FontWeight.w700 : FontWeight.w400, color: isActive ? AppColors.primary : AppColors.textHint)),
           ],
         ),
       ),

@@ -13,7 +13,6 @@ use App\Models\Notice;
 use App\Models\Owner;
 use App\Models\Payment;
 use App\Models\Resident;
-use App\Models\ServiceRequest;
 use App\Models\Society;
 use App\Models\Visitor;
 use Illuminate\Http\Request;
@@ -158,13 +157,6 @@ class DashboardController extends Controller
                     ->where('status', 'open')->count(),
                 'url'   => route('complaints.index', ['status' => 'open']),
                 'icon'  => 'exclamation-circle',
-            ],
-            [
-                'label' => 'Service requests to assign',
-                'count' => ServiceRequest::when($societyId, fn ($q) => $q->where('society_id', $societyId))
-                    ->where('status', 'pending')->count(),
-                'url'   => route('service-requests.index', ['status' => 'pending']),
-                'icon'  => 'tools',
             ],
             [
                 'label' => 'Overdue bills',

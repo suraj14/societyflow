@@ -9,14 +9,9 @@
     <div class="flex justify-between items-center mb-6">
         <div>
             <h1 class="text-3xl font-bold text-gray-900">Services</h1>
-            <p class="text-gray-600 mt-1">Manage society services and providers</p>
+            <p class="text-gray-600 mt-1">Find a provider and call or WhatsApp them directly</p>
         </div>
         <div class="flex space-x-3">
-            <a href="{{ route('service-requests.index') }}"
-               class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center">
-                <i class="fas fa-clipboard-list mr-2"></i>
-                My Requests
-            </a>
             @can('create', App\Models\ServiceProvider::class)
             <a href="{{ route('service-providers.create') }}"
                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center">

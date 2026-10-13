@@ -9,6 +9,7 @@ import '../../../shared/widgets/status_badge.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../core/utils/auto_refresh_mixin.dart';
+import '../../../shared/widgets/discard_guard.dart';
 import '../providers/complaints_provider.dart';
 import '../models/complaint_model.dart';
 
@@ -298,7 +299,9 @@ class _RaiseComplaintSheetState extends ConsumerState<_RaiseComplaintSheet> {
   @override
   Widget build(BuildContext context) {
     final cats = ref.watch(complaintsProvider).categories.isNotEmpty ? ref.watch(complaintsProvider).categories : _defaultCats;
-    return Container(
+    return DiscardGuard(
+      isDirty: () => !_isLoading && (_titleCtrl.text.trim().isNotEmpty || _descCtrl.text.trim().isNotEmpty || _image != null),
+      child: Container(
       decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       padding: EdgeInsets.fromLTRB(24, 20, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
@@ -346,6 +349,7 @@ class _RaiseComplaintSheetState extends ConsumerState<_RaiseComplaintSheet> {
             AppButton(label: 'Submit Complaint', onPressed: _submit, isLoading: _isLoading, icon: Icons.send_rounded),
           ]),
         ),
+      ),
       ),
     );
   }

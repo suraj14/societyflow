@@ -18,11 +18,11 @@ class AdminApi {
   static Future<ApiResult> complaintStatus(int id, String status, {String? message}) =>
       HttpService.instance.post('$_base/complaints/$id/status', body: {'status': status, if (message != null && message.isNotEmpty) 'message': message});
 
-  static Future<ApiResult> serviceRequests(String status) => HttpService.instance.get('$_base/service-requests?status=$status');
-  static Future<ApiResult> assignServiceRequest(int id, int providerId) =>
-      HttpService.instance.post('$_base/service-requests/$id/assign', body: {'provider_id': providerId});
-  static Future<ApiResult> serviceRequestStatus(int id, String status, {String? reason}) =>
-      HttpService.instance.post('$_base/service-requests/$id/status', body: {'status': status, if (reason != null && reason.isNotEmpty) 'cancellation_reason': reason});
+  /// The lists behind the dashboard cards (units, residents, visitors, bills, collections): the same rule as the card's number.
+  static Future<ApiResult> list(String path, {Map<String, String> query = const {}, int page = 1}) =>
+      HttpService.instance.get('$_base/$path?${Uri(queryParameters: {...query, 'page': '$page'}).query}');
+
+  static Future<ApiResult> guardShifts({String? date}) => HttpService.instance.get('$_base/guard-shifts${date == null ? '' : '?date=$date'}');
 }
 
 /// One "needs attention" row from the dashboard.
@@ -48,6 +48,9 @@ class AdminDashboardState {
   final List<AdminAttention> attention;
   final List<Map<String, dynamic>> guardsOnDuty;
 
+  /// Today's roster with a duty state per row (first rows) and the counts per state; null until the server sent it.
+  final Map<String, dynamic>? guardDuty;
+
   const AdminDashboardState({
     this.isLoading = false,
     this.loaded = false,
@@ -56,6 +59,7 @@ class AdminDashboardState {
     this.kpis = const {},
     this.attention = const [],
     this.guardsOnDuty = const [],
+    this.guardDuty,
   });
 
   /// A KPI, or null when the server did not send it - the UI shows "-" rather than inventing a zero.
@@ -66,12 +70,12 @@ class AdminDashboardNotifier extends StateNotifier<AdminDashboardState> {
   AdminDashboardNotifier() : super(const AdminDashboardState());
 
   Future<void> load() async {
-    state = AdminDashboardState(isLoading: !state.loaded, loaded: state.loaded, societyName: state.societyName, kpis: state.kpis, attention: state.attention, guardsOnDuty: state.guardsOnDuty);
+    state = AdminDashboardState(isLoading: !state.loaded, loaded: state.loaded, societyName: state.societyName, kpis: state.kpis, attention: state.attention, guardsOnDuty: state.guardsOnDuty, guardDuty: state.guardDuty);
     final result = await AdminApi.dashboard();
     if (!result.success || result.data == null) {
       // Keep what was already on screen; say what failed. Never replace a failed call with zeros.
       state = AdminDashboardState(
-        loaded: state.loaded, societyName: state.societyName, kpis: state.kpis, attention: state.attention, guardsOnDuty: state.guardsOnDuty,
+        loaded: state.loaded, societyName: state.societyName, kpis: state.kpis, attention: state.attention, guardsOnDuty: state.guardsOnDuty, guardDuty: state.guardDuty,
         error: result.statusCode == 403 ? 'This account cannot open the office console.' : (result.message.isNotEmpty ? result.message : 'Could not load the dashboard.'),
       );
       return;
@@ -87,8 +91,10 @@ class AdminDashboardNotifier extends StateNotifier<AdminDashboardState> {
       loaded: true,
       societyName: (data['society'] is Map ? (data['society'] as Map)['name'] : null)?.toString(),
       kpis: kpis,
-      attention: [for (final a in (data['attention'] as List? ?? const [])) AdminAttention.fromJson(Map<String, dynamic>.from(a as Map))],
+      // Service requests are no longer a workflow; an older server may still send that row - never show it.
+      attention: [for (final a in (data['attention'] as List? ?? const [])) AdminAttention.fromJson(Map<String, dynamic>.from(a as Map))].where((a) => a.key != 'service_requests').toList(),
       guardsOnDuty: [for (final g in (data['guards_on_duty'] as List? ?? const [])) Map<String, dynamic>.from(g as Map)],
+      guardDuty: data['guard_duty'] is Map ? Map<String, dynamic>.from(data['guard_duty'] as Map) : null,
     );
   }
 }

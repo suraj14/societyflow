@@ -7,15 +7,17 @@ import 'admin_queue.dart';
 /// The office's "Tickets" tab: every resident complaint still open, with the real status transitions.
 /// (Residents keep their own ComplaintsScreen - this is the society-wide queue.)
 class AdminTicketsScreen extends StatefulWidget {
-  const AdminTicketsScreen({super.key});
+  /// 'unresolved' (open + in progress: what the Open tickets card counts), 'open' (new only: what the Needs attention row counts), ...
+  final String initialFilter;
+  const AdminTicketsScreen({super.key, this.initialFilter = 'unresolved'});
 
   @override
   State<AdminTicketsScreen> createState() => _AdminTicketsScreenState();
 }
 
 class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
-  static const _filters = {'unresolved': 'Open', 'resolved': 'Resolved', 'all': 'All'};
-  String _filter = 'unresolved';
+  static const _filters = {'unresolved': 'Open', 'open': 'New', 'resolved': 'Resolved', 'all': 'All'};
+  late String _filter = _filters.containsKey(widget.initialFilter) ? widget.initialFilter : 'unresolved';
 
   Future<ApiResult> _fetch() => AdminApi.complaints(_filter);
 
@@ -48,7 +50,7 @@ class _AdminTicketsScreenState extends State<AdminTicketsScreen> {
           child: AdminQueue(
             key: ValueKey(_filter),
             fetch: _fetch,
-            emptyTitle: _filter == 'unresolved' ? 'No open tickets' : 'Nothing here',
+            emptyTitle: _filter == 'unresolved' ? 'No open tickets' : (_filter == 'open' ? 'No new complaints' : 'Nothing here'),
             emptyHint: 'Complaints raised by residents appear here.',
             tile: (ctx, c, reload, say) => _TicketTile(item: c, reload: reload, say: say),
           ),

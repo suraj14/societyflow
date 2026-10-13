@@ -7,25 +7,33 @@ class AppCard extends StatelessWidget {
   final VoidCallback? onTap;
   final Color? color;
 
-  const AppCard({super.key, required this.child, this.padding, this.onTap, this.color});
+  /// What a screen reader says for a tappable card (the visible text is read when this is null).
+  final String? semanticLabel;
+
+  const AppCard({super.key, required this.child, this.padding, this.onTap, this.color, this.semanticLabel});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: padding ?? const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: color ?? AppColors.cardBg,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.divider),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
-          ],
-        ),
-        child: child,
+    final radius = BorderRadius.circular(AppRadius.lg);
+    final content = Padding(padding: padding ?? const EdgeInsets.all(16), child: child);
+
+    // The whole card is the touch target, with a ripple (the previous GestureDetector gave no feedback at all).
+    final card = Container(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
+      ),
+      child: Material(
+        color: color ?? AppColors.cardBg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: radius, side: const BorderSide(color: AppColors.divider)),
+        child: onTap == null ? content : InkWell(onTap: onTap, child: content),
       ),
     );
+
+    if (onTap == null) return card;
+
+    return Semantics(button: true, enabled: true, container: true, label: semanticLabel, excludeSemantics: semanticLabel != null, child: card);
   }
 }
 

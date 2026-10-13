@@ -7,6 +7,7 @@ import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/error_view.dart';
 import '../models/facility_model.dart';
 import '../providers/facilities_provider.dart';
+import '../../../shared/widgets/discard_guard.dart';
 
 /// Book one facility: pick a day, see which hours are free (from the server,
 /// so what is taken, closed or already past is never offered), pick a start
@@ -143,7 +144,9 @@ class _FacilityBookingScreenState extends ConsumerState<FacilityBookingScreen> {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
-    return Scaffold(
+    return DiscardGuard(
+      isDirty: () => _purpose.text.trim().isNotEmpty || _guests.text.trim().isNotEmpty || _slot != null,
+      child: Scaffold(
       backgroundColor: AppColors.background,
       resizeToAvoidBottomInset: true,
       appBar: AppBar(title: Text('Book ${_f.name}', overflow: TextOverflow.ellipsis)),
@@ -225,6 +228,7 @@ class _FacilityBookingScreenState extends ConsumerState<FacilityBookingScreen> {
           ],
           ),
         ),
+      ),
       ),
     );
   }

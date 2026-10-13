@@ -21,27 +21,19 @@ class ServicesState {
 class ServicesNotifier extends StateNotifier<ServicesState> {
   ServicesNotifier() : super(const ServicesState());
 
+  /// The directory is the society's own active providers (`/service-providers`); the catalogue (`/services`) only adds
+  /// categories that have no provider yet, which the directory does not show.
   Future<void> loadServices() async {
     state = state.copyWith(isLoading: true, error: null);
-    final r1 = await HttpService.instance.get(ApiConfig.services);
     final r2 = await HttpService.instance.get(ApiConfig.serviceProviders);
+    final r1 = await HttpService.instance.get(ApiConfig.services);
     state = state.copyWith(
       isLoading: false,
-      services: r1.success ? (r1.data!['data'] as List? ?? []).map((s) => ServiceModel.fromJson(s as Map<String, dynamic>)).toList() : [],
-      providers: r2.success ? (r2.data!['data'] as List? ?? []).map((p) => ServiceProviderModel.fromJson(p as Map<String, dynamic>)).toList() : [],
-      // The catalogue is what the screen lists; without it there is nothing to show.
-      error: r1.success ? null : (r1.message.isNotEmpty ? r1.message : 'Could not load services'),
+      services: r1.success ? (r1.data!['data'] as List? ?? []).map((s) => ServiceModel.fromJson(s as Map<String, dynamic>)).toList() : state.services,
+      providers: r2.success ? (r2.data!['data'] as List? ?? []).map((p) => ServiceProviderModel.fromJson(p as Map<String, dynamic>)).toList() : state.providers,
+      // Without the providers there is nothing to show: say so instead of presenting an empty directory.
+      error: r2.success ? null : (r2.message.isNotEmpty ? r2.message : 'Could not load service providers'),
     );
   }
-
-  Future<void> requestService({required int serviceId, required String description, String? preferredDate}) async {
-    final result = await HttpService.instance.post(ApiConfig.serviceRequests, body: {
-      'service_id': serviceId,
-      'description': description,
-      if (preferredDate != null) 'preferred_date': preferredDate,
-    });
-    if (!result.success) throw Exception(result.message);
-  }
 }
-
 final servicesProvider = StateNotifierProvider<ServicesNotifier, ServicesState>((ref) => ServicesNotifier());

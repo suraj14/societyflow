@@ -80,7 +80,9 @@ class AdminNeedsAttentionPanelTest extends TestCase
 
         $this->assertStringContainsString('Visitors waiting for approval', $html);
         $this->assertStringContainsString('New complaints', $html);
-        $this->assertStringContainsString('Service requests to assign', $html);
+        // Product decision (2026-10-13): Service Requests is no longer a workflow. A pending historical row exists above and must
+        // not surface as something for the admin to act on.
+        $this->assertStringNotContainsString('Service requests to assign', $html);
         $this->assertStringContainsString('Overdue bills', $html);
         $this->assertStringContainsString('Facility bookings to review', $html);
         $this->assertStringNotContainsString('Nothing needs your attention', $html);

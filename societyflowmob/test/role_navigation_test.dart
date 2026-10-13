@@ -20,6 +20,8 @@ import 'package:societyflow/features/facilities/models/facility_model.dart';
 import 'package:societyflow/features/facilities/providers/facilities_provider.dart';
 import 'package:societyflow/features/facilities/screens/facilities_screen.dart';
 import 'package:societyflow/features/home/providers/home_provider.dart';
+import 'package:societyflow/features/services/providers/services_provider.dart';
+import 'package:societyflow/features/shell/main_shell.dart';
 
 /// Role-aware mobile navigation. The server tells the app what an account may do (`user.capabilities`,
 /// computed from the API's own gates); AppNav turns that into the bottom bar and the shortcuts, so a role is
@@ -67,6 +69,11 @@ class _FakeAdminDash extends AdminDashboardNotifier {
   }
   @override
   Future<void> load() async => loads++;
+}
+
+class _EmptyServicesForShell extends ServicesNotifier {
+  @override
+  Future<void> loadServices() async {}
 }
 
 class _FakeHome extends HomeNotifier {
@@ -352,6 +359,239 @@ void main() {
     });
   });
 
+  // ── every Quick overview card opens the list that holds exactly what it counted ──────────────
+  group('Admin dashboard cards', () {
+    Map<String, (int, Map<String, dynamic>)> lists({int total = 3}) => {
+          'GET /admin/units?state=all&page=1': (200, {'success': true, 'data': [{'id': 1, 'title': 'Villa 159, Garden', 'state': 'tenant_occupied', 'state_label': 'Tenant Occupied', 'occupant': 'Piyus'}], 'meta': {'total': 94, 'last_page': 1, 'summary': {}}}),
+          'GET /admin/units?state=occupied&page=1': (200, {'success': true, 'data': [{'id': 1, 'title': 'Villa 159, Garden', 'state': 'tenant_occupied', 'state_label': 'Tenant Occupied', 'occupant': 'Piyus'}], 'meta': {'total': 22, 'last_page': 1, 'summary': {}}}),
+          'GET /admin/units?state=vacant&page=1': (200, {'success': true, 'data': [{'id': 2, 'title': 'Villa 161, Garden', 'state': 'vacant', 'state_label': 'Vacant'}], 'meta': {'total': 72, 'last_page': 1, 'summary': {}}}),
+          'GET /admin/residents?page=1': (200, {'success': true, 'data': [{'title': 'Suraj', 'role': 'Owner', 'subtitle': 'Villa 160', 'phone': '9000000160'}], 'meta': {'total': 31, 'last_page': 1, 'summary': {'owners': 20, 'tenants': 11}}}),
+          'GET /admin/visitors?scope=today&page=1': (200, {'success': true, 'data': [{'id': 4, 'title': 'Ravi', 'subtitle': 'Villa 159 | Delivery', 'when': '15 Oct, 10:00 AM', 'approval_status': 'allowed'}], 'meta': {'total': 4, 'last_page': 1, 'summary': {}}}),
+          'GET /admin/complaints?status=unresolved': (200, {'success': true, 'data': []}),
+          'GET /admin/bills?scope=outstanding&page=1': (200, {'success': true, 'data': [{'id': 9, 'title': 'Villa 159, Garden', 'subtitle': 'Maintenance | October 2026', 'due_date': '15 Oct 2026', 'status': 'partial', 'amount': 1700.0, 'total': 2700.0}], 'meta': {'total': 5, 'last_page': 1, 'summary': {'amount': 67113.0}}}),
+          'GET /admin/collections?page=1': (200, {'success': true, 'data': [{'id': 3, 'title': 'Villa 160, Garden', 'subtitle': 'Rent | Cash', 'date': '12 Oct 2026', 'payer': 'Suraj', 'amount': 10000.0}], 'meta': {'total': 2, 'last_page': 1, 'summary': {'amount': 250000.0, 'month': 'October 2026'}}}),
+        };
+
+    const dash = AdminDashboardState(loaded: true, societyName: 'Royal Eden', kpis: {
+      'units': 94, 'occupied_units': 22, 'vacant_units': 72, 'residents': 31, 'visitors_today': 4, 'open_tickets': 17, 'pending_dues': 67113, 'monthly_revenue': 250000,
+    });
+
+    Future<_Routed> pump(WidgetTester tester, {Map<String, (int, Map<String, dynamic>)>? routes, AdminDashboardState state = dash}) async {
+      await _phone(tester, height: 9000);
+      final api = _installDio(routes ?? lists());
+      await tester.pumpWidget(_app(const AdminHomeScreen(), overrides: [
+        authProvider.overrideWith((ref) => _FakeAuth(_user(['Admin'], _admin, name: 'Priya'))),
+        adminDashboardProvider.overrideWith((ref) => _FakeAdminDash(state)),
+        homeProvider.overrideWith((ref) => _FakeHome()),
+      ]));
+      await tester.pump();
+      return api;
+    }
+
+    // card key, GET it must make, the screen title it opens, a fragment of what the list shows
+    final cards = [
+      ('overview-properties', '/admin/units?state=all&page=1', 'Properties', 'Villa 159, Garden'),
+      ('overview-occupied', '/admin/units?state=occupied&page=1', 'Occupied units', 'Tenant Occupied'),
+      ('overview-vacant', '/admin/units?state=vacant&page=1', 'Vacant units', 'Villa 161, Garden'),
+      ('overview-residents', '/admin/residents?page=1', 'Residents', 'Suraj'),
+      ('overview-visitors-today', '/admin/visitors?scope=today&page=1', "Today's visitors", 'Ravi'),
+      ('overview-open-tickets', '/admin/complaints?status=unresolved', 'Tickets', 'No open tickets'),
+      ('overview-pending-dues', '/admin/bills?scope=outstanding&page=1', 'Pending dues', 'Maintenance | October 2026'),
+      ('overview-collected-this-month', '/admin/collections?page=1', 'Collected this month', 'Suraj'),
+    ];
+
+    for (final c in cards) {
+      testWidgets('${c.$3} card opens its list with the right query, shows the data, and Back returns to the dashboard', (tester) async {
+        final api = await pump(tester);
+
+        await tester.tap(find.byKey(Key(c.$1)));
+        await tester.pumpAndSettle();
+
+        expect(api.calls.where((x) => x.$1 == 'GET' && x.$2 == c.$2), isNotEmpty, reason: 'the card must ask for ${c.$2}');
+        expect(find.text(c.$3), findsWidgets);
+        expect(find.textContaining(c.$4), findsWidgets);
+        expect(find.byType(BackButton), findsOneWidget, reason: 'a visible way back');
+
+        await tester.pageBack();   // the same pop Android Back performs
+        await tester.pumpAndSettle();
+        expect(find.text('Quick overview'), findsOneWidget);
+        expect(find.byType(BackButton), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('the list header shows the server total and the whole-set sum, not what happens to be loaded', (tester) async {
+      await pump(tester);
+      await tester.tap(find.byKey(const Key('overview-pending-dues')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('5 bills - ₹67,113 outstanding'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('overview-collected-this-month')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('₹2,50,000'.replaceAll('2,50,000', '250,000')), findsWidgets);
+      expect(find.textContaining('October 2026'), findsWidgets);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('every card is a button for a screen reader and says what it opens', (tester) async {
+      final handle = tester.ensureSemantics();
+      await pump(tester);
+      for (final label in ['Properties: 94. Opens the list.', 'Occupied: 22. Opens the list.', 'Vacant: 72. Opens the list.', 'Residents: 31. Opens the list.',
+        'Visitors today: 4. Opens the list.', 'Open tickets: 17. Opens the list.', 'Pending dues: ₹67,113. Opens the list.', 'Collected this month: ₹250,000. Opens the list.']) {
+        expect(find.bySemanticsLabel(label), findsOneWidget, reason: label);
+      }
+      handle.dispose();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a failed list shows the error with Retry (never an empty list), and Retry asks again', (tester) async {
+      final routes = lists()..['GET /admin/units?state=all&page=1'] = (500, {'success': false, 'message': 'Server hiccup.'});
+      final api = await pump(tester, routes: routes);
+
+      await tester.tap(find.byKey(const Key('overview-properties')));
+      await tester.pumpAndSettle();
+      expect(find.text('Try Again'), findsOneWidget);
+      expect(find.text('No properties yet'), findsNothing);
+
+      routes['GET /admin/units?state=all&page=1'] = (200, {'success': true, 'data': [{'id': 1, 'title': 'Villa 1', 'state': 'vacant', 'state_label': 'Vacant'}], 'meta': {'total': 1, 'last_page': 1, 'summary': {}}});
+      await tester.tap(find.text('Try Again'));
+      await tester.pumpAndSettle();
+      expect(find.text('Villa 1'), findsOneWidget);
+      expect(api.calls.where((c) => c.$2.startsWith('/admin/units')).length, 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an account the server refuses (403) is told so plainly, not shown an empty list', (tester) async {
+      final routes = lists()..['GET /admin/residents?page=1'] = (403, {'success': false, 'message': 'This is for society admins.'});
+      await pump(tester, routes: routes);
+
+      await tester.tap(find.byKey(const Key('overview-residents')));
+      await tester.pumpAndSettle();
+      expect(find.text('Not available for your account'), findsOneWidget);
+      expect(find.text('No residents yet'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an empty list says what is empty and why, and a long list loads more', (tester) async {
+      final routes = lists()
+        ..['GET /admin/collections?page=1'] = (200, {'success': true, 'data': [], 'meta': {'total': 0, 'last_page': 1, 'summary': {'amount': 0, 'month': 'October 2026'}}})
+        ..['GET /admin/residents?page=1'] = (200, {'success': true, 'data': [{'title': 'Asha', 'role': 'Owner'}], 'meta': {'total': 2, 'last_page': 2, 'summary': {}}})
+        ..['GET /admin/residents?page=2'] = (200, {'success': true, 'data': [{'title': 'Bela', 'role': 'Tenant'}], 'meta': {'total': 2, 'last_page': 2, 'summary': {}}});
+      await pump(tester, routes: routes);
+
+      await tester.tap(find.byKey(const Key('overview-collected-this-month')));
+      await tester.pumpAndSettle();
+      expect(find.text('Nothing collected yet this month'), findsOneWidget);
+      expect(find.textContaining('not counted until it is verified'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('overview-residents')));
+      await tester.pumpAndSettle();
+      expect(find.text('Asha'), findsOneWidget);
+      expect(find.text('Bela'), findsNothing);
+      await tester.tap(find.byKey(const Key('admin-list-more')));
+      await tester.pumpAndSettle();
+      expect(find.text('Bela'), findsOneWidget);
+      expect(find.byKey(const Key('admin-list-more')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Needs attention: no Service requests row (even from an older server); each row opens the list it counted', (tester) async {
+      final api = await pump(tester, state: const AdminDashboardState(loaded: true, kpis: {'units': 1}, attention: [
+        AdminAttention(key: 'service_requests', label: 'Service requests to assign', count: 2),
+        AdminAttention(key: 'complaints', label: 'New complaints', count: 1),
+        AdminAttention(key: 'visitors', label: 'Visitors waiting for approval', count: 2),
+        AdminAttention(key: 'bills', label: 'Overdue bills', count: 1),
+      ]), routes: {
+        ...lists(),
+        'GET /admin/complaints?status=open': (200, {'success': true, 'data': []}),
+        'GET /admin/visitors?scope=pending&page=1': (200, {'success': true, 'data': [], 'meta': {'total': 0, 'last_page': 1, 'summary': {}}}),
+        'GET /admin/bills?scope=overdue&page=1': (200, {'success': true, 'data': [], 'meta': {'total': 0, 'last_page': 1, 'summary': {'amount': 0}}}),
+      });
+
+      // the raw dashboard state still carries the row an old server sends; the home screen must not show it
+      expect(find.text('Service requests to assign'), findsNothing);
+
+      for (final (label, path) in [('New complaints', '/admin/complaints?status=open'), ('Visitors waiting for approval', '/admin/visitors?scope=pending&page=1'), ('Overdue bills', '/admin/bills?scope=overdue&page=1')]) {
+        await tester.tap(find.text(label));
+        await tester.pumpAndSettle();
+        expect(api.calls.any((c) => c.$2 == path), isTrue, reason: '$label must open $path');
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Guards today: real roster rows, On duty only with a check-in, View all opens the roster', (tester) async {
+      final api = await pump(tester, state: const AdminDashboardState(loaded: true, kpis: {'units': 1}, guardDuty: {
+        'date': '2026-10-15',
+        'counts': {'total': 3, 'on_duty': 1, 'not_checked_in': 1, 'scheduled': 1},
+        'items': [
+          {'id': 1, 'guard': 'Asha', 'gate': 'Main Gate', 'shift': 'Day', 'start': '06:00', 'end': '14:00', 'duty_state': 'on_duty', 'duty_label': 'On duty', 'checked_in_at': '06:02', 'overnight': false},
+          {'id': 2, 'guard': 'Bela', 'gate': 'Back Gate', 'shift': 'Day', 'start': '06:00', 'end': '14:00', 'duty_state': 'not_checked_in', 'duty_label': 'Not checked in', 'overnight': false},
+          {'id': 3, 'guard': 'Chitra', 'gate': 'Main Gate', 'shift': 'Night', 'start': '22:00', 'end': '06:00', 'duty_state': 'scheduled', 'duty_label': 'Scheduled', 'overnight': true, 'issue': 'Guard is rostered on overlapping shifts'},
+        ],
+      }), routes: {
+        ...lists(),
+        'GET /admin/guard-shifts': (200, {'success': true, 'data': [
+          {'id': 1, 'guard': 'Asha', 'gate': 'Main Gate', 'shift': 'Day', 'start': '06:00', 'end': '14:00', 'duty_state': 'on_duty', 'duty_label': 'On duty', 'checked_in_at': '06:02', 'overnight': false},
+        ], 'meta': {'total': 1, 'summary': {'on_duty': 1, 'not_checked_in': 0, 'scheduled': 0, 'completed': 0}}}),
+      });
+
+      expect(find.text('Guards today'), findsOneWidget);
+      expect(find.text('1 on duty of 3 rostered'), findsOneWidget);
+      expect(find.text('On duty'), findsOneWidget);
+      expect(find.text('Not checked in'), findsOneWidget);
+      expect(find.text('Scheduled'), findsOneWidget);
+      expect(find.textContaining('Main Gate - Day'), findsWidgets);
+      expect(find.textContaining('22:00-06:00 (overnight)'), findsOneWidget);
+      expect(find.textContaining('Checked in 06:02'), findsOneWidget);
+      expect(find.textContaining('overlapping shifts'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('guards-view-all')));
+      await tester.pumpAndSettle();
+      expect(api.calls.any((c) => c.$2 == '/admin/guard-shifts'), isTrue);
+      expect(find.text('Guard shifts'), findsOneWidget);
+      expect(find.byKey(const Key('guard-shifts-counts')), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('no roster today says so; no duty data at all shows no section (never invented guards)', (tester) async {
+      await pump(tester, state: const AdminDashboardState(loaded: true, kpis: {'units': 1}, guardDuty: {'date': 'x', 'counts': {'total': 0}, 'items': []}));
+      expect(find.text('No guard is rostered today.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+
+      await pump(tester, state: const AdminDashboardState(loaded: true, kpis: {'units': 1}));
+      expect(find.text('Guards today'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a destination that is not on the bottom bar opens as its own screen with a back arrow (MainShell)', (tester) async {
+      await _phone(tester, height: 9000);
+      _installDio({});
+      await tester.pumpWidget(_app(MainShell(key: mainShellKey), overrides: [
+        authProvider.overrideWith((ref) => _FakeAuth(_user(['Admin'], _admin, name: 'Priya'))),
+        adminDashboardProvider.overrideWith((ref) => _FakeAdminDash(dash)),
+        homeProvider.overrideWith((ref) => _FakeHome()),
+        servicesProvider.overrideWith((ref) => _EmptyServicesForShell()),
+      ]));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('quick-services')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AppBar, 'Services'), findsOneWidget);
+      expect(find.byType(BackButton), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Quick overview'), findsOneWidget, reason: 'Back returns to the dashboard it came from');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   // ── the office queues drive the real endpoints ────────────────────────────
   group('Admin queues', () {
     testWidgets('approving a booking POSTs the status, shows the server message, and re-reads the list', (tester) async {
@@ -361,7 +601,6 @@ void main() {
           {'id': 5, 'facility': 'Clubhouse', 'resident': {'name': 'Suraj', 'phone': '9'}, 'property': '160', 'booking_date': '2026-10-20', 'start_time': '10:00', 'end_time': '12:00', 'purpose': 'Birthday', 'status': 'pending', 'actions': ['approved', 'rejected', 'cancelled']},
         ]}),
         'POST /admin/facility-bookings/5/status': (200, {'success': true, 'message': 'Booking approved.'}),
-        'GET /admin/service-requests?status=open': (200, {'success': true, 'data': []}),
       });
 
       await tester.pumpWidget(_app(const AdminRequestsScreen()));
@@ -386,7 +625,6 @@ void main() {
           {'id': 5, 'facility': 'Clubhouse', 'resident': {'name': 'Suraj'}, 'booking_date': '2026-10-20', 'start_time': '10:00', 'end_time': '12:00', 'status': 'pending', 'actions': ['approved']},
         ]}),
         'POST /admin/facility-bookings/5/status': (409, {'success': false, 'message': 'This slot is already booked.'}),
-        'GET /admin/service-requests?status=open': (200, {'success': true, 'data': []}),
       });
 
       await tester.pumpWidget(_app(const AdminRequestsScreen()));
@@ -401,7 +639,6 @@ void main() {
       await _phone(tester);
       _installDio({
         'GET /admin/facility-bookings?status=pending': (403, {'success': false, 'message': 'Only the society office can do this.'}),
-        'GET /admin/service-requests?status=open': (403, {'success': false, 'message': 'Only the society office can do this.'}),
       });
 
       await tester.pumpWidget(_app(const AdminRequestsScreen()));
@@ -431,29 +668,19 @@ void main() {
       expect(find.text('Complaint Resolved.'), findsOneWidget);
     });
 
-    testWidgets('an unassigned service request offers only the society\'s own providers', (tester) async {
+    testWidgets('the office has Bookings only: no Services tab, no service-request queue is ever fetched', (tester) async {
       await _phone(tester);
       final api = _installDio({
         'GET /admin/facility-bookings?status=pending': (200, {'success': true, 'data': []}),
-        'GET /admin/service-requests?status=open': (200, {'success': true, 'data': [
-          {'id': 3, 'service': 'Plumbing', 'description': 'Tap', 'status': 'pending', 'resident': {'name': 'Meera'}, 'providers': [
-            {'id': 21, 'name': 'Ramesh', 'phone': '98'},
-          ]},
-        ]}),
-        'POST /admin/service-requests/3/assign': (200, {'success': true, 'message': 'Service request assigned.'}),
       });
 
-      await tester.pumpWidget(_app(const AdminRequestsScreen(initialTab: 1)));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('assign-3')));
-      await tester.pumpAndSettle();
-      expect(find.text('Ramesh'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('provider-21')));
+      await tester.pumpWidget(_app(const AdminRequestsScreen()));
       await tester.pumpAndSettle();
 
-      final post = api.calls.firstWhere((c) => c.$1 == 'POST');
-      expect(post.$2, '/admin/service-requests/3/assign');
-      expect(post.$3, {'provider_id': 21});
+      expect(find.text('Bookings'), findsOneWidget);
+      expect(find.byType(TabBar), findsNothing);
+      expect(find.text('Services'), findsNothing);
+      expect(api.calls.any((c) => c.$2.contains('service-requests')), isFalse);
     });
   });
 

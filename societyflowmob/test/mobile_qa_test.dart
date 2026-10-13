@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher_platform_interface/link.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 import 'package:societyflow/core/utils/contact_launcher.dart';
 import 'package:societyflow/features/auth/models/user_model.dart';
 import 'package:societyflow/features/auth/providers/auth_provider.dart';
@@ -46,10 +48,35 @@ class _FakeServices extends ServicesNotifier {
         ServiceModel(id: 2, name: 'Cook', charges: 0, status: 'active'),
       ],
       providers: [
-        ServiceProviderModel.fromJson({'id': 10, 'service_id': 1, 'name': 'Sunita', 'phone': '9876543210', 'availability': '7am-11am', 'is_daily_help': true, 'charges': 3000, 'price_type': 'monthly', 'rating': 0, 'status': 'active'}),
-        ServiceProviderModel.fromJson({'id': 11, 'service_id': 1, 'name': 'Meena', 'phone': null, 'rating': 0, 'status': 'active'}),
+        ServiceProviderModel.fromJson({'id': 10, 'service_id': 1, 'service_name': 'Maid', 'name': 'Sunita', 'phone': '9876543210', 'availability': '7am-11am', 'is_daily_help': true, 'charges': 3000, 'price_type': 'monthly', 'rating': 0, 'status': 'active'}),
+        ServiceProviderModel.fromJson({'id': 11, 'service_id': 1, 'service_name': 'Maid', 'name': 'Meena', 'phone': null, 'rating': 0, 'status': 'active'}),
+        ServiceProviderModel.fromJson({'id': 12, 'service_id': 3, 'service_name': 'Electrician', 'name': 'Ramesh', 'phone': '+91 98480-12345', 'charges': 0, 'rating': 0, 'status': 'active'}),
       ],
     );
+  }
+}
+
+class _EmptyServices extends ServicesNotifier {
+  @override
+  Future<void> loadServices() async => state = const ServicesState();
+}
+
+class _FailedServices extends ServicesNotifier {
+  @override
+  Future<void> loadServices() async => state = const ServicesState(error: 'Could not load service providers');
+}
+
+/// Records what the OS would be asked to open; nothing is launched.
+class _RecordingLauncher extends UrlLauncherPlatform {
+  final List<String> launched = [];
+  @override
+  LinkDelegate? get linkDelegate => null;
+  @override
+  Future<bool> canLaunch(String url) async => true;
+  @override
+  Future<bool> launchUrl(String url, LaunchOptions options) async {
+    launched.add(url);
+    return true;
   }
 }
 
@@ -171,48 +198,93 @@ void main() {
   // ── Services ─────────────────────────────────────────────────────────────
 
   group('Services', () {
-    testWidgets('a service with providers is a directory with Call buttons', (tester) async {
+    testWidgets('Services is a flat directory: name, category, price or "Price not specified", availability, Call and WhatsApp', (tester) async {
       await tester.pumpWidget(_app(const ServicesScreen(), overrides: [
         servicesProvider.overrideWith((ref) => _FakeServices()),
         authProvider.overrideWith((ref) => _FakeAuth('Tenant')),
       ]));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('2 providers'), findsOneWidget);
-      await tester.tap(find.text('Maid'));
-      await tester.pumpAndSettle();
-
+      // no category tile to open first, no request form: the providers are right there
       expect(find.text('Sunita'), findsOneWidget);
-      expect(find.text('Call'), findsOneWidget, reason: 'only the provider with a phone gets Call');
-      expect(find.text('7am-11am'), findsOneWidget);
+      expect(find.text('Meena'), findsOneWidget);
+      expect(find.text('Ramesh'), findsOneWidget);
       expect(find.textContaining('3000 / monthly'), findsOneWidget);
-      expect(find.textContaining('No phone number listed'), findsOneWidget);
+      expect(find.text('7am-11am'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('price-11')), matching: find.text('Price not specified')), findsOneWidget);
+      expect(find.byKey(const Key('call-10')), findsOneWidget);
+      expect(find.byKey(const Key('whatsapp-10')), findsOneWidget);
+      expect(find.byKey(const Key('call-11')), findsNothing, reason: 'no number, no dead button');
+      expect(find.byKey(const Key('nophone-11')), findsOneWidget);
+      expect(find.textContaining('Request'), findsNothing);
+      expect(find.textContaining('arrange'), findsNothing);
     });
 
-    testWidgets('a service with no provider offers residents a request', (tester) async {
+    testWidgets('categories filter the list (shown because there is more than one)', (tester) async {
       await tester.pumpWidget(_app(const ServicesScreen(), overrides: [
         servicesProvider.overrideWith((ref) => _FakeServices()),
         authProvider.overrideWith((ref) => _FakeAuth('Tenant')),
       ]));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Cook'));
+      await tester.tap(find.byKey(const Key('services-cat-Electrician')));
       await tester.pumpAndSettle();
-      expect(find.text('Request Cook'), findsOneWidget);
-      expect(find.text('Send request'), findsOneWidget);
+      expect(find.text('Ramesh'), findsOneWidget);
+      expect(find.text('Sunita'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('services-cat-all')));
+      await tester.pumpAndSettle();
+      expect(find.text('Sunita'), findsOneWidget);
     });
 
-    testWidgets('a guard gets the directory only, never a request form', (tester) async {
+    testWidgets('Call opens the dialler and WhatsApp opens wa.me with the encoded number - nothing is sent', (tester) async {
+      final fake = _RecordingLauncher();
+      UrlLauncherPlatform.instance = fake;
+      await tester.pumpWidget(_app(const ServicesScreen(), overrides: [
+        servicesProvider.overrideWith((ref) => _FakeServices()),
+        authProvider.overrideWith((ref) => _FakeAuth('Tenant')),
+      ]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('call-12')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('whatsapp-12')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('whatsapp-10')));
+      await tester.pumpAndSettle();
+
+      expect(fake.launched, ['tel:+919848012345', 'https://wa.me/919848012345', 'https://wa.me/919876543210']);
+      expect(fake.launched.any((u) => u.contains('text=')), isFalse, reason: 'no message text is pre-filled or sent');
+    });
+
+    testWidgets('every role sees the same directory (a guard too) and nobody gets a request form', (tester) async {
       await tester.pumpWidget(_app(const ServicesScreen(), overrides: [
         servicesProvider.overrideWith((ref) => _FakeServices()),
         authProvider.overrideWith((ref) => _FakeAuth('Guard')),
       ]));
       await tester.pumpAndSettle();
 
-      expect(find.text('No provider listed'), findsOneWidget);
-      await tester.tap(find.text('Cook'));
-      await tester.pumpAndSettle();
+      expect(find.text('Sunita'), findsOneWidget);
       expect(find.text('Send request'), findsNothing);
+    });
+
+    testWidgets('an empty directory says so', (tester) async {
+      await tester.pumpWidget(_app(const ServicesScreen(), overrides: [
+        servicesProvider.overrideWith((ref) => _EmptyServices()),
+        authProvider.overrideWith((ref) => _FakeAuth('Tenant')),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('No service providers yet'), findsOneWidget);
+    });
+
+    testWidgets('a failed load is an error, not an empty directory', (tester) async {
+      await tester.pumpWidget(_app(const ServicesScreen(), overrides: [
+        servicesProvider.overrideWith((ref) => _FailedServices()),
+        authProvider.overrideWith((ref) => _FakeAuth('Tenant')),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('No service providers yet'), findsNothing);
+      expect(find.textContaining('Could not load'), findsOneWidget);
     });
   });
 
