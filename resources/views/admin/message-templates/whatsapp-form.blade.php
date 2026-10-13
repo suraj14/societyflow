@@ -105,8 +105,9 @@
             @foreach ($bodyErrors as $message)<p class="text-xs text-red-700 mt-1">{{ $message }}</p>@endforeach
         </div>
 
-        <div x-show="numbers().length" x-cloak>
-            <p class="block text-sm font-medium text-gray-700 mb-1.5">Variables <span class="font-normal text-gray-500">- what fills each one</span></p>
+        <details x-show="numbers().length" x-cloak class="rounded-xl border border-gray-200 px-4 py-3" @if (old('variables') || ($editing && $template->variable_map)) open @endif>
+            <summary class="cursor-pointer text-sm font-medium text-gray-700">Change what fills each variable <span class="font-normal text-gray-500">- optional</span></summary>
+            <p class="text-xs text-gray-500 mt-2 mb-2">Normally leave this alone: <span class="font-mono">@{{1}}</span>, <span class="font-mono">@{{2}}</span> ... are filled in this order with the values shown in the preview, taken from the real event when the message is sent.</p>
             <p class="text-xs text-red-700 mb-2" x-show="numbers().length > current().fields.length">This notification can fill at most <span x-text="current().fields.length"></span> values.</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <template x-for="(n, i) in numbers()" :key="n">
@@ -118,7 +119,7 @@
                     </label>
                 </template>
             </div>
-        </div>
+        </details>
 
         <div>
             <p class="block text-sm font-medium text-gray-700 mb-1.5">Preview <span class="font-normal text-gray-500">- with example values</span></p>

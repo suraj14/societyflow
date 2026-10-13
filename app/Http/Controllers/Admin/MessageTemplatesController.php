@@ -347,9 +347,15 @@ class MessageTemplatesController extends Controller
             throw ValidationException::withMessages(['body_text' => 'The variables must be numbered {{1}}, {{2}}, {{3}} ... in order, with none missing.']);
         }
         $fields = $purposes[$data['purpose']]['fields'];
-        $vars = array_values($data['variables'] ?? []);
         if (count($numbers) > count($fields)) {
             throw ValidationException::withMessages(['body_text' => 'This notification can fill at most ' . count($fields) . ' values, but the text has ' . count($numbers) . '. Use a simpler template.']);
+        }
+        // Nothing chosen (the basic paste-and-save flow): {{1}}, {{2}} ... take the notification's own values in their
+        // documented order at send time. Only an explicit choice in "Change what fills each variable" is checked.
+        $vars = array_values($data['variables'] ?? []);
+        if ($vars === []) {
+            $vars = array_slice(array_keys($fields), 0, count($numbers));
+            $data['variables'] = $vars;
         }
         if (count($vars) !== count($numbers)) {
             throw ValidationException::withMessages(['variables' => 'Choose a value for each of the ' . count($numbers) . ' variable(s) in the text.']);

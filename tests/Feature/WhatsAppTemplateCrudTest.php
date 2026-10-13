@@ -232,6 +232,43 @@ class WhatsAppTemplateCrudTest extends TestCase
         $this->assertSame(2, $t->var_count);
     }
 
+    public function test_pasting_a_template_without_choosing_variables_uses_the_notifications_own_order(): void
+    {
+        $this->enableSending();
+        // the basic paste-and-save flow submits no variable choices at all
+        $form = $this->form(['body_text' => 'Hi {{1}}, {{2}} on {{3}}, {{4}}', 'message_id' => '']);
+        unset($form['variables']);
+        $this->actingAs($this->admin)->post(route('admin.message-templates.whatsapp.store'), $form)->assertSessionHasNoErrors();
+
+        $t = WhatsAppTemplate::firstOrFail();
+        $this->assertSame('Hi {{1}}, {{2}} on {{3}}, {{4}}', $t->body_text, 'placeholders are not renumbered or rewritten');
+        $this->assertSame(['resident_name', 'visitor_name', 'visit_date', 'society_name'], $t->variable_map);
+
+        // no Message ID: sent by approved name + language, values in placeholder order from the real event
+        $sent = [];
+        WhatsAppService::$transportOverride = function (string $url, array $data) use (&$sent) {
+            $sent[] = $data;
+
+            return [['messages' => [['id' => 'wamid.X']]], 200];
+        };
+        $r = $this->send();
+        $this->assertTrue($r['success']);
+        $payload = $sent[0];
+        $this->assertSame('visitor_approved_v2', $payload['template']['name'] ?? null);
+        $this->assertSame('en', $payload['template']['language']['code'] ?? null);
+        $this->assertSame(['Asha', 'Ravi', '12 Nov', 'Alpha'], array_column($payload['template']['components'][0]['parameters'], 'text'));
+    }
+
+    public function test_each_card_shows_the_approved_name_and_who_receives_it(): void
+    {
+        $this->makeOne();
+
+        $html = $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->assertOk()->getContent();
+        $this->assertStringContainsString('visitor_approved_v2', $html);
+        $this->assertStringContainsString('The resident being visited', $html);
+        $this->assertStringContainsString('Not verified', $html);
+    }
+
     public function test_a_template_with_no_variables_is_fine(): void
     {
         $t = $this->makeOne(['body_text' => 'Your visitor has arrived.', 'variables' => []]);

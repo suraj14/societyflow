@@ -92,6 +92,16 @@ class WhatsAppPurposes
         ][$field] ?? TemplateVariables::sample($field);
     }
 
+    /** Who receives a notification of this type (decided by the sending code, not per template). */
+    public static function recipient(?string $purpose): string
+    {
+        return [
+            'visitor' => 'The resident being visited', 'access_pass' => 'The resident who owns the pass', 'complaint' => 'The resident who raised it',
+            'service_request' => 'The resident who asked', 'bill' => 'The resident billed', 'payment' => 'The resident who paid',
+            'notice' => 'Residents the notice is for', 'event' => 'Owners in the event\'s audience', 'document' => 'Owners of the society',
+        ][(string) $purpose] ?? 'Not assigned';
+    }
+
     public static function exists(string $purpose): bool
     {
         return isset(self::all()[$purpose]);

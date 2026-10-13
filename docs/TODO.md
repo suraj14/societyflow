@@ -258,3 +258,4 @@ Open:
 - P2-51 Create the release keystore (`android/key.properties`); the development build is debug-signed.
 - P3-16 Production deployed commit / `APP_ENV` / `APP_DEBUG` unknown from here (only `/api/v1/health` was read, 200 over HTTPS).
 - P3-17 Backend Service Requests (table, routes, notification code) retained for compatibility with installed apps and history: decide retention before removing.
+- P2-52 WhatsApp template form: variable choices are now optional (collapsed); cards show approved name and recipient - done 2026-10-14 (WhatsAppTemplateCrudTest). Live Test WhatsApp with an approved template still needs a real send by the operator (P1-109).
