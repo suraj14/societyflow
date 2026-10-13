@@ -46,7 +46,7 @@ class AdminApiController extends Controller
 
     // ── dashboard ───────────────────────────────────────────────────────────
 
-    public function dashboard(Request $request): JsonResponse
+    public function dashboard(Request $request, \App\Services\GuardShiftService $shifts): JsonResponse
     {
         if (!($sid = $this->societyId($request))) {
             return $this->denied();
@@ -57,7 +57,6 @@ class AdminApiController extends Controller
 
         $pendingVisitors  = Visitor::where('society_id', $sid)->where('approval_status', 'pending')->count();
         $openComplaints   = Complaint::where('society_id', $sid)->where('status', 'open')->count();
-        $pendingRequests  = ServiceRequest::where('society_id', $sid)->where('status', 'pending')->count();
         $pendingBookings  = FacilityBooking::where('society_id', $sid)->where('status', 'pending')->count();
         $overdueBills     = MaintenanceBill::where('society_id', $sid)->overdue()->count();
 
@@ -65,7 +64,6 @@ class AdminApiController extends Controller
         $attention = array_values(array_filter([
             ['key' => 'bookings',         'label' => 'Facility bookings to review',    'count' => $pendingBookings],
             ['key' => 'complaints',       'label' => 'New complaints',                 'count' => $openComplaints],
-            ['key' => 'service_requests', 'label' => 'Service requests to assign',     'count' => $pendingRequests],
             ['key' => 'visitors',         'label' => 'Visitors waiting for approval',  'count' => $pendingVisitors],
             ['key' => 'bills',            'label' => 'Overdue bills',                  'count' => $overdueBills],
         ], fn ($i) => $i['count'] > 0));
@@ -83,6 +81,8 @@ class AdminApiController extends Controller
                 'shift' => $a->shift?->name,
                 'since' => $a->checked_in_at ? SocietyClock::local($a->checked_in_at, $sid)->format('H:i') : null,
             ])->values();
+
+        $duty = $shifts->dutyBoard($sid, $now);
 
         return response()->json([
             'success' => true,
@@ -104,7 +104,9 @@ class AdminApiController extends Controller
                     'monthly_expenses' => $k['monthly_expenses'],
                 ],
                 'attention'     => $attention,
-                'guards_on_duty' => $onDuty,
+                'guards_on_duty' => $onDuty,   // kept for older app versions: checked-in guards only
+                // Today's whole roster with a duty state per row (see GuardShiftService::dutyBoard); the first rows only.
+                'guard_duty'    => ['date' => $duty['date'], 'counts' => $duty['counts'], 'items' => $duty['items']->take(6)->values()],
                 'unread_notifications' => $request->user()->unreadNotifications()->count(),
             ],
         ]);

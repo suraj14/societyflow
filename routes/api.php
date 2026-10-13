@@ -134,6 +134,14 @@ Route::prefix('v1')->group(function () {
         Route::prefix('admin')->group(function () {
             $c = \App\Http\Controllers\Api\AdminApiController::class;
             Route::get('/dashboard',                              [$c, 'dashboard']);
+            // The lists behind the dashboard cards - each built from the card's own rule (AdminListApiController)
+            $l = \App\Http\Controllers\Api\AdminListApiController::class;
+            Route::get('/units',        [$l, 'units']);
+            Route::get('/residents',    [$l, 'residents']);
+            Route::get('/visitors',     [$l, 'visitors']);
+            Route::get('/bills',        [$l, 'bills']);
+            Route::get('/collections',  [$l, 'collections']);
+            Route::get('/guard-shifts', [$l, 'guardShifts']);
             Route::get('/facility-bookings',                      [$c, 'facilityBookings']);
             Route::post('/facility-bookings/{id}/status',         [$c, 'facilityBookingStatus'])->whereNumber('id');
             Route::get('/complaints',                             [$c, 'complaints']);

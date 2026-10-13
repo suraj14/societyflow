@@ -79,7 +79,7 @@ class SocietyOverview
             'monthly_expenses' => self::monthlySocietyExpenses($societyId),
             // visitors has no visit_date column; the scheduled arrival is
             // expected_entry_time.
-            'visitors_today' => Visitor::when($societyId, fn ($q) => $q->where('society_id', $societyId))->whereBetween('expected_entry_time', SocietyClock::dayBounds())->count(),
+            'visitors_today' => Visitor::when($societyId, fn ($q) => $q->where('society_id', $societyId))->whereBetween('expected_entry_time', SocietyClock::dayBounds($societyId))->count(),
         ];
         $stats['monthly_net'] = $stats['monthly_revenue'] - $stats['monthly_expenses'];
 

@@ -112,6 +112,116 @@ class GuardShiftService
     }
 
     /**
+     * What an administrator sees: every guard rostered for a day, with the shift, gate and a duty state that is only
+     * ever as strong as the data behind it.
+     *
+     *   on_duty         checked in (attendance row) and not checked out - the ONLY state that claims presence
+     *   completed       checked out
+     *   scheduled       rostered, the shift has not begun
+     *   not_checked_in  rostered, the shift has begun (or ended) and nobody checked in - "assigned" is not "present"
+     *   absent / missed marked by the office / by the sweep (stored status)
+     *
+     * For today it includes yesterday's overnight shift while it is still running. Replaced rows are history and are
+     * left out (the replacement has its own row). `issue` says what looks wrong for the office to fix: an inactive
+     * guard account, or the same guard rostered on two overlapping shifts.
+     *
+     * @return array{date:string,items:\Illuminate\Support\Collection,counts:array<string,int>}
+     */
+    public function dutyBoard(int $societyId, ?Carbon $at = null, ?string $date = null): array
+    {
+        $now = $at ?? SocietyClock::now($societyId);
+        $day = $date ? Carbon::createFromFormat('Y-m-d', $date, SocietyClock::timezoneFor($societyId))->startOfDay() : $now->copy()->startOfDay();
+        $isToday = $day->toDateString() === $now->toDateString();
+
+        $rows = ShiftAssignment::where('society_id', $societyId)
+            ->where('status', '!=', ShiftAssignment::STATUS_REPLACED)
+            ->where(function ($q) use ($day, $isToday) {
+                $q->whereDate('date', $day->toDateString());
+                if ($isToday) {
+                    $q->orWhereDate('date', $day->copy()->subDay()->toDateString());
+                }
+            })
+            ->with(['shift', 'gate:id,name', 'guardUser:id,name,status'])
+            ->get()
+            ->filter(fn (ShiftAssignment $a) => $a->shift && ($a->date->toDateString() === $day->toDateString() || $a->shift->windowStartingOn($a->date)[1]->gt($now)));
+
+        // two open rows for one guard whose windows overlap
+        $overlaps = [];
+        foreach ($rows->groupBy('guard_user_id') as $mine) {
+            foreach ($mine as $a) {
+                foreach ($mine as $b) {
+                    if ($a->id < $b->id) {
+                        [$as, $ae] = $a->shift->windowStartingOn($a->date);
+                        [$bs, $be] = $b->shift->windowStartingOn($b->date);
+                        if ($as->lt($be) && $bs->lt($ae)) {
+                            $overlaps[$a->id] = $overlaps[$b->id] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        $order = ['on_duty' => 0, 'not_checked_in' => 1, 'scheduled' => 2, 'completed' => 3, 'absent' => 4, 'missed' => 5];
+        $items = $rows->map(function (ShiftAssignment $a) use ($now, $societyId, $overlaps) {
+            [$start, $end] = $a->shift->windowStartingOn($a->date);
+            $state = $this->dutyState($a, $now, $start, $end);
+            $issue = null;
+            if ($a->guardUser && $a->guardUser->status !== 'active') {
+                $issue = 'Guard account is not active';
+            } elseif (isset($overlaps[$a->id])) {
+                $issue = 'Guard is rostered on overlapping shifts';
+            }
+
+            return [
+                'id'             => $a->id,
+                'guard'          => $a->guardUser?->name ?? 'Unknown guard',
+                'gate'           => $a->gate?->name,
+                'shift'          => $a->shift->name,
+                'date'           => $a->date->toDateString(),
+                'start'          => $start->format('H:i'),
+                'end'            => $end->format('H:i'),
+                'overnight'      => $a->shift->isOvernight(),
+                'status'         => $a->status,
+                'duty_state'     => $state,
+                'duty_label'     => [
+                    'on_duty' => 'On duty', 'completed' => 'Completed', 'scheduled' => 'Scheduled', 'not_checked_in' => 'Not checked in',
+                    'absent' => 'Absent', 'missed' => 'Missed',
+                ][$state] ?? ucfirst($state),
+                'checked_in_at'  => $a->checked_in_at ? SocietyClock::local($a->checked_in_at, $societyId)->format('H:i') : null,
+                'checked_out_at' => $a->checked_out_at ? SocietyClock::local($a->checked_out_at, $societyId)->format('H:i') : null,
+                'issue'          => $issue,
+                'sort'           => [$order[$state] ?? 9, $start->getTimestamp()],
+            ];
+        })->sortBy('sort')->map(function ($i) { unset($i['sort']); return $i; })->values();
+
+        $counts = ['total' => $items->count()];
+        foreach (['on_duty', 'not_checked_in', 'scheduled', 'completed', 'absent', 'missed'] as $s) {
+            $counts[$s] = $items->where('duty_state', $s)->count();
+        }
+
+        return ['date' => $day->toDateString(), 'items' => $items, 'counts' => $counts];
+    }
+
+    /** The duty state of one assignment at $now (see dutyBoard). */
+    public function dutyState(ShiftAssignment $a, Carbon $now, Carbon $start, Carbon $end): string
+    {
+        if ($a->status === ShiftAssignment::STATUS_ABSENT) {
+            return 'absent';
+        }
+        if ($a->status === ShiftAssignment::STATUS_MISSED) {
+            return 'missed';
+        }
+        if ($a->checked_out_at !== null || $a->status === ShiftAssignment::STATUS_CHECKED_OUT) {
+            return 'completed';
+        }
+        if ($a->checked_in_at !== null) {
+            return 'on_duty';
+        }
+
+        return $now->lt($start) ? 'scheduled' : 'not_checked_in';
+    }
+
+    /**
      * The guard's started-but-not-ended assignment, whether or not its window
      * is still open: a guard who forgot to end last night's shift must still
      * be able to close it (currentAssignmentFor() stops answering once the
