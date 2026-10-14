@@ -91,6 +91,48 @@ class WhatsAppTemplate extends Model
         return !$this->isManual() && $this->isApproved();
     }
 
+    /**
+     * What the provider says about the template, in words. A hand-typed row has never been checked ("LOCAL"); a synced row
+     * carries Meta's own status.
+     */
+    public function providerStatusLabel(): string
+    {
+        return match (strtoupper((string) $this->status)) {
+            'APPROVED'                => 'Approved',
+            'PENDING', 'IN_REVIEW'    => 'Pending review',
+            'REJECTED'                => 'Rejected',
+            'PAUSED'                  => 'Paused',
+            'DISABLED'                => 'Disabled',
+            'FLAGGED'                 => 'Flagged',
+            'IN_APPEAL'               => 'In appeal',
+            'LOCAL', ''               => 'Not checked',
+            default                   => ucfirst(strtolower((string) $this->status)),
+        };
+    }
+
+    /** True when the provider has not confirmed the template: it is known to be pending, rejected, paused ... */
+    public function isKnownUnapproved(): bool
+    {
+        return !$this->isManual() && !$this->isApproved();
+    }
+
+    /**
+     * May a message go out with this template? Never one the provider reported as pending / rejected / paused, and never
+     * another product's template. A hand-typed template has no provider status to check; the provider itself rejects it if
+     * it is not approved, and that answer is shown.
+     */
+    public function sendBlockReason(): ?string
+    {
+        if ($this->isKnownUnapproved()) {
+            return "\"{$this->displayName()}\" is {$this->providerStatusLabel()} at the provider, not approved, so it is not sent.";
+        }
+        if (\App\Support\WhatsAppTemplateScope::isBookMizo($this)) {
+            return "\"{$this->displayName()}\" is a BookMizo template, not a SocietyFlow one, so it is not sent to residents.";
+        }
+
+        return null;
+    }
+
     /** What the Communication Center shows - never the raw `name` or `external_id`. */
     public function displayName(): string
     {
@@ -128,7 +170,14 @@ class WhatsAppTemplate extends Model
             return $map;
         }
 
-        return $this->purpose ? array_slice(array_keys(WhatsAppPurposes::all()[$this->purpose]['fields'] ?? []), 0, (int) $this->var_count) : [];
+        // not chosen by hand: read from the template's own wording (see WhatsAppTemplateMapping)
+        return $this->purpose ? \App\Support\WhatsAppTemplateMapping::suggest($this->purpose, (string) $this->body_text, (int) $this->var_count) : [];
+    }
+
+    /** "{{1}} Resident name · {{2}} Society name ..." - what fills each variable, for the card. */
+    public function mappingSummary(): string
+    {
+        return $this->purpose && $this->var_count > 0 ? \App\Support\WhatsAppTemplateMapping::describe($this->purpose, $this->variableFields()) : '';
     }
 
     /** The body with each {{n}} replaced by an example value of the field chosen for it (the saved text is untouched). */

@@ -97,3 +97,10 @@ Date, build/commit, server, recipient (approved), channel, action, provider requ
 **Smoke test right after**: `/api/v1/health`; web login; Login with OTP for one approved account (A1); forgot-password mail (A4); a bill list; admin dashboard; a gate page for a guard; Settings pages open.
 
 **Roll back when**: health is not 200; sign-in fails for approved accounts; OTP or reset mail fails for the approved tester; any 5xx on the smoke list; a migration errors. Action: maintenance mode on, restore the backup taken before `migrate`, redeploy the previous release, workers restarted.
+
+## C. WhatsApp templates (added 2026-10-14)
+1. Settings -> WhatsApp: key, Phone Number ID saved; Message Templates -> WhatsApp -> **Sync from Fast2SMS** (read-only; new templates arrive inactive).
+2. For each notification: open the template, choose its type, check the **Example** line reads correctly (it shows which value fills each `{{n}}`), then **Make active**. A pending / rejected template cannot be switched on.
+3. Clear any older `whatsapp_*_template_name` settings that still name BookMizo templates.
+4. Send one real test to an approved tester only after steps 1-3, and read the provider's answer on the page. "Accepted" is not "delivered" (delivery receipts are not read).
+5. A template approved later does not appear by itself: press Sync again. Fast2SMS documents no template-status webhook.

@@ -90,6 +90,29 @@ class WhatsAppService
 
         $template ??= \App\Models\WhatsAppTemplate::where('society_id', $societyId)->where('name', $templateName)->first();
 
+        // Pending / rejected / paused templates and another product's templates are never sent, whatever is switched on.
+        if ($template && ($blocked = $template->sendBlockReason())) {
+            Log::warning('WhatsApp template not sent', ['purpose' => $purpose, 'template_id' => $template->id, 'status' => $template->status]);
+
+            return ['success' => false, 'status' => 'blocked_template', 'message' => $blocked];
+        }
+
+        // An older settings value naming a BookMizo template (it matches no saved row, e.g. a display name) is not sent either.
+        if (!$template && \App\Support\WhatsAppTemplateScope::nameLooksBookMizo((string) $templateName)) {
+            Log::warning('WhatsApp template not sent', ['purpose' => $purpose, 'reason' => 'legacy name is a BookMizo template']);
+
+            return ['success' => false, 'status' => 'blocked_template', 'message' => "\"{$templateName}\" is a BookMizo template, not a SocietyFlow one, so it is not sent to residents. Switch on a SocietyFlow template for this notification in Message Templates."];
+        }
+
+        // The saved text and the saved variable count must agree: {{1}}..{{n}} with none missing, n = var_count.
+        if ($template && trim((string) $template->body_text) !== '') {
+            $numbers = \App\Models\WhatsAppTemplate::placeholderNumbers((string) $template->body_text);
+            sort($numbers);
+            if ($numbers !== range(1, (int) $template->var_count) && !($numbers === [] && (int) $template->var_count === 0)) {
+                return ['success' => false, 'status' => 'failed', 'message' => "Not sent: the saved text of \"{$template->displayName()}\" has variables " . ($numbers ? '{{' . implode('}}, {{', $numbers) . '}}' : '(none)') . " but the template is recorded with {$template->var_count}. Open it and check the text."];
+            }
+        }
+
         if (!array_is_list($values)) {
             $fields = $template?->variableFields() ?: \App\Support\WhatsAppPurposes::variableMap($purpose, (int) ($template?->var_count ?? count($values)), $societyId);
             // A value the event did not supply is a failure to send, never a placeholder or a guess.
@@ -158,6 +181,10 @@ class WhatsAppService
      */
     public static function sendTestTemplate(\App\Models\WhatsAppTemplate $template, string $phone, ?int $societyId, ?array $values = null): array
     {
+        if ($blocked = $template->sendBlockReason()) {
+            return ['success' => false, 'status' => 'blocked_template', 'message' => $blocked];
+        }
+
         $params = $values !== null ? array_values($values) : [];
         if ($values === null) {
             for ($i = 1; $i <= $template->var_count; $i++) {

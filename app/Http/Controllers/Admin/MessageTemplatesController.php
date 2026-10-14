@@ -9,8 +9,11 @@ use App\Models\EmailTemplate;
 use App\Models\SmsTemplate;
 use App\Models\WhatsAppTemplate;
 use App\Services\SmsService;
+use App\Services\WhatsAppTemplateSyncService;
 use App\Support\TemplateVariables;
 use App\Support\WhatsAppPurposes;
+use App\Support\WhatsAppTemplateMapping;
+use App\Support\WhatsAppTemplateScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -51,7 +54,8 @@ class MessageTemplatesController extends Controller
 
         $counts = [
             'sms'      => SmsTemplate::where('society_id', $societyId)->count(),
-            'whatsapp' => WhatsAppTemplate::bySociety($societyId)->count(),
+            // everything except another product's templates (see WhatsAppTemplateScope); those are reached under "Other templates"
+            'whatsapp' => WhatsAppTemplate::bySociety($societyId)->get()->reject(fn ($t) => WhatsAppTemplateScope::classify($t)['scope'] === WhatsAppTemplateScope::BOOKMIZO)->count(),
             'email'    => $this->emailQuery($societyId)->count(),
         ];
 
@@ -93,19 +97,66 @@ class MessageTemplatesController extends Controller
         $purpose = array_key_exists((string) $request->query('purpose'), $labels) ? (string) $request->query('purpose') : 'all';
         $status = in_array($request->query('status'), ['active', 'inactive'], true) ? (string) $request->query('status') : 'all';
 
-        $all = WhatsAppTemplate::bySociety($societyId)->orderBy('purpose')->orderByDesc('is_active')->orderBy('friendly_name')->orderBy('name')->get();
-        $templates = $all
+        $categories = WhatsAppTemplateScope::categories();
+        $category = array_key_exists((string) $request->query('category'), $categories) ? (string) $request->query('category') : 'all';
+        $provider = in_array($request->query('provider'), ['approved', 'pending', 'rejected', 'unchecked'], true) ? (string) $request->query('provider') : 'all';
+        $showOther = $request->query('scope') === 'other';
+
+        // Every template of this society, sorted into SocietyFlow's or not by what it is (see WhatsAppTemplateScope) - never
+        // by approval status, so pending, rejected, inactive and unchecked ones are all listed.
+        $all = WhatsAppTemplate::bySociety($societyId)->orderBy('purpose')->orderByDesc('is_active')->orderBy('friendly_name')->orderBy('name')->get()
+            ->each(fn ($t) => $t->setAttribute('scope_info', WhatsAppTemplateScope::classify($t)));
+        // Only another product's templates are kept out. One nobody can place (no recognisable wording) stays in the list,
+        // under "Not sorted yet", rather than vanishing.
+        $society = $all->reject(fn ($t) => $t->scope_info['scope'] === WhatsAppTemplateScope::BOOKMIZO);
+        $other = $all->filter(fn ($t) => $t->scope_info['scope'] === WhatsAppTemplateScope::BOOKMIZO);
+
+        $templates = ($showOther ? $other : $society)
+            ->when($category !== 'all', fn ($c) => $c->filter(fn ($t) => $t->scope_info['category'] === $category))
             ->when($purpose !== 'all', fn ($c) => $c->where('purpose', $purpose))
             ->when($status !== 'all', fn ($c) => $c->where('is_active', $status === 'active'))
+            ->when($provider !== 'all', fn ($c) => $c->filter(fn ($t) => match ($provider) {
+                'approved'  => strtoupper((string) $t->status) === 'APPROVED',
+                'pending'   => in_array(strtoupper((string) $t->status), ['PENDING', 'IN_REVIEW', 'IN_APPEAL'], true),
+                'rejected'  => in_array(strtoupper((string) $t->status), ['REJECTED', 'PAUSED', 'DISABLED', 'FLAGGED'], true),
+                'unchecked' => $t->isManual(),
+            }))
             ->when($q !== '', fn ($c) => $c->filter(fn ($t) => stripos($t->displayName() . ' ' . $t->name . ' ' . $t->body_text, $q) !== false))
             ->values();
 
-        $active = $all->where('is_active', true)->pluck('purpose')->all();
+        $active = $society->where('is_active', true)->pluck('purpose')->all();
 
         return [
-            'templates' => $templates, 'purposeLabels' => $labels, 'filters' => ['q' => $q, 'purpose' => $purpose, 'status' => $status],
+            'templates' => $templates, 'purposeLabels' => $labels, 'categories' => $categories,
+            'filters' => ['q' => $q, 'purpose' => $purpose, 'status' => $status, 'category' => $category, 'provider' => $provider, 'scope' => $showOther ? 'other' : 'society'],
             'unmappedWhatsApp' => collect($labels)->reject(fn ($label, $key) => in_array($key, $active, true))->values()->all(),
+            'otherCount' => $other->count(), 'societyCount' => $society->count(),
+            // Another product's template switched on for a resident notification: said loudly, never sent (WhatsAppService).
+            'misrouted' => $other->filter(fn ($t) => $t->is_active && $t->purpose)
+                ->map(fn ($t) => ['id' => $t->id, 'name' => $t->displayName(), 'purpose' => $t->purposeLabel()])->values()->all(),
         ];
+    }
+
+    /** The form asks, as the text is pasted, which value each {{n}} should take (WhatsAppTemplateMapping). Nothing is saved. */
+    public function suggestWhatsAppVariables(Request $request): \Illuminate\Http\JsonResponse
+    {
+        $data = $request->validate(['purpose' => ['required', Rule::in(array_keys(WhatsAppPurposes::selectable()))], 'body_text' => ['nullable', 'string', 'max:1024']]);
+        $numbers = WhatsAppTemplate::placeholderNumbers((string) ($data['body_text'] ?? ''));
+
+        return response()->json(['variables' => WhatsAppTemplateMapping::suggest($data['purpose'], (string) ($data['body_text'] ?? ''), count($numbers))]);
+    }
+
+    /** Manual, read-only pull of the account's templates (see WhatsAppTemplateSyncService). */
+    public function syncWhatsApp(): RedirectResponse
+    {
+        $result = WhatsAppTemplateSyncService::sync($this->societyId());
+        $back = redirect()->route('admin.message-templates.index', ['channel' => 'whatsapp']);
+
+        if (!$result['success']) {
+            return $back->with($result['skipped'] ?? false ? 'info' : 'error', $result['message'] . (!empty($result['detail']) ? ' (' . $result['detail'] . ')' : ''));
+        }
+
+        return $back->with('success', $result['message'])->with('sync_warnings', $result['warnings'] ?? []);
     }
 
     private function emailQuery(?int $societyId)
@@ -238,6 +289,9 @@ class MessageTemplatesController extends Controller
             if (isset($data['loaded']) && $data['loaded'] !== (string) $current->updated_at?->timestamp) {
                 throw ValidationException::withMessages(['name' => 'This template was changed since you opened it. Open it again to see the latest version.']);
             }
+            if ($data['status'] === 'active' && !$current->is_active && ($reason = $current->sendBlockReason())) {
+                throw ValidationException::withMessages(['status' => $reason . ' Save it as Inactive.']);
+            }
             $current->fill($this->whatsappAttributes($data))->save();
             $replaced = null;
             if ($data['status'] === 'active') {
@@ -262,6 +316,10 @@ class MessageTemplatesController extends Controller
         } else {
             if (!$whatsappTemplate->purpose) {
                 return redirect()->route('admin.message-templates.index', ['channel' => 'whatsapp'])->with('error', 'Choose what this template is for before switching it on - open it with Edit.');
+            }
+            // A template the provider has not approved (or another product's) is never switched on for residents.
+            if ($reason = $whatsappTemplate->sendBlockReason()) {
+                return redirect()->route('admin.message-templates.index', ['channel' => 'whatsapp'])->with('error', $reason . ' It was not switched on.');
             }
             $replaced = $this->activateWhatsApp($whatsappTemplate);
             $message = "\"{$whatsappTemplate->displayName()}\" is now the active template for {$whatsappTemplate->purposeLabel()}." . ($replaced ? " \"{$replaced}\" was switched off." : '');
@@ -350,11 +408,12 @@ class MessageTemplatesController extends Controller
         if (count($numbers) > count($fields)) {
             throw ValidationException::withMessages(['body_text' => 'This notification can fill at most ' . count($fields) . ' values, but the text has ' . count($numbers) . '. Use a simpler template.']);
         }
-        // Nothing chosen (the basic paste-and-save flow): {{1}}, {{2}} ... take the notification's own values in their
-        // documented order at send time. Only an explicit choice in "Change what fills each variable" is checked.
+        // Nothing chosen (the basic paste-and-save flow): each {{n}} takes the value its own wording asks for ("... bill for
+        // {{2}}" is the bill month, "Rs. {{3}}" the amount), read from the text. Only an explicit choice in "Change what
+        // fills each variable" is checked as chosen.
         $vars = array_values($data['variables'] ?? []);
         if ($vars === []) {
-            $vars = array_slice(array_keys($fields), 0, count($numbers));
+            $vars = WhatsAppTemplateMapping::suggest($data['purpose'], (string) $data['body_text'], count($numbers));
             $data['variables'] = $vars;
         }
         if (count($vars) !== count($numbers)) {

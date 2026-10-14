@@ -389,6 +389,9 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     // WhatsApp templates are entered by hand (copied from the provider portal): no sync, no refresh.
     Route::get('message-templates/whatsapp/create', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'createWhatsApp'])->name('admin.message-templates.whatsapp.create');
     Route::post('message-templates/whatsapp', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'storeWhatsApp'])->name('admin.message-templates.whatsapp.store');
+    // Manual, read-only "Sync from Fast2SMS": adds new templates, refreshes status, never deletes or overwrites. No background sync exists.
+    Route::post('message-templates/whatsapp/suggest-variables', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'suggestWhatsAppVariables'])->name('admin.message-templates.whatsapp.suggest');
+    Route::post('message-templates/whatsapp/sync',[App\Http\Controllers\Admin\MessageTemplatesController::class, 'syncWhatsApp'])->name('admin.message-templates.whatsapp.sync');
     Route::get('message-templates/whatsapp/{whatsappTemplate}/edit', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'editWhatsApp'])->name('admin.message-templates.whatsapp.edit');
     Route::put('message-templates/whatsapp/{whatsappTemplate}', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'updateWhatsApp'])->name('admin.message-templates.whatsapp.update');
     Route::post('message-templates/whatsapp/{whatsappTemplate}/toggle', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'toggleWhatsApp'])->name('admin.message-templates.whatsapp.toggle');

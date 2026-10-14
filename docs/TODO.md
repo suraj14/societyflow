@@ -259,3 +259,11 @@ Open:
 - P3-16 Production deployed commit / `APP_ENV` / `APP_DEBUG` unknown from here (only `/api/v1/health` was read, 200 over HTTPS).
 - P3-17 Backend Service Requests (table, routes, notification code) retained for compatibility with installed apps and history: decide retention before removing.
 - P2-52 WhatsApp template form: variable choices are now optional (collapsed); cards show approved name and recipient - done 2026-10-14 (WhatsAppTemplateCrudTest). Live Test WhatsApp with an approved template still needs a real send by the operator (P1-109).
+
+## 2026-10-14 WhatsApp templates round
+- P1-111 Every SocietyFlow template listed (any provider status), BookMizo kept out, unapproved / BookMizo never sent, notification gate reads template records, parameters follow the approved wording, manual sync - **done** (`WhatsAppTemplateScopeTest`, 2141-test SQLite run). Verified with fakes only.
+- P1-112 Operator: clear the legacy `whatsapp_*_template_name` settings of society 6 that name BookMizo templates (sender refuses them; data left as found) - **open**.
+- P1-113 First real "Sync from Fast2SMS" and one real approved-template send to an approved tester - **blocked** on an operator pressing the button / approved recipient.
+- P2-53 No sender for `society_visitor_arrived` (visitor at the gate) or a WhatsApp login OTP - listed templates are unused until a product decision.
+- P2-54 Fast2SMS documents no template-status webhook: new templates need a manual sync (no background sync exists).
+- P2-55 Re-run the MariaDB suite for this change before release.

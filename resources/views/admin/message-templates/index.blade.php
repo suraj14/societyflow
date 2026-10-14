@@ -27,7 +27,13 @@
             @if ($channel === 'sms')
                 <a href="{{ route('admin.message-templates.sms.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
             @elseif ($channel === 'whatsapp')
-                <a href="{{ route('admin.message-templates.whatsapp.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
+                <div class="flex flex-wrap gap-2 justify-end">
+                    <form method="POST" action="{{ route('admin.message-templates.whatsapp.sync') }}" x-data="{ busy: false }" @submit="if (busy) { $event.preventDefault(); } else { busy = true; }">
+                        @csrf
+                        <button type="submit" :disabled="busy" title="Reads your template list from Fast2SMS. Nothing is sent, deleted or overwritten." class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60"><i class="fas fa-rotate text-xs" :class="busy ? 'fa-spin' : ''"></i> Sync from Fast2SMS</button>
+                    </form>
+                    <a href="{{ route('admin.message-templates.whatsapp.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
+                </div>
             @elseif ($channel === 'email')
                 <a href="{{ route('admin.email-templates.create') }}" class="{{ $btn }}"><i class="fas fa-plus text-xs"></i> New Template</a>
             @endif

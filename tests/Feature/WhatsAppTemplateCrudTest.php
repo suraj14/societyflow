@@ -109,8 +109,8 @@ class WhatsAppTemplateCrudTest extends TestCase
         $this->assertFalse($t->isVerified(), 'typing a name in does not make it approved');
         $this->assertSame('LOCAL', $t->status);
         $html = $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->getContent();
-        $this->assertStringContainsString('Not verified', $html);
-        $this->assertStringNotContainsString('Provider approved', $html);
+        $this->assertStringContainsString('Provider: Not checked', $html);
+        $this->assertStringNotContainsString('Provider: Approved', $html);
     }
 
     public function test_the_edit_form_loads_the_selected_record_and_the_new_form_opens(): void
@@ -225,8 +225,8 @@ class WhatsAppTemplateCrudTest extends TestCase
         $this->create(['body_text' => 'Hello {{1}} {{2}}', 'variables' => ['resident_name']])->assertSessionHasErrors('variables');
         // only values this notification really has
         $this->create(['variables' => ['resident_name', 'visitor_name', 'amount']])->assertSessionHasErrors('variables');
-        // more variables than the notification can fill (visitor has 4 fields)
-        $this->create(['body_text' => '{{1}} {{2}} {{3}} {{4}} {{5}}', 'variables' => ['resident_name', 'visitor_name', 'visit_date', 'society_name', 'resident_name']])->assertSessionHasErrors('body_text');
+        // more variables than the notification can fill (a visitor notification has 5 values: it gained the society phone)
+        $this->create(['body_text' => '{{1}} {{2}} {{3}} {{4}} {{5}} {{6}}', 'variables' => ['resident_name', 'visitor_name', 'visit_date', 'society_name', 'society_phone', 'resident_name']])->assertSessionHasErrors('body_text');
         // a repeated number is one variable
         $t = $this->makeOne(['body_text' => 'Hi {{1}}, yes {{1}}. {{2}}', 'variables' => ['resident_name', 'visitor_name']]);
         $this->assertSame(2, $t->var_count);
@@ -266,7 +266,7 @@ class WhatsAppTemplateCrudTest extends TestCase
         $html = $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->assertOk()->getContent();
         $this->assertStringContainsString('visitor_approved_v2', $html);
         $this->assertStringContainsString('The resident being visited', $html);
-        $this->assertStringContainsString('Not verified', $html);
+        $this->assertStringContainsString('Provider: Not checked', $html);
     }
 
     public function test_a_template_with_no_variables_is_fine(): void
@@ -336,14 +336,16 @@ class WhatsAppTemplateCrudTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_the_sync_and_refresh_actions_no_longer_exist(): void
+    public function test_the_refresh_and_assign_workflow_is_gone_and_only_a_manual_sync_button_remains(): void
     {
         foreach (['settings.whatsapp.sync', 'settings.whatsapp.assign', 'settings.whatsapp.unassign'] as $name) {
             $this->assertFalse(\Illuminate\Support\Facades\Route::has($name), "$name was removed");
         }
         $html = $this->actingAs($this->admin)->get(route('admin.message-templates.index', ['channel' => 'whatsapp']))->getContent();
         $this->assertStringNotContainsString('Refresh from Fast2SMS', $html);
-        $this->assertStringNotContainsString('Sync', $html);
+        // the one sync that exists is the button on this page (WhatsAppTemplateScopeTest covers what it does)
+        $this->assertStringContainsString('Sync from Fast2SMS', $html);
+        $this->assertTrue(\Illuminate\Support\Facades\Route::has('admin.message-templates.whatsapp.sync'));
         $settings = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->getContent();
         $this->assertStringNotContainsString('Refresh from Fast2SMS', $settings);
         $this->assertStringNotContainsString('Connect &amp; Verify', $settings);

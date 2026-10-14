@@ -66,6 +66,8 @@ class BusinessNotifications
         self::whatsapp('complaint', [$creator], $complaint->society_id, fn ($u) => [
             'resident_name' => $u->name, 'complaint_ref' => $complaint->complaint_number ?? (string) $complaint->id,
             'complaint_title' => $complaint->title ?? '', 'complaint_status' => $status,
+            // the office's own note when there is one, else what changed - both real data, never invented text
+            'complaint_update' => trim((string) ($complaint->resolution_notes ?? '')) !== '' ? trim((string) $complaint->resolution_notes) : "Status changed to {$status}",
         ]);
     }
 
@@ -124,7 +126,7 @@ class BusinessNotifications
             InAppNotifier::send([$payer], 'payment', 'Payment received', "We received your payment of {$amount}.", self::url('payments.show', $payment->id), 'fa-indian-rupee-sign');
         }
         self::whatsapp('payment', $payers->all(), $payment->society_id, fn ($u) => [
-            'amount' => $amount, 'resident_name' => $u->name,
+            'amount' => $amount, 'amount_number' => number_format((float) ($payment->amount ?? 0), 2), 'resident_name' => $u->name,
             'payment_date' => $payment->payment_date ? Carbon::parse($payment->payment_date)->format('d M Y') : now()->format('d M Y'),
             'receipt_ref' => $payment->receipt_number ?? (string) $payment->id,
         ]);
@@ -145,9 +147,15 @@ class BusinessNotifications
         $due = !empty($bill->due_date) ? Carbon::parse($bill->due_date)->format('d M Y') : '';
 
         InAppNotifier::send($residents, 'bill', 'New bill', "A bill of {$amount} has been generated" . ($due ? ", due {$due}" : '') . '.', self::url('payments.index'), 'fa-file-invoice-dollar');
+        // "October 2026" from the bill's own month and year; left out (so a template that needs it is not sent) when the bill has none
+        $month = $bill->month ?? null;
+        $period = $month && ($bill->year ?? null)
+            ? (is_numeric($month) ? Carbon::create((int) $bill->year, (int) $month, 1)->format('F Y') : trim("{$month} {$bill->year}"))
+            : '';
         self::whatsapp('bill', $residents, $bill->society_id, fn ($u) => [
             'resident_name' => $u->name, 'amount' => $amount, 'due_date' => $due, 'bill_ref' => $bill->bill_number ?? (string) $bill->id,
-        ]);
+            'amount_number' => number_format((float) ($bill->total_amount ?? $bill->amount ?? 0), 2),
+        ] + ($period !== '' ? ['bill_period' => $period] : []));
     }
 
     public static function noticePublished(object $notice): void
@@ -183,9 +191,13 @@ class BusinessNotifications
         // Identifies this save (see SendEventChangedEmail): a retried delivery dedupes, a later edit does not.
         $stamp = ($event->updated_at ? Carbon::parse($event->updated_at)->timestamp : 0) . '-' . ($event->start_date ? Carbon::parse($event->start_date)->format('YmdHi') : '0');
 
+        $start = $event->start_date ? Carbon::parse($event->start_date) : null;
+        $location = trim((string) ($event->location ?? ''));
+
         self::whatsapp('event', $users, $event->society_id, fn ($u) => [
             'resident_name' => $u->name, 'event_name' => (string) ($event->event_name ?? ''), 'event_date' => $when, 'event_status' => $what,
-        ], "event:{$dedupe}:{$stamp}");
+        ] + ($start ? ['event_day' => $start->format('d M Y'), 'event_time' => $start->format('h:i A')] : [])
+          + ($location !== '' ? ['event_location' => $location] : []), "event:{$dedupe}:{$stamp}");
     }
 
     /** An announced event was cancelled / rescheduled / updated. Same audience as eventCreated. */
@@ -372,7 +384,10 @@ class BusinessNotifications
         if (!$societyId || !self::hasTemplate($purpose, $societyId)) {
             return;
         }
-        $society = Society::find($societyId)?->name ?? '';
+        $societyRow = Society::find($societyId);
+        $society = $societyRow?->name ?? '';
+        // the society's own phone, offered to templates that print a contact number; absent when none is saved
+        $societyPhone = trim((string) ($societyRow?->phone ?? ''));
 
         foreach ($users as $user) {
             if (!$user instanceof User || !$user->phone) {
@@ -384,7 +399,7 @@ class BusinessNotifications
                 continue;
             }
             try {
-                SendWhatsAppNotification::dispatch($purpose, $user->phone, $values($user) + ['society_name' => $society], $societyId)->afterCommit();
+                SendWhatsAppNotification::dispatch($purpose, $user->phone, $values($user) + ['society_name' => $society] + ($societyPhone !== '' ? ['society_phone' => $societyPhone] : []), $societyId)->afterCommit();
             } catch (\Throwable $e) {
                 Log::warning('WhatsApp notification not queued', ['purpose' => $purpose, 'class' => get_class($e)]);
             }
@@ -393,6 +408,12 @@ class BusinessNotifications
 
     private static function hasTemplate(string $purpose, int $societyId): bool
     {
+        // A template switched on for this notification in Message Templates -> WhatsApp (the record is what counts now) ...
+        if (\App\Models\WhatsAppTemplate::forPurpose($societyId, $purpose) !== null) {
+            return (bool) SystemSetting::get('whatsapp', 'whatsapp_enabled', false, $societyId);
+        }
+
+        // ... or the older settings key some societies still carry.
         $assigned = SystemSetting::query()
             ->where('group', 'whatsapp')
             ->where('key', "whatsapp_{$purpose}_template_name")

@@ -27,7 +27,7 @@ class WhatsAppPurposes
             'visitor' => [
                 'label'  => 'Visitor approved',
                 'help'   => 'Tells a resident their visitor was approved.',
-                'fields' => ['resident_name' => 'Resident name', 'visitor_name' => 'Visitor name', 'visit_date' => 'Visit date', 'society_name' => 'Society name'],
+                'fields' => ['resident_name' => 'Resident name', 'visitor_name' => 'Visitor name', 'visit_date' => 'Visit date', 'society_name' => 'Society name', 'society_phone' => 'Society phone (security contact)'],
             ],
             'access_pass' => [
                 'label'  => 'Gate pass updates',
@@ -37,7 +37,7 @@ class WhatsAppPurposes
             'complaint' => [
                 'label'  => 'Complaint updates',
                 'help'   => 'When a complaint changes status.',
-                'fields' => ['resident_name' => 'Resident name', 'complaint_ref' => 'Complaint number', 'complaint_title' => 'Complaint title', 'complaint_status' => 'New status', 'society_name' => 'Society name'],
+                'fields' => ['resident_name' => 'Resident name', 'complaint_ref' => 'Complaint number', 'complaint_title' => 'Complaint title', 'complaint_status' => 'New status', 'society_name' => 'Society name', 'complaint_update' => 'Latest update (resolution note, else the new status)'],
             ],
             'service_request' => [
                 'label'  => 'Service request updates',
@@ -47,12 +47,12 @@ class WhatsAppPurposes
             'bill' => [
                 'label'  => 'New bill',
                 'help'   => 'When a maintenance or rent bill is generated.',
-                'fields' => ['resident_name' => 'Resident name', 'amount' => 'Amount', 'due_date' => 'Due date', 'bill_ref' => 'Bill number', 'society_name' => 'Society name'],
+                'fields' => ['resident_name' => 'Resident name', 'amount' => 'Amount', 'due_date' => 'Due date', 'bill_ref' => 'Bill number', 'society_name' => 'Society name', 'bill_period' => 'Bill month', 'amount_number' => 'Amount (number only, no symbol)'],
             ],
             'payment' => [
                 'label'  => 'Payment received',
                 'help'   => 'Confirms a payment to the resident who paid.',
-                'fields' => ['amount' => 'Amount', 'resident_name' => 'Resident name', 'payment_date' => 'Payment date', 'receipt_ref' => 'Receipt number', 'society_name' => 'Society name'],
+                'fields' => ['amount' => 'Amount', 'resident_name' => 'Resident name', 'payment_date' => 'Payment date', 'receipt_ref' => 'Receipt number', 'society_name' => 'Society name', 'amount_number' => 'Amount (number only, no symbol)'],
             ],
             'notice' => [
                 'label'  => 'Important notices',
@@ -62,7 +62,7 @@ class WhatsAppPurposes
             'event' => [
                 'label'  => 'Society events',
                 'help'   => 'When an event is announced, rescheduled, updated or cancelled (owners of the event\'s audience).',
-                'fields' => ['resident_name' => 'Resident name', 'event_name' => 'Event name', 'event_date' => 'Event date & time', 'event_status' => 'What happened (New event / Rescheduled / Updated / Cancelled)', 'society_name' => 'Society name'],
+                'fields' => ['resident_name' => 'Resident name', 'event_name' => 'Event name', 'event_date' => 'Event date & time', 'event_status' => 'What happened (New event / Rescheduled / Updated / Cancelled)', 'society_name' => 'Society name', 'event_day' => 'Event day', 'event_time' => 'Event time', 'event_location' => 'Event location'],
             ],
             'document' => [
                 'label'  => 'Society rules & documents',
@@ -88,7 +88,8 @@ class WhatsAppPurposes
             'visitor_name' => 'Ravi (courier)', 'visit_date' => '15 Oct, 10:00 AM', 'complaint_ref' => 'CMP-1042', 'complaint_title' => 'Water leakage',
             'complaint_status' => 'In progress', 'service_name' => 'Plumbing', 'request_status' => 'Assigned', 'amount' => '2,700', 'due_date' => '15 Oct 2026',
             'bill_ref' => 'MB-2026-0042', 'payment_date' => '12 Oct 2026', 'receipt_ref' => 'RCP-0042', 'event_name' => 'Diwali get-together',
-            'event_date' => '25 Oct, 6:00 PM', 'event_status' => 'New event',
+            'event_date' => '25 Oct, 6:00 PM', 'event_status' => 'New event', 'society_phone' => '98765 43210', 'complaint_update' => 'Plumber visit booked',
+            'bill_period' => 'October 2026', 'amount_number' => '2,700.00', 'event_day' => '25 Oct 2026', 'event_time' => '06:00 PM', 'event_location' => 'Clubhouse',
         ][$field] ?? TemplateVariables::sample($field);
     }
 

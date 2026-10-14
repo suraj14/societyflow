@@ -88,7 +88,7 @@ class WhatsAppSendTest extends TestCase
 
     public function test_a_template_with_no_variables_sends_none(): void
     {
-        $this->template(['var_count' => 0]);
+        $this->template(['var_count' => 0, 'body_text' => 'Your visitor is at the gate']);
 
         $this->send();
 
@@ -120,7 +120,7 @@ class WhatsAppSendTest extends TestCase
     /** @dataProvider recipients */
     public function test_the_recipient_gets_the_default_country_code(string $given, ?string $countryCode, string $expected): void
     {
-        $this->template(['var_count' => 0]);
+        $this->template(['var_count' => 0, 'body_text' => 'Your visitor is at the gate']);
         if ($countryCode !== null) {
             $this->wa('whatsapp_country_code', $countryCode);
         }

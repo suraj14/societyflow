@@ -4,6 +4,12 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-14 - WhatsApp templates: listing, BookMizo exclusion, exact parameters, manual sync
+
+Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 5.
+- Fixed with tests: all SocietyFlow templates listed in five categories whatever their provider status; BookMizo ones kept out (not by prefix) but never deleted; pending / rejected / BookMizo templates never sent or switched on; **templates saved in the UI now actually trigger the real notifications**; each `{{n}}` is filled from what the approved wording asks for, using real event data; manual "Sync from Fast2SMS" (no webhook exists for template status, so no background sync).
+- Evidence: SQLite 2141 tests / 12071 assertions / 0 failures / 6 skipped, 8 of 8 shard exit 0. MariaDB not re-run. No provider call was made.
+- Found: society 6's old settings point resident notifications at BookMizo templates (blocked by the sender, data untouched); rows 20-35 of `whatsapp_templates` came from a sync not run in this session.
 ## 2026-10-13 - mobile UX, manual templates, OTP / e-mail / SMS / WhatsApp production readiness
 
 Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Rounds 3-4; procedure for real delivery and deployment: [MESSAGING_STAGING_AND_DEPLOYMENT.md](MESSAGING_STAGING_AND_DEPLOYMENT.md).

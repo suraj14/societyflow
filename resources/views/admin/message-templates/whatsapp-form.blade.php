@@ -22,11 +22,14 @@
         'purpose'   => old('purpose', $template->purpose ?: 'notice'),
         'body'      => (string) old('body_text', (string) $template->body_text),
         'variables' => array_values((array) old('variables', $template->exists ? $template->variableFields() : [])),
+        'suggestUrl' => route('admin.message-templates.whatsapp.suggest'),
+        // a mapping the admin saved (or is correcting after an error) is never overwritten by a suggestion
+        'keepChoice' => (bool) old('variables') || ($template->exists && is_array($template->variable_map) && $template->variable_map !== []),
     ];
     $bodyErrors = $errors->get('body_text');
 @endphp
 
-<div class="max-w-3xl space-y-6" x-data="sfWhatsAppTemplateForm(@js($config))">
+<div class="max-w-3xl space-y-6" x-data="sfWhatsAppTemplateForm(@js($config))" x-init="suggest()">
     <div class="flex items-center justify-between gap-3">
         <div>
             <h2 class="text-2xl font-bold text-gray-900">{{ $editing ? 'Edit WhatsApp Template' : 'New WhatsApp Template' }}</h2>
@@ -60,7 +63,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
                 <label for="t-purpose" class="block text-sm font-medium text-gray-700 mb-1.5">Notification Type <span class="text-red-500">*</span></label>
-                <select id="t-purpose" name="purpose" x-model="purpose" @change="reset()" class="{{ $sfInput }}">
+                <select id="t-purpose" name="purpose" x-model="purpose" @change="reset(); suggest()" class="{{ $sfInput }}">
                     @foreach ($purposes as $p)
                         <option value="{{ $p['key'] }}">{{ $p['label'] }}</option>
                     @endforeach
@@ -97,7 +100,7 @@
 
         <div>
             <label for="t-body" class="block text-sm font-medium text-gray-700 mb-1.5">Message Body <span class="text-red-500">*</span></label>
-            <textarea id="t-body" name="body_text" x-model="body" rows="6" maxlength="1024" required placeholder="Hello @{{1}}, your visitor @{{2}} has been approved." class="{{ $sfInput }}">{{ old('body_text', $template->body_text) }}</textarea>
+            <textarea id="t-body" name="body_text" x-model="body" @input.debounce.400ms="suggest()" rows="6" maxlength="1024" required placeholder="Hello @{{1}}, your visitor @{{2}} has been approved." class="{{ $sfInput }}">{{ old('body_text', $template->body_text) }}</textarea>
             <div class="flex items-start justify-between gap-3 mt-1">
                 <p class="text-xs text-gray-500">Paste the approved text. Variables are numbered <span class="font-mono">@{{1}}</span>, <span class="font-mono">@{{2}}</span> ...</p>
                 <p class="text-xs text-gray-500 whitespace-nowrap"><span x-text="body.length"></span>/1024</p>
@@ -107,13 +110,13 @@
 
         <details x-show="numbers().length" x-cloak class="rounded-xl border border-gray-200 px-4 py-3" @if (old('variables') || ($editing && $template->variable_map)) open @endif>
             <summary class="cursor-pointer text-sm font-medium text-gray-700">Change what fills each variable <span class="font-normal text-gray-500">- optional</span></summary>
-            <p class="text-xs text-gray-500 mt-2 mb-2">Normally leave this alone: <span class="font-mono">@{{1}}</span>, <span class="font-mono">@{{2}}</span> ... are filled in this order with the values shown in the preview, taken from the real event when the message is sent.</p>
+            <p class="text-xs text-gray-500 mt-2 mb-2">Normally leave this alone: <span class="font-mono">@{{1}}</span>, <span class="font-mono">@{{2}}</span> ... are filled with the value their own wording asks for (&ldquo;bill for&hellip;&rdquo; is the bill month, &ldquo;Rs.&rdquo; the amount), as the preview shows. The values come from the real event when the message is sent. Change one only if the preview reads wrong.</p>
             <p class="text-xs text-red-700 mb-2" x-show="numbers().length > current().fields.length">This notification can fill at most <span x-text="current().fields.length"></span> values.</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <template x-for="(n, i) in numbers()" :key="n">
                     <label class="text-sm">
                         <span class="block text-gray-700 mb-1">Fill <span class="font-mono" x-text="'{' + '{' + n + '}' + '}'"></span> with</span>
-                        <select name="variables[]" x-model="vars[i]" class="{{ $sfInput }}">
+                        <select name="variables[]" x-model="vars[i]" @change="keep = true" class="{{ $sfInput }}">
                             <template x-for="f in current().fields" :key="f.key"><option :value="f.key" x-text="f.label" :selected="f.key === vars[i]"></option></template>
                         </select>
                     </label>
@@ -153,7 +156,19 @@ function sfWhatsAppTemplateForm(cfg) {
             if (this.vars.length > n.length) this.vars.length = n.length;
             return n;
         },
-        reset() { this.vars = []; },
+        keep: !!cfg.keepChoice,
+        reset() { this.vars = []; this.keep = false; },
+        // Ask the server which value each numbered variable wants (read from the pasted wording); a choice made by hand is left alone.
+        async suggest() {
+            if (this.keep || !this.numbers().length) return;
+            try {
+                const r = await fetch(cfg.suggestUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+                    body: JSON.stringify({ purpose: this.purpose, body_text: this.body }) });
+                if (!r.ok) return;
+                const d = await r.json();
+                if (!this.keep && Array.isArray(d.variables) && d.variables.length) this.vars = d.variables;
+            } catch (e) { /* the defaults below still work */ }
+        },
         preview() {
             const fields = this.current().fields;
             return this.body.replace(re(), (m, n) => { const f = fields.find(x => x.key === this.vars[parseInt(n, 10) - 1]); return f ? f.sample : m; });

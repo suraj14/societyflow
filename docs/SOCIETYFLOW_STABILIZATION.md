@@ -250,3 +250,44 @@ Development database (`database/database.sqlite`): migrated after verified backu
 - Create the failed-jobs table before using a real queue; run a supervised worker.
 - Set `APP_URL` to the HTTPS domain, `APP_DEBUG=false`, `LOG_LEVEL` no lower than `warning`.
 - Password minimum is 8 everywhere; SMS notifications need the "Integration active" switch; resident payments are pending claims; Accountant cannot verify.
+
+## Round 5 - WhatsApp templates: every SocietyFlow template listed, BookMizo kept out, exact parameters, manual sync (2026-10-14)
+
+**Status stays READY FOR STAGING, NOT READY FOR PRODUCTION.** No real WhatsApp message, sync or provider call was made in this round; every provider call in the tests is a captured fake. The development database was only read (read-only queries).
+
+### What the data actually showed
+- `whatsapp_templates` (society 6, "Royal Eden") holds 35 rows: 6 SocietyFlow templates (`society_visitor_approved`, `society_visitor_arrived`, `society_bill_generated`, `society_complaint_update`, `society_important_notice`, `society_event_announcement`, all APPROVED, with Message IDs and wording) and 29 BookMizo / other ones. **Rows 20-35 appeared between two of my read-only queries, written by a sync at 09:02:13 UTC that was not run from this session.** I did not write them and did not change any row.
+- Society 6's older WhatsApp settings still point resident notifications at BookMizo templates (by technical name or by display label): `access_pass`, `visitor`, `complaint`, `payment`, `document`, `service_request`, `emergency`, `otp`. With WhatsApp enabled and external messaging allowed on that server, a resident event could have tried to send BookMizo wording. **Data was not changed**; the sender now refuses them (T3).
+
+### Findings and fixes
+| # | Finding | Root cause | Fix | Evidence |
+|---|---|---|---|---|
+| T1 | The list had no notion of "whose template is this" | one Fast2SMS account carries BookMizo and SocietyFlow templates | `WhatsAppTemplateScope::classify()` decides by (1) hand-typed here = ours, (2) booking / slot / refund / customer / staff wording = BookMizo, (3) the notification type it is attached to, (4) wording (visitor, OTP, bill, complaint, notice ...). **A name prefix decides nothing** (`society_booking_reminder` is excluded; `visitor_arrived_v2` is kept) | `WhatsAppTemplateScopeTest` (listing, exclusion, prefix cases) |
+| T2 | Listing | filters could hide by status | list shows pending, rejected, paused, approved, inactive and unchecked templates; five category headings (Login & OTP, Visitors & Gate Security, Services & Complaints, Bills & Payments, Notices, Events & Society Security); a template nobody can place stays under "Not sorted yet" instead of vanishing; BookMizo ones sit under "Other templates" (kept, never deleted). Provider status and In-app status are two separate chips. Search, type, status filters kept; category and provider-status filters added | same |
+| T3 | BookMizo template attached to a resident notification | old settings / earlier attachments | `sendNotification()` and the test button refuse a BookMizo template (row or legacy name) and any template the provider reported as pending / rejected / paused / disabled; such a template cannot be switched on or saved active; the page shows a red banner for any BookMizo template that is switched on | tests: never sent, cannot be switched on, banner |
+| T4 | **A template saved or switched on in Message Templates never triggered the real notifications** | `BusinessNotifications::hasTemplate()` only read the older settings key, not the template record; earlier tests called the sender directly and missed it | `hasTemplate()` also accepts an active template record | `test_a_template_the_admin_just_saved_in_the_ui_reaches_the_real_notification_path` (fails without the fix) |
+| T5 | **Parameters were filled in the code's order, not the approved wording's** | default order of values per notification | `WhatsAppTemplateMapping` reads the words around each `{{n}}` ("notice from {{2}}" = society, "bill for {{2}}" = bill month, "Rs. {{3}}" = amount number, "Contact security: {{4}}" = society phone ...). New real-data fields: bill month, amount number, complaint update (resolution note, else the new status), event day / time / location, society phone. A value the event cannot supply (no society phone saved) stops the send; nothing is blank-filled or invented. Text vs recorded variable count must agree, and the count must match what the event can supply | the six real approved bodies from the dev database are rendered through real events and compared word for word |
+| T6 | Sync | the earlier brief removed sync; this brief asks for a reliable manual one | `Sync from Fast2SMS` button (Admin / Super Admin): read-only `GET /dev/dlt_manager/whatsapp?type=template`; adds new templates **inactive**, refreshes provider status, fills only empty fields; never deletes, never overwrites id / label / type / switch / language / Message ID / text / variable choices; warns when a switched-on template lost approval or the provider's wording differs. It honours the messaging kill switch | `test_the_next_sync_adds...`, `..._keeps_everything_saved...`, `..._refreshes_status...`, kill-switch and key tests |
+| T7 | Webhook | - | **Not implemented, deliberately.** Fast2SMS documents webhooks for message events only (sent / delivered / read / failed / received, with an optional `webhook_secret_key` header); no template approval or status event is documented ([help page](https://www.fast2sms.com/help/?p=17125)). So there is **no automatic or background sync**: a template approved later appears after the next press of the button, and the page says so | - |
+
+### The six real templates and what fills them
+| Template (provider id) | Variables | Filled from | SocietyFlow sender |
+|---|---|---|---|
+| `society_visitor_approved` (37327) | 4 | resident name, visitor name, visit time, society phone | `VisitorApproved` - tested |
+| `society_complaint_update` (37331) | 5 | resident, complaint number, new status, update note, society | `TicketUpdated` - tested |
+| `society_bill_generated` (37330) | 4 | resident, bill month, amount number, due date | `BillGenerated` - tested |
+| `society_important_notice` (37332) | 3 | resident, society, notice title | `NoticePublished` - tested |
+| `society_event_announcement` (37335) | 5 | resident, society, event name, day, time | event created - tested through the real controller |
+| `society_visitor_arrived` (37328) | 3 | resident, visitor, time | **no event sends "visitor arrived" today** - listed, can be edited, unused |
+
+Other events with a WhatsApp sender: payment received (tested), gate pass created / revoked, society document published (covered by their earlier tests; not re-run against an approved body this round). No SocietyFlow flow sends a WhatsApp login OTP (`WhatsAppService::sendOtp` has no caller), so Login & OTP templates are listed but unused. A `payment_completed` row is sorted under Bills & Payments by its name (basis shown on the card): confirm it is yours.
+
+### Tests
+SQLite, 8 shards, exit code of every shard read: **2141 tests, 12071 assertions, 0 failures, 0 errors, 6 skipped, 8 of 8 exit 0** (`scripts/run-test-shards.ps1`). New: `WhatsAppTemplateScopeTest` (27 tests, 190 assertions). MariaDB was **not** re-run for this change (no engine-specific SQL was added; run it before release). Mutation checks: with the send guard, the notification gate or the wording rules switched off, the matching tests fail; all restored.
+
+Older tests changed on purpose: fixtures that recorded 0 variables while the text still carried `{{1}} {{2}}` (the state the new guard refuses); "visitor has 4 values" is now 5; the "Not verified" label became "Provider: Not checked"; "no sync exists" became "only a manual sync button exists".
+
+### Still open
+- Live delivery of any template (none sent). Sync against the real account was not run from here.
+- The dev database's legacy settings still name BookMizo templates for society 6: an operator should clear them (the sender refuses them meanwhile).
+- `society_visitor_arrived` and OTP-on-WhatsApp have no sender; deciding to build them is a product decision.
