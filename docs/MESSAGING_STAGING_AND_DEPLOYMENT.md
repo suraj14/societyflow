@@ -104,3 +104,10 @@ Date, build/commit, server, recipient (approved), channel, action, provider requ
 3. Clear any older `whatsapp_*_template_name` settings that still name BookMizo templates.
 4. Send one real test to an approved tester only after steps 1-3, and read the provider's answer on the page. "Accepted" is not "delivered" (delivery receipts are not read).
 5. A template approved later does not appear by itself: press Sync again. Fast2SMS documents no template-status webhook.
+
+## D. WhatsApp Phone Number ID (added 2026-10-14)
+1. Settings -> WhatsApp -> **Verify configuration**: all three stages must pass; stage 3 lists the numbers on the API key.
+2. Copy the Phone Number ID of the number you send from (not the Business Account ID, not the phone number) into the field and save. An HTTP 404 "WABA or Phone Number not found" means a wrong digit or the wrong kind of ID.
+3. Synced templates send from the number they belong to; check the card's "Sends from" line matches the number you intend.
+4. No migration, queue or config-cache change is needed for this round (code only). After deploying run `php artisan route:clear && php artisan view:clear` (and `config:cache` / `route:cache` again if used).
+5. A real test send (approved tester only) is still required before calling WhatsApp working.

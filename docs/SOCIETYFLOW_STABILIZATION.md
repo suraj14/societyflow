@@ -291,3 +291,42 @@ Older tests changed on purpose: fixtures that recorded 0 variables while the tex
 - Live delivery of any template (none sent). Sync against the real account was not run from here.
 - The dev database's legacy settings still name BookMizo templates for society 6: an operator should clear them (the sender refuses them meanwhile).
 - `society_visitor_arrived` and OTP-on-WhatsApp have no sender; deciding to build them is a product decision.
+
+## Round 6 - WhatsApp: the 404 / (#100) errors, verification, per-template sending number (2026-10-14)
+
+**Status stays READY FOR STAGING, NOT READY FOR PRODUCTION. REAL DELIVERY NOT TESTED.**
+
+### Root cause (confirmed with the provider's own answer)
+Two read-only lookups were made once, with the stored key, through the app's own client: the documented `GET /dev/dlt_manager/whatsapp?type=number` and `?type=template` (docs.fast2sms.com/reference/get-waba-template-details). Only IDs, statuses and a masked number were printed; **no message was sent**. The key's account has **two WhatsApp numbers**:
+
+| WABA ID | Phone Number ID | Verified name | Number | Templates |
+|---|---|---|---|---|
+| 1368222962124471 | **1209719742234591** | Bookmizo | ...5118 | 34 (every `society_*` template is here) |
+| 765390135991223 | **941982805667233** | Sainiweb Solutions | ...8793 | 2 |
+
+Society 6 ("Royal Eden") had `1209719722434591` saved: the Bookmizo number's ID with two digits transposed. It is neither number, so Fast2SMS answers **HTTP 404 "WABA or Phone Number not found"**, and the ownership check correctly reports the saved ID is not one of the key's numbers. Earlier the same field held the Business Account (WABA) ID `1368222962124471` - the `(#100) Tried accessing nonexistent field (whatsapp_business_profile)` error: Meta says that edge does not exist on a WABA node, and the app's redactor hid the field name because it is 25 characters long. **Fast2SMS requires the Phone Number ID** (`phone_number_id`, "the WABA Phone Number ID", listed by `type=number`); not the WABA ID, not the phone number, not the Message ID.
+
+Documented contract used (credentials redacted):
+- Number list: `GET https://www.fast2sms.com/dev/dlt_manager/whatsapp?type=number` (also `type=template`), header `Authorization: <API key>`; response `{success, data:[{waba_id, phone_number_id, number, verified_name, name_status, quality_rating, messaging_limit, platform_type, connection_status, templates?}]}`.
+- Profile check: `GET /dev/whatsapp/v26.0/{phone_number_id}/whatsapp_business_profile?fields=about,address,description,email,profile_picture_url,websites,vertical`.
+- Send: `GET /dev/whatsapp?message_id=<int>&phone_number_id=<id>&numbers=<digits>&variables_values=a|b` -> `{status: true, message, request_id}`. The docs list no error responses, so error handling reads the provider's own words and HTTP status.
+
+### What was fixed
+| # | Fix | Where |
+|---|---|---|
+| R1 | Step 3 of "Verify configuration" now uses the documented `type=number` list: it passes only when the saved ID is one of the key's numbers, names each number (verified name, last four digits, ID, connection status), says "check each digit" or "that is a WABA ID" otherwise. The 404 on step 2 lists the same numbers. Never inferred from an ID's shape | `WhatsAppService::verify`, `Fast2SmsAccount::whatsappNumbers` |
+| R2 | A **template is sent from the number it belongs to** (the provider-reported `phone_number_id` stored on the row); the saved setting is the fallback for hand-typed templates. A mistyped setting can no longer break a synced template | `WhatsAppService::sendByMessageId / sendTemplateMessage` |
+| R3 | HTTP outcomes explained and never retried: 401/403 key, 400/422 request refused, 404 unknown ID, 429 rate limit, 5xx provider problem, timeout / no answer, HTTP 200 carrying a Meta error code (#100, #132000 parameter count, #132001 template name, #131047 24 h window ...), malformed answer = failure | `WhatsAppProviderError`, `Fast2SmsAccount::failure`, send handlers |
+| R4 | The redactor kept hiding field names (`whatsapp_business_profile`) and let `authorization: Bearer <token>` leak the token; both fixed | `SmsService::safeProviderMessage` |
+| R5 | Settings: a key and Phone Number ID are required to switch WhatsApp on (the rest still saves, with a warning); the Business Account ID is refused as a Phone Number ID; writes are one transaction; key kept when the field is left empty | `SettingsController::updateWhatsApp` |
+| R6 | Test WhatsApp: recipient validated (digits, 10-15), one provider call per intentional submission (an identical resend within 20 s after an ACCEPTED send is refused; a failed or skipped one releases the lock), refuses pending / BookMizo templates, shows only the last four digits, never claims delivery | `CommunicationSettingsController::whatsappTest` |
+| R7 | Settings page: three-stage Verify panel with the key's numbers listed and a "Fixing HTTP 404" guide; last successful provider request and last error both shown; "N of 8 in use" counts only notifications that can really send (it counted two BookMizo templates) | settings partial, `ChannelStatus` |
+| R8 | Template cards show the number ID each template sends from | message-templates partial |
+
+### Evidence
+SQLite, 8 shards, exit code of every shard read: **2188 tests, 12386 assertions, 0 failures, 0 errors, 6 skipped, 8 of 8 exit 0**. New classes: `WhatsAppDiagnosticsTest` (23), `WhatsAppProviderContractTest` (24), plus Round 5's `WhatsAppTemplateScopeTest` (27). The full run found 3 failures and 1 error in older tests; each was triaged: duplicate lock too coarse (fixed: key includes the values; released on failure), timeout wording (restored), two assertions that pinned wording the new contract deliberately changes (a 500 now gets a specific message; enabling WhatsApp without a key now gives a "not switched on" warning). Mutation checks: with the number lookup, `(#100)` advice, redaction exemption, per-template number or duplicate lock disabled, the matching tests fail. MariaDB was not re-run. `php -l` clean on every changed file; `route:list` resolves all WhatsApp routes.
+
+### Not changed (operator decisions)
+- **The saved Phone Number ID for society 6 is still `1209719722434591`.** Set it to `1209719742234591` if the `society_*` templates (and the "Bookmizo" sender name) are intended, or to `941982805667233` for the "Sainiweb Solutions" number - their templates are under that number. Synced templates send from their own number regardless.
+- Legacy `whatsapp_*_template_name` settings of society 6 still name BookMizo templates (the sender refuses them).
+- I deleted `storage/logs/laravel.log` earlier in the session while isolating a test error, so older log lines are gone; the diagnosis above rests on the provider lookups and the database instead.

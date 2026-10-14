@@ -943,6 +943,13 @@ class SettingsController extends Controller
                 if ($digits !== '' && (!ctype_digit($digits) || strlen($digits) < 8 || preg_match('/^(91)?[6-9][0-9]{9}$/', $digits))) {
                     $fail('Phone Number ID is the long numeric ID from Fast2SMS (WhatsApp), not a mobile number.');
                 }
+                // The Business Account (WABA) ID is a different, equally long number and the usual wrong paste: Fast2SMS then
+                // answers "(#100) Tried accessing nonexistent field".
+                $societyId = auth()->user()->hasRole('Super Admin') ? null : auth()->user()->society_id;
+                $waba = trim((string) (request()->input('whatsapp_waba_id') ?? SystemSetting::get('whatsapp', 'whatsapp_waba_id', '', $societyId)));
+                if ($digits !== '' && $waba !== '' && $digits === $waba) {
+                    $fail('That is the Business Account (WABA) ID, not the Phone Number ID. Copy the Phone Number ID of your WhatsApp number from Fast2SMS.');
+                }
             }],
             // Added in front of 10-digit recipient numbers (91 for India).
             'whatsapp_country_code'                   => ['nullable', 'regex:/^[0-9]{1,4}$/'],
@@ -965,7 +972,21 @@ class SettingsController extends Controller
 
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
 
-        SystemSetting::set('whatsapp', 'whatsapp_enabled', $request->boolean('whatsapp_enabled'), 'boolean', $societyId);
+        // Switched on only when it can work: a key and a Phone Number ID must exist after this save. Everything else the
+        // form carries is still saved; the page says why it stayed off. (Whether the ID is the RIGHT one is the provider's
+        // to say - see Verify configuration - never inferred from its shape.)
+        $hasKey = ($request->filled('whatsapp_api_key') && !\App\Support\SettingSecrets::isMask($request->whatsapp_api_key)) || \App\Services\WhatsAppService::apiKey($societyId) !== '';
+        $pnid = $request->has('whatsapp_phone_number_id')
+            ? trim((string) ($validated['whatsapp_phone_number_id'] ?? ''))
+            : trim((string) SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', '', $societyId));
+        $wantsOn = $request->boolean('whatsapp_enabled');
+        $enabled = $wantsOn && $hasKey && $pnid !== '';
+        $notEnabled = $wantsOn && !$enabled
+            ? 'WhatsApp was not switched on: ' . (!$hasKey ? 'save the Fast2SMS API key' : 'save the Phone Number ID') . ' first.'
+            : null;
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($request, $validated, $societyId, $enabled) {
+        SystemSetting::set('whatsapp', 'whatsapp_enabled', $enabled, 'boolean', $societyId);
 
         if ($request->has('whatsapp_country_code')) {
             SystemSetting::set('whatsapp', 'whatsapp_country_code', trim((string) ($validated['whatsapp_country_code'] ?? '')) ?: '91', 'string', $societyId);
@@ -997,8 +1018,14 @@ class SettingsController extends Controller
         }
 
         \App\Support\ChannelStatus::clear('whatsapp', $societyId);
+        });
 
-        return redirect()->route('settings.index', ['tab' => 'whatsapp'])->with('success', 'WhatsApp settings saved. ' . $this->checkWhatsAppAfterSave($societyId));
+        $back = redirect()->route('settings.index', ['tab' => 'whatsapp']);
+        if ($notEnabled) {
+            return $back->with('warning', 'WhatsApp settings saved. ' . $notEnabled);
+        }
+
+        return $back->with('success', 'WhatsApp settings saved. ' . $this->checkWhatsAppAfterSave($societyId));
     }
 
     /**

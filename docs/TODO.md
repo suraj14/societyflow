@@ -267,3 +267,10 @@ Open:
 - P2-53 No sender for `society_visitor_arrived` (visitor at the gate) or a WhatsApp login OTP - listed templates are unused until a product decision.
 - P2-54 Fast2SMS documents no template-status webhook: new templates need a manual sync (no background sync exists).
 - P2-55 Re-run the MariaDB suite for this change before release.
+
+## 2026-10-14 WhatsApp 404 / ownership round
+- P1-114 Phone Number ID verification against the documented number list, per-template sending number, HTTP outcome handling, duplicate-test guard, settings rules - **done** (`WhatsAppProviderContractTest`, `WhatsAppDiagnosticsTest`; 2188-test SQLite run).
+- P1-115 Operator: correct society 6's saved Phone Number ID (`1209719722434591` is a transposed `1209719742234591`) - **open**, needs a human decision which number to send from.
+- P1-116 One real, approved-tester WhatsApp send to confirm delivery and the sender name ("Bookmizo" for the society_* templates) - **open / REAL DELIVERY NOT TESTED**.
+- P2-56 `WhatsAppService` still returns a `dev_mode` "success" when the key or ID is missing (callers treat it as "not sent"); give it an explicit `skipped_not_configured` status.
+- P2-57 Delivery receipts / webhook (`status_update`, optional `webhook_secret_key` header) are not consumed: "accepted" never becomes "delivered".

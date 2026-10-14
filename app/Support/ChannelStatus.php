@@ -21,11 +21,17 @@ class ChannelStatus
 
     public static function record(string $channel, ?int $societyId, bool $ok, string $summary, ?string $detail = null): void
     {
+        $now = now()->toIso8601String();
+        $previous = self::get($channel, $societyId);
+
         SystemSetting::set(self::GROUP, $channel, [
             'ok'      => $ok,
             'summary' => $summary,
             'detail'  => $detail,
-            'at'      => now()->toIso8601String(),
+            'at'      => $now,
+            // the last SUCCESS survives a later failure (until the settings change), so a page can show both
+            'last_ok_at'      => $ok ? $now : ($previous['last_ok_at'] ?? null),
+            'last_ok_summary' => $ok ? $summary : ($previous['last_ok_summary'] ?? null),
         ], 'json', $societyId);
     }
 

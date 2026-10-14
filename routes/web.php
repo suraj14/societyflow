@@ -410,6 +410,8 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     Route::post('settings/sms/test', [App\Http\Controllers\SettingsController::class, 'testSms'])->name('settings.sms.test');
     Route::post('settings/whatsapp', [App\Http\Controllers\SettingsController::class, 'updateWhatsApp'])->name('settings.whatsapp.update');
     // WhatsApp templates come from Fast2SMS: refresh them, choose what each notification uses, and send a test.
+    // Read-only "Verify configuration" (local + provider + account checks); sends nothing.
+    Route::post('settings/whatsapp/verify', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappVerify'])->name('settings.whatsapp.verify');
     Route::post('settings/whatsapp/test-template', [App\Http\Controllers\CommunicationSettingsController::class, 'whatsappTest'])->name('settings.whatsapp.test-template');
     Route::post('settings/security', [App\Http\Controllers\SettingsController::class, 'updateSecurity'])->name('settings.security.update');
     Route::post('settings/clear-cache', [App\Http\Controllers\SettingsController::class, 'clearCache'])->name('settings.clear-cache');

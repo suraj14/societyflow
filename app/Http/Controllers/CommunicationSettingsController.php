@@ -44,10 +44,16 @@ class CommunicationSettingsController extends Controller
     public function whatsappTest(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'phone'       => 'required|string|min:10|max:15',
+            // digits, with an optional + and spaces / hyphens; 10 digits (national) up to 15 (with country code)
+            'phone'       => ['required', 'string', 'max:20', 'regex:/^\+?[0-9][0-9 \-]{8,18}$/', function ($attribute, $value, $fail) {
+                $digits = strlen(preg_replace('/\D+/', '', (string) $value));
+                if ($digits < 10 || $digits > 15) {
+                    $fail('Enter the recipient as 10 digits, or with the country code (up to 15 digits).');
+                }
+            }],
             'template_id' => 'required|integer',
             'variables'   => 'nullable|string|max:500',
-        ]);
+        ], ['phone.regex' => 'The recipient number can contain only digits, spaces, hyphens and a leading +.']);
         $societyId = $this->societyId();
 
         if (!WhatsAppService::isEnabled($societyId)) {
@@ -71,7 +77,18 @@ class CommunicationSettingsController extends Controller
             }
         }
 
+        // One intentional submission = one provider call: the same test (society, number, template) twice within a few
+        // seconds - a double click, a retried request - is refused here, after validation and before anything is sent.
+        $lock = 'wa-test:' . ($societyId ?? 'all') . ':' . sha1(preg_replace('/\D+/', '', $data['phone']) . '|' . $template->id . '|' . trim((string) ($data['variables'] ?? '')));
+        if (!\Illuminate\Support\Facades\Cache::add($lock, 1, 20)) {
+            return $this->fail('This test was just submitted. Wait a few seconds before sending it again.');
+        }
+
         $result = WhatsAppService::sendTestTemplate($template, $data['phone'], $societyId, $values);
+        // only an ACCEPTED send holds the lock: a failed or skipped one sent nothing, so fixing the cause and retrying is fine
+        if (empty($result['success']) || ($result['message'] ?? null) === 'dev_mode') {
+            \Illuminate\Support\Facades\Cache::forget($lock);
+        }
         $raw = $result['raw'] ?? null;
 
         if (!empty($result['skipped'])) {
@@ -95,14 +112,34 @@ class CommunicationSettingsController extends Controller
         ]);
     }
 
+    /**
+     * "Verify configuration": local validation, then the provider's own checks - read-only, no message is sent. Each stage
+     * answers separately (ok = true / false / null for "not run") and `verified` is true only when all passed.
+     * Reads the SAVED settings. Messaging switched off on the server means the provider stages are "not checked".
+     */
+    public function whatsappVerify(): JsonResponse
+    {
+        $societyId = $this->societyId();
+        $result = WhatsAppService::verify($societyId);
+
+        if ($result['verified']) {
+            ChannelStatus::record('whatsapp', $societyId, true, 'Fast2SMS accepted the API key and the Phone Number ID is one of the account\'s numbers');
+        } elseif ($result['provider']['ok'] === false || $result['account']['ok'] === false) {
+            ChannelStatus::record('whatsapp', $societyId, false, $result['account']['ok'] === false ? $result['account']['message'] : $result['provider']['message'], $result['provider']['detail'] ?? ($result['account']['detail'] ?? null));
+        }
+
+        return response()->json($result + ['delivery' => 'not tested: verification sends no message']);
+    }
+
     private function whatsappReason(string $provider): string
     {
         $p = strtolower($provider);
 
         return match (true) {
             str_contains($p, ExternalMessaging::SUPPRESSED_MESSAGE) => 'Real messaging is switched off on this server.',
-            str_contains($p, 'does not exist')            => 'WhatsApp does not recognise that template on this number. Refresh the templates and try again.',
-            str_contains($p, 'parameter')                 => 'The template expects a different number of values.',
+            str_contains($p, 'is not approved') || str_contains($p, 'bookmizo template') => 'This template cannot be used for sending.',
+            str_contains($p, 'does not exist')            => 'WhatsApp does not recognise that template on this number. Sync the templates and try again.',
+            str_contains($p, 'parameter') || str_contains($p, 'number of values') => 'The template expects a different number of values.',
             str_contains($p, 'authentication') || str_contains($p, 'authoriz') || str_contains($p, 'invalid api') => 'Fast2SMS did not accept the API key.',
             str_contains($p, 'unavailable')               => 'Could not reach Fast2SMS. Check the internet connection.',
             default                                       => 'Check the number and try again.',

@@ -11,7 +11,10 @@
     $sfWaEnabled = (bool) ($sfWa['whatsapp_enabled'] ?? false);
     $sfWaTemplates = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->orderBy('friendly_name')->orderBy('name')->get();
     $sfWaPurposes = \App\Support\WhatsAppPurposes::selectable();
-    $sfWaInUse = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->distinct()->count('purpose');
+    // notifications that will really send: an active template of a type, and one the sender would accept (not BookMizo's, not unapproved)
+    $sfWaInUse = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->get()
+        ->filter(fn ($t) => $t->sendBlockReason() === null)->pluck('purpose')->unique()->count();
+    $sfWaBlocked = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->get()->filter(fn ($t) => $t->sendBlockReason() !== null)->count();
     $sfInput = 'w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500';
     $sfWaJs = $sfWaTemplates->map(fn ($t) => ['id' => $t->id, 'label' => $t->displayName(), 'vars' => (int) $t->var_count, 'body' => (string) $t->body_text])->values();
 @endphp
@@ -60,6 +63,21 @@
             ])
         @endif
 
+        {{-- Last provider results, both: the last success and the last error (sanitised) --}}
+        @if ($sfWaStatus && (!empty($sfWaStatus['last_ok_at']) || !$sfWaStatus['ok']))
+            <div class="bg-white rounded-2xl border border-gray-200 px-5 py-3 text-sm space-y-1">
+                <p class="text-gray-700"><span class="font-semibold">Last successful provider request:</span>
+                    {{ !empty($sfWaStatus['last_ok_at']) ? \Illuminate\Support\Carbon::parse($sfWaStatus['last_ok_at'])->diffForHumans() . ' - ' . ($sfWaStatus['last_ok_summary'] ?? '') : 'none since the settings were last changed' }}</p>
+                @unless ($sfWaStatus['ok'])
+                    <p class="text-red-800"><span class="font-semibold">Last error:</span> {{ $sfWaStatus['summary'] }}@if (!empty($sfWaStatus['detail'])) <span class="font-mono text-xs break-words">({{ $sfWaStatus['detail'] }})</span>@endif</p>
+                @endunless
+            </div>
+        @endif
+
+        @if ($sfWaBlocked)
+            <p class="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-900" role="alert"><i class="fas fa-circle-exclamation mr-1"></i> {{ $sfWaBlocked }} active template(s) cannot be sent (BookMizo's, or not approved by the provider) and are not counted above. See <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp']) }}" class="underline">Message Templates</a>.</p>
+        @endif
+
         {{-- 1. API Configuration --}}
         <div class="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6 space-y-5">
             <h3 class="font-semibold text-gray-900"><span class="text-purple-600">&#9312;</span> API Configuration</h3>
@@ -83,7 +101,7 @@
                 <div>
                     <label for="sf-wa-pnid" class="block text-sm font-medium text-gray-700 mb-1.5">WhatsApp Phone Number ID</label>
                     <input id="sf-wa-pnid" type="text" name="whatsapp_phone_number_id" value="{{ $sfWa['whatsapp_phone_number_id'] ?? '' }}" inputmode="numeric" placeholder="e.g. 1209719742234591" class="{{ $sfInput }}">
-                    <p class="text-xs text-gray-500 mt-1">From Fast2SMS &rarr; WhatsApp Business: the numeric phone-number ID, <strong>not</strong> the phone number itself (and not the recipient's number).</p>
+                    <p class="text-xs text-gray-500 mt-1">From Fast2SMS &rarr; WhatsApp Business: the numeric phone-number ID, <strong>not</strong> the phone number itself, the recipient's number, or the Business Account (WABA) ID.</p>
                 </div>
                 <div>
                     <label for="sf-wa-cc" class="block text-sm font-medium text-gray-700 mb-1.5">Default Country Code</label>
@@ -102,6 +120,51 @@
             <button type="submit" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-sm font-semibold shadow hover:from-purple-700 hover:to-indigo-700">Save Changes</button>
         </div>
     </form>
+
+    {{-- Verify configuration: read-only, three separate checks, sends nothing --}}
+    <div class="rounded-2xl border border-gray-200 bg-white p-5 sm:p-6" x-data="sfWaVerify(@js(route('settings.whatsapp.verify')))">
+        <h3 class="font-semibold text-gray-900 flex items-center gap-2"><i class="fas fa-clipboard-check text-purple-600"></i> Verify configuration</h3>
+        <p class="text-sm text-gray-600 mt-1 mb-4">Checks the <strong>saved</strong> settings in three steps and sends no message. It cannot tell whether a message will be delivered.</p>
+        <button type="button" @click="run()" :disabled="busy" class="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-800 text-sm font-semibold hover:bg-gray-50 disabled:opacity-60">
+            <span x-show="!busy">Verify configuration</span><span x-show="busy" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i> Checking&hellip;</span>
+        </button>
+        <ul class="mt-4 space-y-2 text-sm" x-show="result" x-cloak role="status">
+            <template x-for="row in rows()" :key="row.key">
+                <li class="flex gap-2 rounded-xl px-3 py-2" :class="row.ok === true ? 'bg-green-50 text-green-900' : (row.ok === false ? 'bg-red-50 text-red-900' : 'bg-gray-50 text-gray-700')">
+                    <span class="font-bold w-4 shrink-0" x-text="row.ok === true ? '✓' : (row.ok === false ? '✕' : '–')"></span>
+                    <span><span class="font-semibold" x-text="row.label + ': '"></span><span x-text="row.message"></span>
+                        <span class="block text-xs font-mono break-words mt-0.5" x-show="row.detail" x-text="row.detail"></span></span>
+                </li>
+            </template>
+            <li class="rounded-xl px-3 py-2 font-semibold" :class="result && result.verified ? 'bg-green-100 text-green-900' : 'bg-amber-50 text-amber-900'"
+                x-text="result && result.verified ? 'Verified with Fast2SMS. Delivery of a message is not tested.' : 'Not verified.'"></li>
+        </ul>
+
+        {{-- What Fast2SMS itself lists for this API key: the only authoritative source of a valid Phone Number ID --}}
+        <div class="mt-3 text-sm" x-show="result && result.numbers && result.numbers.length" x-cloak>
+            <p class="font-semibold text-gray-800">WhatsApp numbers on this API key (from Fast2SMS)</p>
+            <ul class="mt-1 space-y-1">
+                <template x-for="n in (result ? result.numbers : [])" :key="n.phone_number_id">
+                    <li class="rounded-lg bg-gray-50 px-3 py-2">
+                        <span class="font-medium" x-text="n.verified_name || 'WhatsApp number'"></span>
+                        <span class="text-gray-600" x-text="' - ending ' + (n.number_tail || '????') + (n.connection_status ? ', ' + n.connection_status.toLowerCase() : '')"></span><br>
+                        <span class="text-xs text-gray-600">Phone Number ID <span class="font-mono text-gray-900 select-all" x-text="n.phone_number_id"></span></span>
+                    </li>
+                </template>
+            </ul>
+        </div>
+
+        <details class="mt-4 text-sm text-gray-700">
+            <summary class="cursor-pointer font-medium">Fixing &ldquo;HTTP 404: WABA or Phone Number not found&rdquo;</summary>
+            <ol class="list-decimal ml-5 mt-2 space-y-1">
+                <li>The 404 means Fast2SMS has no WhatsApp number with the Phone Number ID saved above. Check every digit - one transposed digit is enough.</li>
+                <li>Press <strong>Verify configuration</strong>: it lists the numbers Fast2SMS reports for this API key, each with its Phone Number ID.</li>
+                <li>Copy the Phone Number ID of the number you send from into the field above and save. It is a long number (about 15 digits): not the phone number itself and not the Business Account (WABA) ID.</li>
+                <li>Templates read from Fast2SMS are sent from the number they belong to, so a synced template works even if this field was mistyped; this field is still used for checks and for templates typed in by hand.</li>
+                <li>You can also find it in the Fast2SMS panel under WhatsApp. If the list above is empty or the key is rejected, the API key is the problem.</li>
+            </ol>
+        </details>
+    </div>
 
     {{-- 2. Test WhatsApp --}}
     <div class="rounded-2xl border border-green-200 bg-green-50/60 p-5 sm:p-6" x-data="sfWaTest(@js(route('settings.whatsapp.test-template')), @js($sfWaJs))" x-init="reset()">
@@ -149,6 +212,28 @@
 
 @push('scripts')
 <script>
+function sfWaVerify(url) {
+    return {
+        busy: false, result: null,
+        rows() {
+            const r = this.result || {};
+            return [
+                { key: 'local', label: '1. Saved settings', ...(r.local || {}) },
+                { key: 'provider', label: '2. Fast2SMS accepts the key and ID', ...(r.provider || {}) },
+                { key: 'account', label: '3. ID belongs to your WhatsApp number', ...(r.account || {}) },
+            ];
+        },
+        async run() {
+            this.busy = true; this.result = null;
+            try {
+                const res = await fetch(url, { method: 'POST', headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content } });
+                const d = await res.json().catch(() => null);
+                this.result = d && d.local ? d : { local: { ok: false, message: 'Could not read the answer. Try again.' }, provider: { ok: null, message: 'Not run.' }, account: { ok: null, message: 'Not run.' }, verified: false };
+            } catch (e) { this.result = { local: { ok: false, message: 'Could not reach the server. Check your connection.' }, provider: { ok: null, message: 'Not run.' }, account: { ok: null, message: 'Not run.' }, verified: false }; }
+            this.busy = false;
+        },
+    };
+}
 function sfWaTest(url, templates) {
     return {
         templates, templateId: templates.length ? templates[0].id : '', phone: @js(auth()->user()->phone), variables: '', busy: false, result: null,

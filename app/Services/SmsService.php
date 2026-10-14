@@ -291,8 +291,10 @@ class SmsService
             $message = str_replace($secret, '[redacted]', $message);
         }
 
-        $message = preg_replace('/authorization\s*:\s*\S+/i', 'authorization: [redacted]', $message) ?? $message;
-        $message = preg_replace('/[A-Za-z0-9_\-]{20,}/', '[redacted]', $message) ?? $message;
+        $message = preg_replace('/authorization\s*:\s*(?:(?:bearer|basic)\s+)?\S+/i', 'authorization: [redacted]', $message) ?? $message;
+        // A long run of letters and digits looks like a key or token. A plain snake_case word is a field or endpoint name
+        // (e.g. whatsapp_business_profile) and is the very thing a provider error needs to show, so it stays.
+        $message = preg_replace_callback('/[A-Za-z0-9_\-]{20,}/', fn ($m) => preg_match('/^[a-z]+(_[a-z]+)+$/', $m[0]) ? $m[0] : '[redacted]', $message) ?? $message;
         // A provider that echoes the request back ("invalid OTP 4821") must not put a live one-time code, or a phone number,
         // into a log or a message: on the OTP route every run of four or more digits is hidden.
         if ($maskNumbers) {

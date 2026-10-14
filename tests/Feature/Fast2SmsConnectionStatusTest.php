@@ -101,7 +101,8 @@ class Fast2SmsConnectionStatusTest extends TestCase
         Fast2SmsAccount::$transportOverride = fn () => [['message' => 'Something else'], 500];
         $this->saveWhatsApp();
         $status = ChannelStatus::get('whatsapp', $this->society->id);
-        $this->assertStringContainsString('could not complete the request', $status['summary']);
+        // an HTTP 500 is the provider's own problem: said so specifically (it used to be the generic line), never as a network fault
+        $this->assertStringContainsString('problem on its side', $status['summary']);
         $this->assertStringNotContainsString('internet', $status['summary']);
     }
 
@@ -133,7 +134,9 @@ class Fast2SmsConnectionStatusTest extends TestCase
 
         $this->saveWhatsApp();
 
-        $this->assertStringContainsString('Add the API key and the Phone Number ID', session('success'));
+        // enabling without a key is no longer saved as "on": a plain setup message, and no provider result recorded
+        $this->assertStringContainsString('not switched on', session('warning'));
+        $this->assertStringContainsString('API key', session('warning'));
         $this->assertNull(ChannelStatus::get('whatsapp', $this->society->id));
     }
 

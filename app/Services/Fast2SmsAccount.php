@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\WhatsAppProviderError;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -80,6 +81,39 @@ class Fast2SmsAccount
         return ['ok' => true, 'message' => count($templates) . ' WhatsApp template(s) found.', 'templates' => $templates];
     }
 
+    /**
+     * The WhatsApp numbers on the account as the provider reports them (same read-only template lookup, no filter).
+     * Lets Settings tell a correct Phone Number ID from the Business Account ID or any other ID.
+     *
+     * @return array{ok: bool, message: string, numbers?: list<array{phone_number_id: string, waba_id: string, number_tail: string, verified_name: string, connection_status: string, quality_rating: string}>, detail?: ?string, skipped?: bool}
+     */
+    public static function whatsappNumbers(string $apiKey): array
+    {
+        // GET /dev/dlt_manager/whatsapp?type=number - the documented list of the account's WhatsApp numbers
+        // (docs.fast2sms.com/reference/get-waba-template-details). Authoritative for "which IDs belong to this key".
+        $r = self::whatsapp($apiKey, 'number', null);
+        if (!$r['ok']) {
+            return $r;
+        }
+
+        $numbers = [];
+        foreach ($r['data'] as $row) {
+            $pnid = (string) ($row['phone_number_id'] ?? '');
+            if ($pnid !== '') {
+                $numbers[$pnid] = [
+                    'phone_number_id'   => $pnid,
+                    'waba_id'           => (string) ($row['waba_id'] ?? ''),
+                    'number_tail'       => substr(preg_replace('/\D+/', '', (string) ($row['number'] ?? '')) ?? '', -4),
+                    'verified_name'     => mb_substr((string) ($row['verified_name'] ?? ''), 0, 60),
+                    'connection_status' => (string) ($row['connection_status'] ?? ''),
+                    'quality_rating'    => (string) ($row['quality_rating'] ?? ''),
+                ];
+            }
+        }
+
+        return ['ok' => true, 'message' => count($numbers) . ' WhatsApp number(s) on the account.', 'numbers' => array_values($numbers)];
+    }
+
     /** @return array{ok: bool, message: string, data?: array, detail?: ?string} */
     private static function whatsapp(string $apiKey, string $type, ?string $phoneNumberId = null): array
     {
@@ -115,9 +149,15 @@ class Fast2SmsAccount
             default                                                            => 'Could not reach Fast2SMS. Check the internet connection and try again.',
         };
 
+        // Meta's errors often arrive inside an HTTP 200 (`{"error": {"message": "(#100) ...", "code": 100}}`): read them, and
+        // say what to do, instead of the generic line.
+        $advice = WhatsAppProviderError::explain($detail, $body['error']['code'] ?? null);
+
         $message = match (true) {
             $code === 0                                         => $transport,
             $code === 401 || (int) ($body['status_code'] ?? 0) === 412 => 'Fast2SMS did not accept this API key. Copy it again from Fast2SMS -> Dev API.',
+            $advice !== null                                    => $advice,
+            WhatsAppProviderError::forHttp($code) !== null      => WhatsAppProviderError::forHttp($code),
             default                                             => 'Fast2SMS could not complete the request.',
         };
 

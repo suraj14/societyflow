@@ -157,7 +157,7 @@ class WhatsAppService
         // A synced template has Fast2SMS's integer message_id: send by that. Without one, fall back to name + language.
         $result = $template && $template->message_id
             ? self::sendByMessageId($phone, $template, $params, $societyId, ['purpose' => $purpose])
-            : self::sendTemplateMessage($phone, $templateName, $components, $societyId, logContext: ['purpose' => $purpose], language: $template?->language ?: null);
+            : self::sendTemplateMessage($phone, $templateName, $components, $societyId, logContext: ['purpose' => $purpose], language: $template?->language ?: null, templatePhoneNumberId: $template?->phone_number_id);
 
         \App\Support\SendOnce::finish($once, !empty($result['success']) && ($result['message'] ?? null) !== 'dev_mode' && empty($result['skipped']));
 
@@ -198,7 +198,7 @@ class WhatsAppService
 
         $result = $template->message_id
             ? self::sendByMessageId($phone, $template, $params, $societyId, ['purpose' => 'test'])
-            : self::sendTemplateMessage($phone, $template->name, $components, $societyId, logContext: ['purpose' => 'test'], language: $template->language ?: null);
+            : self::sendTemplateMessage($phone, $template->name, $components, $societyId, logContext: ['purpose' => 'test'], language: $template->language ?: null, templatePhoneNumberId: $template->phone_number_id);
         if (($result['message'] ?? null) !== 'dev_mode' && empty($result['skipped'])) {
             self::recordDelivery('test', $phone, $societyId, $result);
         }
@@ -292,7 +292,7 @@ class WhatsAppService
                 'provider_msg' => SmsService::safeProviderMessage((string) $error, $apiKey),
             ]);
 
-            return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey)];
+            return ['success' => false, 'message' => \App\Support\WhatsAppProviderError::describe(SmsService::safeProviderMessage((string) $error, $apiKey), (int) $httpCode, $body['error']['code'] ?? null)];
         };
     }
 
@@ -313,7 +313,10 @@ class WhatsAppService
         }
 
         $apiKey = self::apiKey($societyId);
-        $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
+        // A Fast2SMS template (Message ID) belongs to ONE of the account's WhatsApp numbers; the provider reports which. That
+        // number is the one to send from - it is what the Message ID is valid for. The saved Phone Number ID is the fallback
+        // for a template typed in by hand, which has no number of its own.
+        $phoneNumberId = $template->phone_number_id ?: self::getSetting('whatsapp_phone_number_id', null, $societyId);
         if (empty($apiKey) || empty($phoneNumberId)) {
             Log::info('WhatsApp not configured - message not sent', array_merge($logContext, ['phone' => SmsService::maskPhone($phone)]));
 
@@ -334,7 +337,7 @@ class WhatsAppService
                 'phone' => SmsService::maskPhone($phone), 'provider_msg' => SmsService::safeProviderMessage((string) $error, $apiKey),
             ]));
 
-            return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey), 'http_status' => $httpCode, 'raw' => SmsService::rawResponse($body, $apiKey)];
+            return ['success' => false, 'message' => \App\Support\WhatsAppProviderError::describe(SmsService::safeProviderMessage((string) $error, $apiKey), (int) $httpCode, $body['error']['code'] ?? null), 'http_status' => $httpCode, 'raw' => SmsService::rawResponse($body, $apiKey)];
         };
 
         // The same handling for the real transport and a test's mock: status 0 means nothing came back.
@@ -349,20 +352,20 @@ class WhatsAppService
                 return ['success' => false, 'skipped' => true, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
             }
 
-            return ['success' => false, 'message' => 'WhatsApp service unavailable: ' . ($body['transport_error'] ?? 'no response')];
+            return ['success' => false, 'message' => 'WhatsApp service unavailable: ' . \App\Support\WhatsAppProviderError::forHttp(0) . ' (' . SmsService::safeProviderMessage((string) ($body['transport_error'] ?? 'no response')) . ')'];
         }
 
         return $handler($body, $httpCode);
     }
 
-    private static function sendTemplateMessage(string $phone, ?string $templateName, array $components, ?int $societyId, array $logContext, ?string $language = null): array
+    private static function sendTemplateMessage(string $phone, ?string $templateName, array $components, ?int $societyId, array $logContext, ?string $language = null, ?string $templatePhoneNumberId = null): array
     {
         if (!self::isEnabled($societyId)) {
             return ['success' => true, 'message' => 'dev_mode'];
         }
 
         $apiKey = self::apiKey($societyId);
-        $phoneNumberId = self::getSetting('whatsapp_phone_number_id', null, $societyId);
+        $phoneNumberId = $templatePhoneNumberId ?: self::getSetting('whatsapp_phone_number_id', null, $societyId);
         $version = self::getSetting('whatsapp_api_version', 'v26.0', $societyId);
         // A synced template's own language wins: Meta matches name AND
         // language, and an account's templates are often plain 'en' while
@@ -422,7 +425,7 @@ class WhatsAppService
                 'provider_msg' => SmsService::safeProviderMessage((string) $error, $apiKey),
             ]));
 
-            return ['success' => false, 'message' => SmsService::safeProviderMessage((string) $error, $apiKey)];
+            return ['success' => false, 'message' => \App\Support\WhatsAppProviderError::describe(SmsService::safeProviderMessage((string) $error, $apiKey), (int) $httpCode, $body['error']['code'] ?? null)];
         };
     }
 
@@ -465,6 +468,80 @@ class WhatsAppService
         $version = (string) (self::getSetting('whatsapp_api_version', 'v26.0', $societyId) ?: 'v26.0');
 
         return Fast2SmsAccount::whatsappProfile($apiKey, $phoneNumberId, $version);
+    }
+
+    /**
+     * "Verify configuration": three separate, read-only checks that send no message and say exactly what each proved.
+     *  1. local     - what is saved is complete and shaped like the provider's identifiers (no network);
+     *  2. provider  - Fast2SMS accepts the key together with the Phone Number ID (business-profile lookup);
+     *  3. account   - the saved Phone Number ID is one of the WhatsApp numbers Fast2SMS reports for the account, and not
+     *                 the Business Account (WABA) ID or another ID (template lookup).
+     * `verified` is true only when all three passed. None of this says anything about delivery. A check that was not
+     * made (messaging switched off on the server, or an earlier check failed) has `ok` = null and is never shown as passed.
+     *
+     * @return array{local: array, provider: array, account: array, verified: bool}
+     */
+    public static function verify(?int $societyId): array
+    {
+        $apiKey = self::apiKey($societyId);
+        $pnid = trim((string) self::getSetting('whatsapp_phone_number_id', '', $societyId));
+        $waba = trim((string) self::getSetting('whatsapp_waba_id', '', $societyId));
+
+        $problems = [];
+        if ($apiKey === '') {
+            $problems[] = 'No Fast2SMS API key is saved (WhatsApp or SMS settings).';
+        }
+        if ($pnid === '') {
+            $problems[] = 'No Phone Number ID is saved.';
+        } elseif (!ctype_digit($pnid) || strlen($pnid) < 8) {
+            $problems[] = 'The Phone Number ID must be the long numeric ID Fast2SMS shows for your WhatsApp number.';
+        } elseif (preg_match('/^(91)?[6-9][0-9]{9}$/', $pnid)) {
+            $problems[] = 'The Phone Number ID looks like a mobile number. It is the long numeric ID, not the number itself.';
+        } elseif ($waba !== '' && $pnid === $waba) {
+            $problems[] = 'The Phone Number ID is the same as the Business Account (WABA) ID. They are different IDs: use the Phone Number ID of your WhatsApp number.';
+        }
+
+        $local = ['ok' => $problems === [], 'message' => $problems === [] ? 'Saved settings are complete.' : implode(' ', $problems)];
+        $notRun = ['ok' => null, 'message' => 'Not run.'];
+        if (!$local['ok']) {
+            return ['local' => $local, 'provider' => $notRun, 'account' => $notRun, 'numbers' => [], 'verified' => false];
+        }
+
+        $conn = self::checkConnection($societyId);
+        $provider = !empty($conn['skipped'])
+            ? ['ok' => null, 'message' => $conn['message']]
+            : ['ok' => (bool) $conn['ok'], 'message' => $conn['message'], 'detail' => $conn['detail'] ?? null];
+
+        $found = Fast2SmsAccount::whatsappNumbers($apiKey);
+        $numbers = $found['numbers'] ?? [];
+        // "Bookmizo (number ending 5118, ID 1209...)" - what the provider itself reports for each number on this key
+        $describe = fn (array $n) => ($n['verified_name'] !== '' ? $n['verified_name'] . ' ' : '') . '(number ending ' . ($n['number_tail'] ?: '????') . ', Phone Number ID ' . $n['phone_number_id'] . ')';
+
+        if (!empty($found['skipped'])) {
+            $account = ['ok' => null, 'message' => $found['message']];
+        } elseif (!$found['ok']) {
+            $account = ['ok' => false, 'message' => $found['message'], 'detail' => $found['detail'] ?? null];
+        } else {
+            $ids = array_column($numbers, 'phone_number_id');
+            $isWaba = in_array($pnid, array_filter(array_column($numbers, 'waba_id')), true);
+            $list = implode('; ', array_map($describe, $numbers));
+            $mine = collect($numbers)->firstWhere('phone_number_id', $pnid);
+            $account = match (true) {
+                $mine !== null              => ['ok' => true, 'message' => 'The saved Phone Number ID is the account\'s ' . $describe($mine) . '.'
+                                                . (($mine['connection_status'] ?? '') !== '' && strtoupper($mine['connection_status']) !== 'CONNECTED' ? ' The provider reports it as ' . $mine['connection_status'] . '.' : '')],
+                $isWaba                     => ['ok' => false, 'message' => 'The saved "Phone Number ID" is a Business Account (WABA) ID. This key\'s WhatsApp numbers: ' . $list . '.'],
+                $ids === []                 => ['ok' => false, 'message' => 'Fast2SMS reports no WhatsApp number on this account.'],
+                default                     => ['ok' => false, 'message' => 'The saved Phone Number ID is not one of this key\'s WhatsApp numbers - check each digit. This key\'s numbers: ' . $list . '.'],
+            };
+        }
+
+        // a 404 on the profile step with the real list at hand: name the way out right there
+        if ($provider['ok'] === false && $numbers && str_contains((string) ($provider['detail'] ?? ''), 'HTTP 404')) {
+            $provider['message'] .= ' This key\'s WhatsApp numbers: ' . implode('; ', array_map($describe, $numbers)) . '.';
+        }
+
+        return ['local' => $local, 'provider' => $provider, 'account' => $account, 'numbers' => $numbers,
+            'verified' => $provider['ok'] === true && $account['ok'] === true];
     }
 
     /** Meta's API wants a country-coded number with no leading '+'. India default. */

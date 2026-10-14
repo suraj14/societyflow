@@ -234,7 +234,9 @@ class CommunicationSettingsTest extends TestCase
         $this->assertStringContainsString('needs 2 value(s)', $bad->json('message'));
         $this->assertNull($url, 'nothing was sent');
 
-        // a provider rejection is explained and shown raw
+        // a provider rejection is explained and shown raw (the same values were accepted a moment ago; the duplicate-submit
+        // guard that stops an identical resend within seconds is exercised in WhatsAppProviderContractTest)
+        \Illuminate\Support\Facades\Cache::flush();
         WhatsAppService::$transportOverride = fn () => [['error' => ['message' => '(#132001) Template name does not exist in the translation']], 400];
         $fail = $send(['variables' => 'Asha|Block A']);
         $this->assertFalse($fail->json('success'));

@@ -94,6 +94,40 @@ class WhatsAppTemplateMapping
         return $out;
     }
 
+    /**
+     * Which notification a freshly synced template is clearly meant for, judged from its NAME (the name is what its
+     * author chose it for; wording alone is too loose to attach a message to a resident event). Null when the name does
+     * not say, when SocietyFlow has no sender for it, or when its variables could not all be filled by that notification.
+     * "Arrived" templates return null on purpose: the only visitor sender fires on approval, and an arrival message would
+     * go out with the wrong meaning.
+     */
+    public static function suggestPurpose(string $name, string $body = ''): ?string
+    {
+        $n = strtolower(str_replace(['-', ' '], '_', $name));
+        if (str_contains($n, 'arriv') || str_contains($n, 'booking') || str_contains($n, 'bookmizo')) {
+            return null;
+        }
+
+        $purpose = match (true) {
+            (bool) preg_match('/visitor_(approved|approval|allowed|entry)/', $n) => 'visitor',
+            (bool) preg_match('/(gate|access)_?pass/', $n)                      => 'access_pass',
+            str_contains($n, 'complaint')                                       => 'complaint',
+            (bool) preg_match('/payment_(received|receipt|confirm)|receipt/', $n) => 'payment',
+            str_contains($n, 'bill') || str_contains($n, 'invoice')             => 'bill',
+            str_contains($n, 'notice') || str_contains($n, 'circular')          => 'notice',
+            str_contains($n, 'event')                                           => 'event',
+            (bool) preg_match('/society_(rules|document)|document_published/', $n) => 'document',
+            default                                                             => null,
+        };
+        if ($purpose === null) {
+            return null;
+        }
+
+        $count = count(\App\Models\WhatsAppTemplate::placeholderNumbers($body));
+
+        return $count <= count(WhatsAppPurposes::all()[$purpose]['fields'] ?? []) ? $purpose : null;
+    }
+
     private static function flatten(string $text): string
     {
         return strtolower((string) preg_replace('/\{\{\s*\d+\s*\}\}/', self::MARK, $text));

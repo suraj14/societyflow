@@ -129,6 +129,9 @@
                         <dl class="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
                             <dt class="text-gray-500">Approved name</dt><dd class="font-mono text-gray-800 break-all">{{ $t->name }}</dd>
                             <dt class="text-gray-500">Recipient</dt><dd class="text-gray-800">{{ \App\Support\WhatsAppPurposes::recipient($t->purpose) }}</dd>
+                            @if ($t->phone_number_id)
+                                <dt class="text-gray-500">Sends from</dt><dd class="font-mono text-gray-800 break-all">Phone Number ID {{ $t->phone_number_id }}</dd>
+                            @endif
                         </dl>
 
                         <p class="text-sm text-gray-800 bg-gray-50 rounded-xl px-3 py-2.5 whitespace-pre-line break-words">{{ $t->body_text ?: '(no text saved - sync or edit to fill it in)' }}</p>

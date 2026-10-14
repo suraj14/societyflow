@@ -4,6 +4,12 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-14 (later) - WhatsApp 404 / Phone Number ID
+
+Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION; REAL DELIVERY NOT TESTED.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 6.
+- Cause: the key's account has two WhatsApp numbers (`1209719742234591` Bookmizo, `941982805667233` Sainiweb Solutions); society 6 saved `1209719722434591` (transposed digits) -> HTTP 404. Earlier it held the WABA ID -> `(#100)`.
+- Fixed with tests: ownership check against the documented `type=number` list, templates send from their own number, every HTTP outcome handled, duplicate-test guard, settings validation, truthful status. SQLite 2188 tests, 8/8 exit 0.
+- Operator: set society 6's Phone Number ID (decision needed), clear the legacy BookMizo settings, then one approved real test.
 ## 2026-10-14 - WhatsApp templates: listing, BookMizo exclusion, exact parameters, manual sync
 
 Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 5.
