@@ -209,7 +209,7 @@ class CommunicationSettingsTest extends TestCase
         $this->syncWhatsApp([$this->waTemplate('visitor_alert', 2, 'Hi {{1}}, {{2}} is here')]);
         $tpl = WhatsAppTemplate::where('name', 'visitor_alert')->first();
         $url = null;
-        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'r2'], 200]; };
+        WhatsAppService::$transportOverride = function ($u) use (&$url) { $url = $u; return [['return' => true, 'message' => ['Whatsapp Message sent successfully.'], 'request_id' => 'r2'], 200]; };
         $send = fn (array $extra = []) => $this->actingAs($this->admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id] + $extra)->assertOk();
 
         // typed values

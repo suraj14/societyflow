@@ -26,6 +26,12 @@ enum EmailEvent: string
     case SOCIETY_DOCUMENT_PUBLISHED = 'society_document_published';
     case EVENT_CHANGED = 'event_changed';
 
+    // Gate approval workflow (VisitorNotifications)
+    case VISITOR_REQUEST = 'visitor_request';
+    case VISITOR_REJECTED = 'visitor_rejected';
+    case VISITOR_OVERRIDE = 'visitor_override';
+    case VISITOR_CHECKED_IN = 'visitor_checked_in';
+
     /**
      * Get all event values as array
      */
@@ -56,6 +62,10 @@ enum EmailEvent: string
             self::FACILITY_BOOKING_STATUS_UPDATED->value => 'Facility Booking Status Updated',
             self::SOCIETY_DOCUMENT_PUBLISHED->value => 'Society Document Published',
             self::EVENT_CHANGED->value => 'Event Cancelled / Rescheduled / Updated',
+            self::VISITOR_REQUEST->value => 'Visitor At The Gate (waiting for approval)',
+            self::VISITOR_REJECTED->value => 'Visitor Rejected',
+            self::VISITOR_OVERRIDE->value => 'Visitor Decision Changed By Administrator',
+            self::VISITOR_CHECKED_IN->value => 'Visitor Entered',
         ];
     }
 

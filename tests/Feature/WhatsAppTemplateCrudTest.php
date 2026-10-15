@@ -34,7 +34,7 @@ class WhatsAppTemplateCrudTest extends TestCase
             parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
             $this->requests[] = $q + ['_path' => parse_url($url, PHP_URL_PATH)];
 
-            return [['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'r'], 200];
+            return [['return' => true, 'message' => ['Whatsapp Message sent successfully.'], 'request_id' => 'r'], 200];
         };
         Fast2SmsAccount::$transportOverride = function () { $this->requests[] = ['_account_call' => true]; return [['success' => true], 200]; };
     }
@@ -473,6 +473,41 @@ class WhatsAppTemplateCrudTest extends TestCase
         $this->assertNull($unrelated->fresh()->purpose);
         $this->assertFalse($unrelated->fresh()->is_active);
         $this->assertNotNull(WhatsAppTemplate::forPurpose($this->society->id, 'bill'));
+    }
+
+    /**
+     * The carry-over above leaves the older `whatsapp_<type>_template_name` setting in place. It used to find the template by
+     * name whatever its switch said, so "Switch off" on a carried-over template did not stop it.
+     */
+    public function test_switching_off_a_carried_over_template_stops_it_although_the_older_setting_still_names_it(): void
+    {
+        $this->enableSending();
+        $t = $this->makeOne();                                                // active for visitor
+        $this->wa('whatsapp_visitor_template_name', $t->name);                // the older setting the carry-over left behind
+        $this->assertTrue($this->send()['success'], 'switched on: sent');
+
+        $this->actingAs($this->admin)->post(route('admin.message-templates.whatsapp.toggle', $t))->assertSessionHas('success');
+        $this->assertFalse($t->fresh()->is_active);
+        $this->requests = [];
+
+        $off = $this->send();
+        $this->assertFalse($off['success']);
+        $this->assertSame('skipped_not_configured', $off['status']);
+        $this->assertStringContainsString('is switched off', $off['message']);
+        $this->assertSame([], $this->requests, 'switched off: no provider request');
+
+        // switched on for another notification: the older visitor setting does not borrow it
+        $t->forceFill(['purpose' => 'bill', 'is_active' => true])->save();
+        $elsewhere = $this->send();
+        $this->assertFalse($elsewhere['success']);
+        $this->assertStringContainsString('is used for', $elsewhere['message']);
+        $this->assertSame([], $this->requests);
+
+        // never assigned in Message Templates (the setup before templates were records): the older setting still sends it
+        $t->forceFill(['purpose' => null, 'is_active' => false])->save();
+        \Illuminate\Support\Facades\Cache::flush();   // the same values were accepted above; the duplicate guard is tested elsewhere
+        $this->assertTrue($this->send()['success']);
+        $this->assertCount(1, $this->requests);
     }
 
     public function test_saving_whatsapp_settings_does_not_touch_the_templates(): void

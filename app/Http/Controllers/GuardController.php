@@ -157,10 +157,8 @@ class GuardController extends BaseController
 
         abort_if($flat === null, 403, 'That property is not in your society.');
 
-        $visitor = Visitor::create([
-            'society_id'          => $societyId,
-            'flat_id'             => $flat->id,
-            'host_user_id'        => auth()->id(),
+        // The service finds the unit's owner / tenant, stores the request and tells them (and the administrators).
+        $result = \App\Services\VisitorApprovalService::register(auth()->user(), $flat, [
             'visitor_name'        => $validated['visitor_name'],
             'visitor_phone'       => $validated['visitor_phone'],
             'visitor_type'        => $validated['visitor_type'],
@@ -168,12 +166,13 @@ class GuardController extends BaseController
             'vehicle_number'      => $validated['vehicle_number'] ?? null,
             'expected_count'      => $validated['expected_count'] ?? 1,
             'expected_entry_time' => now(),
-            'approval_status'     => 'pending',
-            'entry_status'        => 'pending',
-        ]);
+        ], $request->input('client_request_id'));
+        $visitor = $result['visitor'];
 
         return redirect()->route('guard.dashboard')
-            ->with('success', $visitor->visitor_name . ' registered. Awaiting resident approval.');
+            ->with('success', $visitor->visitor_name . ($result['linked']
+                ? ' registered. Awaiting resident approval.'
+                : ' registered. No owner or tenant is linked to this property, so the administrators have been asked to decide.'));
     }
 
     /**
@@ -273,10 +272,12 @@ class GuardController extends BaseController
             return $this->gateActionResponse($request, false, 'This visitor is already checked in.');
         }
 
-        $visitor->update([
-            'entry_status'      => 'entered',
-            'actual_entry_time' => now(),
-        ]);
+        try {
+            $visitor = \App\Services\VisitorApprovalService::checkIn($visitor, auth()->user())['visitor'];
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            // someone else got there first (a double tap, the other gate): the same plain answer as the checks above
+            return $this->gateActionResponse($request, false, $e->getMessage());
+        }
 
         return $this->gateActionResponse($request, true, $visitor->visitor_name . ' checked in.', $visitor);
     }
@@ -290,10 +291,11 @@ class GuardController extends BaseController
             return $this->gateActionResponse($request, false, 'This visitor is not currently inside.');
         }
 
-        $visitor->update([
-            'entry_status'     => 'exited',
-            'actual_exit_time' => now(),
-        ]);
+        try {
+            $visitor = \App\Services\VisitorApprovalService::checkOut($visitor, auth()->user())['visitor'];
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            return $this->gateActionResponse($request, false, $e->getMessage());
+        }
 
         return $this->gateActionResponse($request, true, $visitor->visitor_name . ' checked out.', $visitor);
     }

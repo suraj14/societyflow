@@ -80,6 +80,11 @@ class VisitorController extends Controller
             'approval_status'     => 'allowed',
             'entry_status'        => 'pending',
             'approved_by'         => $user->id,
+            // who invited and decided, for the approval trail (same as VisitorApprovalService::register for a pre-approved visit)
+            'requested_by'        => $user->id,
+            'decided_by'          => $user->id,
+            'decided_at'          => now(),
+            'decision_role'       => 'resident',
             'security_notes'      => $validated['notes'] ?? null,
         ]);
 

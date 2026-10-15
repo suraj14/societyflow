@@ -199,8 +199,12 @@ class AccessPassService
                 return $deny(self::REASON_GUEST_ALREADY_IN);
             }
 
-            $guest->update(['entry_status' => 'entered', 'actual_entry_time' => now()]);
+            $guest->update(['entry_status' => 'entered', 'actual_entry_time' => now(), 'checked_in_by' => $guard->id]);
             $guest->addLog($guard, 'entry', 'Guest QR scanned in');
+
+            // A real entry: the people of the unit hear it, as for any check-in. The guest was approved by the resident who
+            // invited them, so nothing is asked of anyone - this is only the notice that they are now inside.
+            \App\Events\VisitorWorkflowEvent::dispatch($guest, 'checked_in', $guard->id);
 
             return ['found' => true, 'ok' => true, 'reason' => null, 'visitor' => $guest];
         });

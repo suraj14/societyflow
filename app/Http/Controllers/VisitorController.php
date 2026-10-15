@@ -189,9 +189,9 @@ class VisitorController extends BaseController
                 $photoPath = $this->handleFileUpload($request, 'photo', 'visitor-photos', ['jpeg', 'png', 'jpg', 'gif']);
             }
 
-            $visitor = Visitor::create([
-                'society_id' => $flat->society_id,
-                'flat_id' => $flat->id,
+            // One path for every way a visitor is logged: the service stores it (pre-approved for a resident's own guest,
+            // waiting for the residents otherwise) and tells the unit's owner / tenant and the administrators.
+            $result = \App\Services\VisitorApprovalService::register($user, $flat, [
                 'host_user_id' => $user->id,
                 'visitor_name' => $validated['visitor_name'],
                 'visitor_phone' => $validated['visitor_phone'],
@@ -202,12 +202,9 @@ class VisitorController extends BaseController
                 'expected_entry_time' => $entryDateTime,
                 'expected_exit_time' => $exitDateTime,
                 'photo' => $photoPath,
-                'approval_status' => $isResident ? 'allowed' : 'pending',
-                'approved_by' => $isResident ? $user->id : null,
-                'entry_status' => 'pending',
             ]);
 
-            return $visitor;
+            return $result['visitor'];
         }, $isResident
             ? 'Visitor invited and pre-approved. Security can verify them at the gate.'
             : 'Visitor registered successfully.', 'visitors.index', false);
@@ -314,10 +311,14 @@ class VisitorController extends BaseController
                 'in_time' => 'required|date_format:H:i',
                 'expected_exit_time' => 'nullable|date',
                 'out_time' => 'nullable|date_format:H:i',
-                'approval_status' => 'nullable|in:pending,allowed,denied',
-                'entry_status' => 'nullable|in:pending,entered,exited',
+                // The edit form still posts these two, but a decision and an entry are never changed by editing the record:
+                // they go through Allow / Deny, the administrator's override (with a reason) and the gate's check-in / out,
+                // which record who did it. Accepted here only so the form posts cleanly, then ignored.
+                'approval_status' => 'nullable|string',
+                'entry_status' => 'nullable|string',
                 'photo' => 'nullable|file|mimes:jpeg,png,jpg,gif|max:2048',
             ]);
+            unset($validated['approval_status'], $validated['entry_status']);
 
             // Combine date and time for entry (both are required)
             $validated['expected_entry_time'] = $validated['expected_entry_time'] . ' ' . $validated['in_time'];
@@ -382,10 +383,12 @@ class VisitorController extends BaseController
             abort(403, 'Access denied: Only administrators and staff can check in visitors.');
         }
 
-        $visitor->update([
-            'entry_status' => 'entered',
-            'actual_entry_time' => now(),
-        ]);
+        // Approval is not entry, and a denied visitor is never checked in: the service enforces both and records who did it.
+        try {
+            \App\Services\VisitorApprovalService::checkIn($visitor, auth()->user());
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            return redirect()->route('visitors.index')->with('error', $e->getMessage());
+        }
 
         return redirect()->route('visitors.index')
             ->with('success', 'Visitor checked in successfully.');
@@ -403,10 +406,11 @@ class VisitorController extends BaseController
             abort(403, 'Access denied: Only administrators and staff can check out visitors.');
         }
 
-        $visitor->update([
-            'entry_status' => 'exited',
-            'actual_exit_time' => now(),
-        ]);
+        try {
+            \App\Services\VisitorApprovalService::checkOut($visitor, auth()->user());
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            return redirect()->route('visitors.index')->with('error', $e->getMessage());
+        }
 
         return redirect()->route('visitors.index')
             ->with('success', 'Visitor checked out successfully.');
@@ -426,16 +430,33 @@ class VisitorController extends BaseController
 
         $validated = $request->validate([
             'status' => 'required|in:pending,allowed,denied,entered,exited',
+            'reason' => 'nullable|string|max:500',
         ]);
 
-        if (in_array($validated['status'], ['pending', 'allowed', 'denied'])) {
-            $visitor->update(['approval_status' => $validated['status']]);
-        } else {
-            $visitor->update([
-                'entry_status' => $validated['status'],
-                'actual_entry_time' => $validated['status'] === 'entered' ? now() : $visitor->actual_entry_time,
-                'actual_exit_time' => $validated['status'] === 'exited' ? now() : $visitor->actual_exit_time,
-            ]);
+        // Every transition goes through the workflow service, so it is validated, atomic and recorded with who did it.
+        // Nothing here sets a status directly any more: a decision is never reset to "pending", a denied visitor is not
+        // checked in, and changing an earlier decision is an administrator's override with a reason.
+        try {
+            $user = auth()->user();
+            switch ($validated['status']) {
+                case 'pending':
+                    return redirect()->route('visitors.index')->with('error', 'A decision cannot be reset to pending. Use Allow / Deny, or an administrator can change it with a reason.');
+                case 'allowed':
+                case 'denied':
+                    $service = \App\Services\VisitorApprovalService::class;
+                    $visitor->approval_status === 'pending'
+                        ? $service::decide($visitor, $user, $validated['status'], $validated['reason'] ?? null)
+                        : $service::override($visitor, $user, $validated['status'], $validated['reason'] ?? null);
+                    break;
+                case 'entered':
+                    \App\Services\VisitorApprovalService::checkIn($visitor, $user);
+                    break;
+                case 'exited':
+                    \App\Services\VisitorApprovalService::checkOut($visitor, $user);
+                    break;
+            }
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            return redirect()->route('visitors.index')->with('error', $e->getMessage());
         }
 
         return redirect()->route('visitors.index')
@@ -444,15 +465,15 @@ class VisitorController extends BaseController
 
     /**
      * Who may Allow/Deny this visitor:
-     *   'staff'    - Admin/Staff/Super Admin, any visitor in their society;
+     *   'staff'    - Admin/Super Admin, any visitor in their society;
      *   'resident' - a tenant/owner, only visitors to their own property;
-     *   null       - nobody else (Guard records the decision, it doesn't make it).
+     *   null       - nobody else (Guard and Staff record visitors and let them in; they do not decide).
      */
     private function approvalRole(Visitor $visitor): ?string
     {
         $user = auth()->user();
 
-        if ($user->hasRole(['Admin', 'Staff', 'Super Admin'])) {
+        if ($user->hasRole(['Admin', 'Super Admin'])) {
             return VisitorPropertyScope::canManageVisitor($user, $visitor) ? 'staff' : null;
         }
 
@@ -463,7 +484,7 @@ class VisitorController extends BaseController
         return null;
     }
 
-    public function allow(Visitor $visitor)
+    public function allow(Request $request, Visitor $visitor)
     {
         $role = $this->approvalRole($visitor);
 
@@ -471,21 +492,21 @@ class VisitorController extends BaseController
             abort(403, 'Access denied: You can only approve visitors for your own property.');
         }
 
-        if ($role === 'resident' && $visitor->entry_status !== 'pending') {
-            return redirect()->route('visitors.index')
-                ->with('error', 'This visitor has already arrived; the decision can no longer be changed.');
+        // A visitor who is still waiting is decided normally. One who was already decided (an owner's rejection, say) can
+        // only be changed by an administrator's override, with a written reason - never by pressing Allow again.
+        $pending = $visitor->approval_status === 'pending';
+        $validated = $request->validate(['reason' => ($pending ? 'nullable' : 'required') . '|string|max:500']);
+
+        try {
+            $pending
+                ? \App\Services\VisitorApprovalService::decide($visitor, auth()->user(), 'allowed')
+                : \App\Services\VisitorApprovalService::override($visitor, auth()->user(), 'allowed', $validated['reason'] ?? null);
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            return redirect()->route('visitors.index')->with('error', $e->getMessage());
         }
 
-        $visitor->update([
-            'approval_status' => 'allowed',
-            'approved_by' => auth()->id(),
-        ]);
-
-        // Dispatch event to trigger email notification
-        \App\Events\VisitorApproved::dispatch($visitor);
-
         return redirect()->route('visitors.index')
-            ->with('success', 'Visitor allowed successfully.');
+            ->with('success', $pending ? 'Visitor allowed successfully.' : 'Decision changed to allowed. The residents and the guard have been told.');
     }
 
     public function deny(Request $request, Visitor $visitor)
@@ -496,27 +517,23 @@ class VisitorController extends BaseController
             abort(403, 'Access denied: You can only deny visitors for your own property.');
         }
 
-        if ($role === 'resident' && $visitor->entry_status !== 'pending') {
-            return redirect()->route('visitors.index')
-                ->with('error', 'This visitor has already arrived; the decision can no longer be changed.');
+        // Staff must record why; a resident turning away their own visitor
+        // need not explain themselves. Changing a decision already made is an override and always needs one.
+        $pending = $visitor->approval_status === 'pending';
+        $validated = $request->validate([
+            'reason' => (($role === 'staff' || !$pending) ? 'required' : 'nullable') . '|string|max:500',
+        ]);
+
+        try {
+            $pending
+                ? \App\Services\VisitorApprovalService::decide($visitor, auth()->user(), 'denied', $validated['reason'] ?? null)
+                : \App\Services\VisitorApprovalService::override($visitor, auth()->user(), 'denied', $validated['reason'] ?? null);
+        } catch (\App\Services\VisitorWorkflowException $e) {
+            return redirect()->route('visitors.index')->with('error', $e->getMessage());
         }
 
-        // Staff must record why; a resident turning away their own visitor
-        // need not explain themselves.
-        $validated = $request->validate([
-            'reason' => ($role === 'staff' ? 'required' : 'nullable') . '|string|max:500',
-        ]);
-
-        $visitor->update([
-            'approval_status' => 'denied',
-            'rejection_reason' => $validated['reason'] ?? 'Denied by resident',
-        ]);
-
-        // Send visitor denial email
-        \App\Services\EmailNotificationService::sendVisitorNotification($visitor, 'denied');
-
         return redirect()->route('visitors.index')
-            ->with('success', 'Visitor denied successfully.');
+            ->with('success', $pending ? 'Visitor denied successfully.' : 'Decision changed to denied. The residents and the guard have been told.');
     }
 
     /**

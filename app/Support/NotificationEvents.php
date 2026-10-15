@@ -132,8 +132,44 @@ class NotificationEvents
                 'lookup' => self::LOOKUP_TRIGGER_EVENT,
                 'templates' => ['visitor_approved'],
                 'channels' => ['email'],
-                'dispatched_from' => 'VisitorApproved event -> SendVisitorApprovedEmail',
+                'dispatched_from' => 'VisitorApprovalService::decide -> VisitorApproved event -> SendVisitorApprovedEmail',
                 'critical' => true,
+            ],
+
+            // ── Gate approval workflow (VisitorApprovalService -> VisitorWorkflowEvent -> VisitorNotifications) ──
+            // The resident-facing "approved" message is `visitor.approved` above (VisitorApproved event), so an approval is
+            // announced once. Checkout is in-app only: an e-mail per exit would flood residents and no template is approved.
+            'visitor.request' => [
+                'group' => self::GROUP_VISITOR_GATE,
+                'lookup' => self::LOOKUP_TRIGGER_EVENT,
+                'templates' => ['visitor_request'],
+                'channels' => ['email', 'whatsapp'],
+                'dispatched_from' => 'VisitorApprovalService::register -> VisitorWorkflowEvent(requested) -> VisitorNotifications',
+                'critical' => true,
+            ],
+            'visitor.rejected' => [
+                'group' => self::GROUP_VISITOR_GATE,
+                'lookup' => self::LOOKUP_TRIGGER_EVENT,
+                'templates' => ['visitor_rejected'],
+                'channels' => ['email'],
+                'dispatched_from' => 'VisitorApprovalService::decide -> VisitorWorkflowEvent(rejected) -> VisitorNotifications',
+                'critical' => true,
+            ],
+            'visitor.override' => [
+                'group' => self::GROUP_VISITOR_GATE,
+                'lookup' => self::LOOKUP_TRIGGER_EVENT,
+                'templates' => ['visitor_override'],
+                'channels' => ['email', 'whatsapp'],
+                'dispatched_from' => 'VisitorApprovalService::override -> VisitorWorkflowEvent(overridden) -> VisitorNotifications',
+                'critical' => true,
+            ],
+            'visitor.checked_in' => [
+                'group' => self::GROUP_VISITOR_GATE,
+                'lookup' => self::LOOKUP_TRIGGER_EVENT,
+                'templates' => ['visitor_checked_in'],
+                'channels' => ['email'],
+                'dispatched_from' => 'VisitorApprovalService::checkIn -> VisitorWorkflowEvent(checked_in) -> VisitorNotifications',
+                'critical' => false,
             ],
 
             // ── EmailNotificationService::sendByTrigger (slug + role permission) ──
@@ -156,14 +192,10 @@ class NotificationEvents
             // 'event.updated' used to be registered here: EventController::update called sendEventNotification(), which re-sent the
             // 'new-event' template (body: 'A new event has been created'). Updates now dispatch EventChanged ('event.changed' above),
             // so there is no separate 'event.updated' send any more and no rule to switch.
-            'visitor.denied' => [
-                'group' => self::GROUP_VISITOR_GATE,
-                'lookup' => self::LOOKUP_SLUG,
-                'templates' => ['visitor-denied'],
-                'channels' => ['email'],
-                'dispatched_from' => 'VisitorController -> sendVisitorNotification',
-                'critical' => false,
-            ],
+            // 'visitor.denied' (slug 'visitor-denied') used to be registered here: VisitorController::deny called
+            // sendVisitorNotification(), which looks the recipient up through `$visitor->hostUser` - a relation Visitor does not
+            // have (it is host()) - so the e-mail went to nobody. A rejection now dispatches `visitor.rejected` above, to the
+            // residents and administrators who need it.
             'service_request.assigned' => [
                 'group' => self::GROUP_SERVICE_COMPLAINT,
                 'lookup' => self::LOOKUP_SLUG,
@@ -315,6 +347,9 @@ class NotificationEvents
             'new-notice',
             'event-updated',
             'new-event',
+            // superseded by `visitor_rejected` (see the note where 'visitor.denied' used to be registered); kept, not deleted,
+            // because a society may have edited its copy
+            'visitor-denied',
         ];
     }
 

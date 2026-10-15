@@ -1,12 +1,16 @@
+import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/auto_refresh_mixin.dart';
 import '../../../shared/widgets/app_card.dart';
 import '../../../shared/widgets/skeleton_loader.dart';
 import '../../../shared/widgets/status_badge.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/network_image_widget.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../core/services/document_scan_service.dart';
 import '../providers/visitors_provider.dart';
@@ -32,7 +36,7 @@ class _VisitorsScreenState extends ConsumerState<VisitorsScreen>
   }
 
   @override
-  int get refreshIntervalSeconds => 15;
+  int get refreshIntervalSeconds => 10; // a decision made elsewhere shows within seconds
 
   @override
   void onAutoRefresh() => ref.read(visitorsProvider.notifier).loadVisitors();
@@ -375,12 +379,21 @@ class _VisitorCard extends ConsumerWidget {
           Text(_fmtTime(visitor.expectedEntryTime), style: AppTextStyles.caption),
         ]),
 
-        // Quick action buttons on card for pending visitors
-        if (visitor.isPending || visitor.canCheckIn || visitor.canCheckOut) ...[
+        // What the signed-in person may do now (the server's answer, not a guess from the status). Gate staff get
+        // no Allow / Deny - they record the visitor and wait for the resident - only a clear note not to let them in.
+        if (visitor.canDecide || (isStaff && (visitor.canCheckIn || visitor.canCheckOut))) ...[
           const SizedBox(height: 10),
           const Divider(height: 1),
           const SizedBox(height: 8),
           _QuickActions(visitor: visitor, isStaff: isStaff),
+        ] else if (isStaff && visitor.status == 'pending_approval') ...[
+          const SizedBox(height: 10),
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          _WaitingNote(visitor: visitor),
+        ] else if (visitor.isDenied && (visitor.rejectionReason ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text('Rejected: ${visitor.rejectionReason}', style: const TextStyle(fontSize: 12, color: AppColors.error)),
         ],
 
         // Actual times
@@ -428,6 +441,181 @@ class _VisitorCard extends ConsumerWidget {
   }
 }
 
+// ── Decisions: confirm before they are sent ──────────────────────────────────
+//
+// What the signed-in person may do comes from the server (`can_decide`, `can_override`, `can_check_in`,
+// `can_check_out` on every visitor), so no button is shown that the server would refuse. Allow and Deny
+// each ask first: a resident's decision lets a stranger in, or turns them away, and the guard acts on it.
+
+bool _isAdminRole(WidgetRef ref) => (ref.read(currentUserProvider)?.role ?? '').contains('Admin');
+
+Future<bool> _confirmAllow(BuildContext context, VisitorModel v) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text('Allow ${v.visitorName}?'),
+      content: Text(
+        '${v.visitorName} will be allowed to enter'
+        '${v.unitDisplay.isNotEmpty ? ' ${v.unitDisplay}' : ''}. The guard is told straight away.',
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(c, true),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.secondary),
+          child: const Text('Allow entry', style: TextStyle(color: Colors.white)),
+        ),
+      ],
+    ),
+  );
+  return ok ?? false;
+}
+
+/// The reason for turning a visitor away. Optional for a resident, required for an administrator.
+/// Null when they cancel.
+Future<String?> _askDenyReason(BuildContext context, VisitorModel v, {required bool reasonRequired}) async {
+  final ctrl = TextEditingController();
+  String? error;
+  final reason = await showDialog<String>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setDialog) => AlertDialog(
+        title: Text('Turn away ${v.visitorName}?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('The guard is told not to let them in.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            maxLength: 250,
+            decoration: InputDecoration(
+              labelText: reasonRequired ? 'Reason (required)' : 'Reason (optional)',
+              errorText: error,
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (reasonRequired && ctrl.text.trim().length < 3) {
+                setDialog(() => error = 'Enter the reason');
+                return;
+              }
+              Navigator.pop(c, ctrl.text.trim());
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Deny entry', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    ),
+  );
+  // No ctrl.dispose() here: the dialog is still animating out when showDialog returns and its field would be
+  // reading a disposed controller. A TextEditingController holds no native resources; it is collected with the dialog.
+  return reason;
+}
+
+/// An administrator changing a decision: which way, and why. The reason is mandatory (the server needs five
+/// characters) because the residents and the guard are told and the change is kept in the visitor's history.
+/// Null when they cancel.
+Future<({bool allow, String reason})?> _askOverride(BuildContext context, VisitorModel v) async {
+  final ctrl = TextEditingController();
+  var allow = !v.isAllowed; // the opposite of what stands now
+  String? error;
+  final result = await showDialog<({bool allow, String reason})>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setDialog) => AlertDialog(
+        title: const Text('Change the decision'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+            v.isDenied
+                ? '${v.decidedBy ?? 'A resident'} turned ${v.visitorName} away${(v.rejectionReason ?? '').isNotEmpty ? ': ${v.rejectionReason}' : ''}.'
+                : '${v.visitorName} is ${v.isAllowed ? 'allowed' : 'waiting for an answer'}.',
+            style: const TextStyle(fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          // the decision that already stands cannot be chosen again
+          SegmentedButton<bool>(
+            segments: [
+              ButtonSegment(value: true, label: const Text('Allow entry'), enabled: !v.isAllowed),
+              ButtonSegment(value: false, label: const Text('Deny entry'), enabled: !v.isDenied),
+            ],
+            selected: {allow},
+            onSelectionChanged: (sel) => setDialog(() => allow = sel.first),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: ctrl,
+            maxLength: 250,
+            decoration: InputDecoration(labelText: 'Reason (required)', errorText: error),
+          ),
+          const Text('The residents and the guard are told, and this is kept in the visitor\'s history.',
+              style: TextStyle(fontSize: 12, color: AppColors.textHint)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (ctrl.text.trim().length < 5) {
+                setDialog(() => error = 'Enter a reason (at least 5 characters)');
+                return;
+              }
+              Navigator.pop(c, (allow: allow, reason: ctrl.text.trim()));
+            },
+            child: const Text('Change decision'),
+          ),
+        ],
+      ),
+    ),
+  );
+  return result; // (controller left to be collected with the dialog, see _askDenyReason)
+}
+
+/// Runs one visitor action and says what the server answered, in its own words.
+Future<void> _runVisitorAction(BuildContext context, Future<void> Function() action, String success) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await action();
+    messenger.showSnackBar(SnackBar(
+      content: Text(success),
+      backgroundColor: AppColors.secondary,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+    ));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(
+      content: Text(e.toString()),
+      backgroundColor: AppColors.error,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+    ));
+  }
+}
+
+// ── Gate staff: nothing to press while the residents decide ──────────────────
+
+class _WaitingNote extends StatelessWidget {
+  final VisitorModel visitor;
+  const _WaitingNote({required this.visitor});
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        const Icon(Icons.hourglass_top_rounded, size: 14, color: AppColors.warning),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            visitor.escalated
+                ? 'No answer yet - an administrator has been told. Do not let them in.'
+                : 'Waiting for the resident to approve. Do not let them in yet.',
+            style: const TextStyle(fontSize: 12, color: AppColors.warning, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ]);
+}
+
 // ── Quick action buttons on card ─────────────────────────────────────────────
 
 class _QuickActions extends ConsumerWidget {
@@ -438,11 +626,16 @@ class _QuickActions extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final buttons = <Widget>[];
+    final notifier = ref.read(visitorsProvider.notifier);
 
-    if (visitor.isPending) {
+    if (visitor.canDecide) {
       buttons.add(Expanded(
         child: OutlinedButton.icon(
-          onPressed: () => _act(context, ref, () => ref.read(visitorsProvider.notifier).denyVisitor(visitor.id), '❌ Visitor denied'),
+          onPressed: () async {
+            final reason = await _askDenyReason(context, visitor, reasonRequired: _isAdminRole(ref));
+            if (reason == null || !context.mounted) return;
+            await _runVisitorAction(context, () => notifier.denyVisitor(visitor.id, reason: reason), '❌ Visitor denied');
+          },
           icon: const Icon(Icons.close_rounded, size: 15, color: AppColors.error),
           label: const Text('Deny', style: TextStyle(color: AppColors.error, fontSize: 12)),
           style: OutlinedButton.styleFrom(
@@ -455,7 +648,10 @@ class _QuickActions extends ConsumerWidget {
       buttons.add(const SizedBox(width: 8));
       buttons.add(Expanded(
         child: ElevatedButton.icon(
-          onPressed: () => _act(context, ref, () => ref.read(visitorsProvider.notifier).allowVisitor(visitor.id), '✅ Visitor allowed'),
+          onPressed: () async {
+            if (!await _confirmAllow(context, visitor) || !context.mounted) return;
+            await _runVisitorAction(context, () => notifier.allowVisitor(visitor.id), '✅ Visitor allowed');
+          },
           icon: const Icon(Icons.check_rounded, size: 15, color: Colors.white),
           label: const Text('Allow', style: TextStyle(color: Colors.white, fontSize: 12)),
           style: ElevatedButton.styleFrom(
@@ -472,7 +668,7 @@ class _QuickActions extends ConsumerWidget {
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
       buttons.add(Expanded(
         child: ElevatedButton.icon(
-          onPressed: () => _act(context, ref, () => ref.read(visitorsProvider.notifier).checkIn(visitor.id), '✅ Checked In'),
+          onPressed: () => _runVisitorAction(context, () => notifier.checkIn(visitor.id), '✅ Checked In'),
           icon: const Icon(Icons.login_rounded, size: 15, color: Colors.white),
           label: const Text('Check-In', style: TextStyle(color: Colors.white, fontSize: 12)),
           style: ElevatedButton.styleFrom(
@@ -489,7 +685,7 @@ class _QuickActions extends ConsumerWidget {
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 8));
       buttons.add(Expanded(
         child: ElevatedButton.icon(
-          onPressed: () => _act(context, ref, () => ref.read(visitorsProvider.notifier).checkOut(visitor.id), '⬅ Checked Out'),
+          onPressed: () => _runVisitorAction(context, () => notifier.checkOut(visitor.id), '⬅ Checked Out'),
           icon: const Icon(Icons.logout_rounded, size: 15, color: Colors.white),
           label: const Text('Check-Out', style: TextStyle(color: Colors.white, fontSize: 12)),
           style: ElevatedButton.styleFrom(
@@ -504,25 +700,6 @@ class _QuickActions extends ConsumerWidget {
 
     if (buttons.isEmpty) return const SizedBox.shrink();
     return Row(children: buttons);
-  }
-
-  Future<void> _act(BuildContext ctx, WidgetRef ref, Future<void> Function() fn, String msg) async {
-    try {
-      await fn();
-      if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-          content: Text(msg),
-          backgroundColor: AppColors.secondary,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ));
-      }
-    } catch (e) {
-      if (ctx.mounted) {
-        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error));
-      }
-    }
   }
 }
 
@@ -547,32 +724,22 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
     _visitor = widget.visitor;
   }
 
+  /// The visitor as the server holds it now (the list is replaced by the server's answer after every action,
+  /// and refreshed every few seconds), so this sheet follows a decision made elsewhere too.
+  VisitorModel get _live => ref.watch(visitorsProvider).allVisitors.where((v) => v.id == _visitor.id).firstOrNull ?? _visitor;
+
   Future<void> _act(Future<void> Function() fn, String msg) async {
     setState(() => _isActing = true);
-    try {
-      await fn();
-      // Refresh the visitor from state
-      final updated = ref.read(visitorsProvider).allVisitors.where((v) => v.id == _visitor.id).firstOrNull;
-      if (updated != null && mounted) setState(() => _visitor = updated);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg),
-        backgroundColor: AppColors.secondary,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-      ));
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: AppColors.error));
-    } finally {
-      if (mounted) setState(() => _isActing = false);
-    }
+    await _runVisitorAction(context, fn, msg);
+    if (mounted) setState(() => _isActing = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    final v = _visitor;
+    final v = _live;
+    final notifier = ref.read(visitorsProvider.notifier);
+    final isAdmin = _isAdminRole(ref);
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -585,13 +752,16 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
           Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 16),
 
-          // Header
+          // Header: the visitor's photo when the guard took one, so the resident sees who is waiting
           Row(children: [
-            Container(
-              width: 52, height: 52,
-              decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
-              child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 26),
-            ),
+            if ((v.photo ?? '').isNotEmpty)
+              NetImage(url: v.photo, width: 64, height: 64, borderRadius: BorderRadius.circular(14), fallbackIcon: Icons.person_rounded)
+            else
+              Container(
+                width: 52, height: 52,
+                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
+                child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 26),
+              ),
             const SizedBox(width: 14),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(v.visitorName, style: AppTextStyles.h3),
@@ -608,7 +778,17 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
             _DetailRow(Icons.directions_car_rounded, 'Vehicle', v.vehicleNumber!),
           if (v.purpose != null && v.purpose!.isNotEmpty)
             _DetailRow(Icons.note_rounded, 'Purpose', v.purpose!),
-          _DetailRow(Icons.schedule_rounded, 'Expected', _fmtDateTime(v.expectedEntryTime)),
+          _DetailRow(Icons.schedule_rounded, 'Arrived', _fmtDateTime(v.expectedEntryTime)),
+          if ((v.requestedBy ?? '').isNotEmpty) _DetailRow(Icons.shield_outlined, 'Logged by', v.requestedBy!),
+          if ((v.decidedBy ?? '').isNotEmpty && v.decidedAt != null)
+            _DetailRow(
+              v.isDenied ? Icons.cancel_outlined : Icons.verified_outlined,
+              v.isDenied ? 'Denied by' : 'Allowed by',
+              '${v.decidedBy}${v.decisionRole == 'override' ? ' (administrator override)' : ''} · ${_fmtDateTime(v.decidedAt!.toLocal())}',
+              color: v.isDenied ? AppColors.error : AppColors.secondary,
+            ),
+          if (v.isDenied && (v.rejectionReason ?? '').isNotEmpty) _DetailRow(Icons.comment_outlined, 'Reason', v.rejectionReason!, color: AppColors.error),
+          if ((v.overrideReason ?? '').isNotEmpty) _DetailRow(Icons.scale_rounded, 'Override reason', v.overrideReason!),
           if (v.actualEntryTime != null) _DetailRow(Icons.login_rounded, 'Checked In', _fmtDateTime(v.actualEntryTime!), color: AppColors.secondary),
           if (v.actualExitTime != null) _DetailRow(Icons.logout_rounded, 'Checked Out', _fmtDateTime(v.actualExitTime!), color: AppColors.textHint),
 
@@ -618,8 +798,8 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
           if (_isActing)
             const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
           else ...[
-            // Pending — Allow / Deny
-            if (v.isPending) ...[
+            // Waiting - the resident (or an administrator) decides; the guard only waits
+            if (v.isPending && v.entryStatus == 'pending') ...[
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -632,38 +812,49 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
                     const Icon(Icons.pending_actions_rounded, color: AppColors.warning, size: 18),
                     const SizedBox(width: 8),
                     Expanded(child: Text(
-                      widget.isStaff
-                          ? 'Waiting for resident approval. You can also allow or deny below.'
-                          : 'This visitor is waiting at the gate. Allow or deny entry.',
+                      v.canDecide
+                          ? 'This visitor is waiting at the gate. Allow or deny entry.'
+                          : v.escalated
+                              ? 'No answer yet - an administrator has been told. Do not let them in.'
+                              : 'Waiting for the resident to approve. Do not let them in yet.',
                       style: const TextStyle(color: AppColors.warning, fontSize: 12),
                     )),
                   ]),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: OutlinedButton.icon(
-                      onPressed: () => _act(() => ref.read(visitorsProvider.notifier).denyVisitor(v.id), '❌ Visitor denied'),
-                      icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.error),
-                      label: const Text('Deny Entry', style: TextStyle(color: AppColors.error)),
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.error), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), padding: const EdgeInsets.symmetric(vertical: 12)),
-                    )),
-                    const SizedBox(width: 12),
-                    Expanded(child: ElevatedButton.icon(
-                      onPressed: () => _act(() => ref.read(visitorsProvider.notifier).allowVisitor(v.id), '✅ Visitor allowed'),
-                      icon: const Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
-                      label: const Text('Allow Entry', style: TextStyle(color: Colors.white)),
-                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.secondary, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), padding: const EdgeInsets.symmetric(vertical: 12)),
-                    )),
-                  ]),
+                  if (v.canDecide) ...[
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final reason = await _askDenyReason(context, v, reasonRequired: isAdmin);
+                          if (reason == null || !mounted) return;
+                          await _act(() => notifier.denyVisitor(v.id, reason: reason), '❌ Visitor denied');
+                        },
+                        icon: const Icon(Icons.close_rounded, size: 18, color: AppColors.error),
+                        label: const Text('Deny Entry', style: TextStyle(color: AppColors.error)),
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.error), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), padding: const EdgeInsets.symmetric(vertical: 12)),
+                      )),
+                      const SizedBox(width: 12),
+                      Expanded(child: ElevatedButton.icon(
+                        onPressed: () async {
+                          if (!await _confirmAllow(context, v) || !mounted) return;
+                          await _act(() => notifier.allowVisitor(v.id), '✅ Visitor allowed');
+                        },
+                        icon: const Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
+                        label: const Text('Allow Entry', style: TextStyle(color: Colors.white)),
+                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.secondary, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), padding: const EdgeInsets.symmetric(vertical: 12)),
+                      )),
+                    ]),
+                  ],
                 ]),
               ),
               const SizedBox(height: 12),
             ],
 
-            // Guard Check-In
+            // Guard Check-In: only after the visitor was allowed
             if (widget.isStaff && v.canCheckIn)
               SizedBox(width: double.infinity, height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: () => _act(() => ref.read(visitorsProvider.notifier).checkIn(v.id), '✅ Visitor checked in'),
+                  onPressed: () => _act(() => notifier.checkIn(v.id), '✅ Visitor checked in'),
                   icon: const Icon(Icons.login_rounded, color: Colors.white),
                   label: const Text('Check In Visitor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
@@ -675,7 +866,7 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
               const SizedBox(height: 8),
               SizedBox(width: double.infinity, height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: () => _act(() => ref.read(visitorsProvider.notifier).checkOut(v.id), '⬅ Visitor checked out'),
+                  onPressed: () => _act(() => notifier.checkOut(v.id), '⬅ Visitor checked out'),
                   icon: const Icon(Icons.logout_rounded, color: Colors.white),
                   label: const Text('Check Out Visitor', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.warning, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
@@ -683,12 +874,29 @@ class _VisitorDetailSheetState extends ConsumerState<_VisitorDetailSheet> {
               ),
             ],
 
-            // Already completed
+            // Administrator: change a decision, with a reason. Never silent - the residents and the guard are told.
+            if (v.canOverride && !(v.isPending && v.canDecide)) ...[
+              const SizedBox(height: 8),
+              SizedBox(width: double.infinity, height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final choice = await _askOverride(context, v);
+                    if (choice == null || !mounted) return;
+                    await _act(() => notifier.overrideVisitor(v.id, allow: choice.allow, reason: choice.reason), 'Decision changed. The residents and the guard have been told.');
+                  },
+                  icon: const Icon(Icons.scale_rounded, size: 18, color: AppColors.primary),
+                  label: const Text('Change decision (administrator)', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.primary), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                ),
+              ),
+            ],
+
+            // Outcome line when there is nothing left to press
             if (!v.isPending && !v.canCheckIn && !v.canCheckOut)
               Center(child: Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
-                  v.isDenied ? '❌ Entry Denied' : v.hasExited ? '✅ Visit Completed' : '✅ Visitor Approved',
+                  v.isDenied ? '❌ Entry Denied' : v.hasExited ? '✅ Visit Completed' : v.hasEntered ? '✅ Visitor Inside' : '✅ Visitor Approved',
                   style: TextStyle(color: v.isDenied ? AppColors.error : AppColors.secondary, fontWeight: FontWeight.w600),
                 ),
               )),
@@ -740,6 +948,14 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
   int? _selectedFlatId;
   bool _isLoading = false;
   bool _showMore = false;
+
+  /// Identifies this submission. A tap that seemed to do nothing, or a request that timed out, is sent again with the
+  /// SAME id, so the server returns the visitor it already has instead of creating a second one and telling the
+  /// residents twice.
+  final String _clientRequestId = '${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
+
+  /// A photo of the visitor taken at the gate (guard and staff), shown to the resident when they decide.
+  String? _photoPath;
 
   /// What a scanned ID gave us, if the guard scanned one. Held so the ID
   /// proof travels with the visitor and the capture can be cleaned up.
@@ -883,6 +1099,18 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
     setState(() => _scanned = null);
   }
 
+  Future<void> _takePhoto() async {
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 70, maxWidth: 1280);
+      if (picked != null && mounted) setState(() => _photoPath = picked.path);
+    } catch (_) {
+      // no camera / permission refused: the visitor can still be registered without a photo
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open the camera. You can register the visitor without a photo.')));
+      }
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (widget.isStaff && _selectedFlatId == null) {
@@ -891,7 +1119,9 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
     }
     setState(() => _isLoading = true);
     try {
-      await ref.read(visitorsProvider.notifier).addVisitor(
+      final added = await ref.read(visitorsProvider.notifier).addVisitor(
+        clientRequestId: _clientRequestId,
+        photoPath: _photoPath,
         phone: _phoneCtrl.text.trim(),
         visitorType: _selectedType,
         flatId: _selectedFlatId,
@@ -906,12 +1136,13 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(widget.isStaff
-              ? '✅ Visitor registered. Resident notified for approval.'
-              : '✅ Visitor registered successfully!'),
-          backgroundColor: AppColors.secondary,
+          // the server's own words: it says when nobody is linked to the unit and the administrators were asked instead
+          content: Text((added.residentsLinked ? '✅ ' : '⚠ ') + (added.message.isNotEmpty
+              ? added.message
+              : (widget.isStaff ? 'Visitor registered. Resident notified for approval.' : 'Visitor registered successfully!'))),
+          backgroundColor: added.residentsLinked ? AppColors.secondary : AppColors.warning,
           behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
+          duration: Duration(seconds: added.residentsLinked ? 4 : 8),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           margin: const EdgeInsets.all(16),
         ));
@@ -982,6 +1213,7 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
                 ),
               ),
               if (_scanned != null) _scannedIdChip(),
+              _photoRow(),
               const SizedBox(height: 18),
             ],
 
@@ -1084,6 +1316,31 @@ class _AddVisitorSheetState extends ConsumerState<_AddVisitorSheet> {
       ),
     );
   }
+
+  /// A photo of the visitor, taken at the gate, so the resident sees who is waiting before they decide.
+  Widget _photoRow() => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(children: [
+          if (_photoPath != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(File(_photoPath!), width: 44, height: 44, fit: BoxFit.cover),
+            ),
+          if (_photoPath != null) const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _isLoading ? null : _takePhoto,
+              icon: const Icon(Icons.photo_camera_outlined, size: 18, color: AppColors.primary),
+              label: Text(_photoPath == null ? 'Take visitor photo (optional)' : 'Retake photo',
+                  style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppColors.primary),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+        ]),
+      );
 
   /// "Existing visitor found" - the duplicate the gate would otherwise
   /// create. Shown the moment a known number is typed, with the three things

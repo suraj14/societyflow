@@ -37,6 +37,18 @@ class Visitor extends Model
         'rejection_reason',
         'security_notes',
         'photo',
+        // gate approval workflow (App\Services\VisitorApprovalService is the only writer of the decision/entry ones)
+        'requested_by',
+        'decided_by',
+        'decided_at',
+        'decision_role',
+        'checked_in_by',
+        'checked_out_by',
+        'override_by',
+        'override_at',
+        'override_reason',
+        'escalated_at',
+        'client_request_id',
     ];
 
     // Converted from casts(): the casts() method is Laravel 11+;
@@ -47,7 +59,30 @@ class Visitor extends Model
             'expected_exit_time' => 'datetime',
             'actual_entry_time' => 'datetime',
             'actual_exit_time' => 'datetime',
+            'decided_at' => 'datetime',
+            'override_at' => 'datetime',
+            'escalated_at' => 'datetime',
         ];
+
+    /**
+     * The state the gate and resident apps show, derived from the two stored columns:
+     * pending_approval | approved | rejected | checked_in | checked_out.
+     */
+    public function workflowStatus(): string
+    {
+        if ($this->entry_status === 'exited') {
+            return 'checked_out';
+        }
+        if ($this->entry_status === 'entered') {
+            return 'checked_in';
+        }
+
+        return match ($this->approval_status) {
+            'allowed' => 'approved',
+            'denied'  => 'rejected',
+            default   => 'pending_approval',
+        };
+    }
 
     /**
      * A pre-approved visit gets a scannable QR token the moment it becomes
@@ -94,6 +129,16 @@ class Visitor extends Model
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function requestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by');
+    }
+
+    public function decidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'decided_by');
     }
 
     public function logs(): HasMany

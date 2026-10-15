@@ -339,13 +339,16 @@ class WhatsAppDiagnosticsTest extends TestCase
             $this->remote('promo_diwali_offer', 'APPROVED'),
         ]);
 
-        $this->sync()->assertSessionHas('success', fn ($m) => str_contains($m, '2 approved template(s) were attached'));
+        $this->sync()->assertSessionHas('success', fn ($m) => str_contains($m, '3 approved template(s) were attached'));
 
         $byName = WhatsAppTemplate::pluck('purpose', 'name')->all();
         $this->assertSame('bill', $byName['society_bill_generated']);
         $this->assertSame('visitor', $byName['society_visitor_approved']);
         $this->assertNull($byName['society_complaint_update'], 'pending: never attached');
-        $this->assertNull($byName['society_visitor_arrived'], 'no sender for an arrival: not attached to the approval notification');
+        // A gate-request sender now exists (visitor_arrival), so an approved arrival template is attached to THAT notification -
+        // and still never to the approval one, whose wording it would contradict.
+        $this->assertSame('visitor_arrival', $byName['society_visitor_arrived']);
+        $this->assertNotSame('visitor', $byName['society_visitor_arrived']);
         $this->assertNull($byName['bookmizo_refund_full']);
         $this->assertNull($byName['promo_diwali_offer']);
         $this->assertSame(0, WhatsAppTemplate::where('is_active', true)->count(), 'nothing is switched on by a sync');
@@ -426,7 +429,8 @@ class WhatsAppDiagnosticsTest extends TestCase
         $this->assertSame('bill', WhatsAppTemplateMapping::suggestPurpose('society_bill_generated', 'a {{1}} b {{2}} c {{3}} d {{4}}'));
         $this->assertSame('notice', WhatsAppTemplateMapping::suggestPurpose('society_important_notice', '{{1}} {{2}} {{3}}'));
         $this->assertSame('event', WhatsAppTemplateMapping::suggestPurpose('society_event_announcement', '{{1}}'));
-        $this->assertNull(WhatsAppTemplateMapping::suggestPurpose('society_visitor_arrived'));
+        $this->assertSame('visitor_arrival', WhatsAppTemplateMapping::suggestPurpose('society_visitor_arrived'), 'an arrival template belongs to the gate-request notification');
+        $this->assertNotSame('visitor', WhatsAppTemplateMapping::suggestPurpose('society_visitor_arrived'), 'never to the approval one');
         $this->assertNull(WhatsAppTemplateMapping::suggestPurpose('payment_completed'), 'a generic name says nothing about whose it is');
         $this->assertNull(WhatsAppTemplateMapping::suggestPurpose('bookmizo_booking_confirm_full'));
         $this->assertNull(WhatsAppTemplateMapping::suggestPurpose('society_visitor_approved', '{{1}} {{2}} {{3}} {{4}} {{5}} {{6}}'), 'more variables than the notification can fill');

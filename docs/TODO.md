@@ -270,7 +270,26 @@ Open:
 
 ## 2026-10-14 WhatsApp 404 / ownership round
 - P1-114 Phone Number ID verification against the documented number list, per-template sending number, HTTP outcome handling, duplicate-test guard, settings rules - **done** (`WhatsAppProviderContractTest`, `WhatsAppDiagnosticsTest`; 2188-test SQLite run).
-- P1-115 Operator: correct society 6's saved Phone Number ID (`1209719722434591` is a transposed `1209719742234591`) - **open**, needs a human decision which number to send from.
+- P1-115 Operator: correct society 6's saved Phone Number ID (`1209719722434591` is a transposed `1209719742234591`) - **done** by the operator (`1209719742234591` saved; read 2026-10-14).
 - P1-116 One real, approved-tester WhatsApp send to confirm delivery and the sender name ("Bookmizo" for the society_* templates) - **open / REAL DELIVERY NOT TESTED**.
 - P2-56 `WhatsAppService` still returns a `dev_mode` "success" when the key or ID is missing (callers treat it as "not sent"); give it an explicit `skipped_not_configured` status.
 - P2-57 Delivery receipts / webhook (`status_update`, optional `webhook_secret_key` header) are not consumed: "accepted" never becomes "delivered".
+
+## 2026-10-14 WhatsApp success-shape round
+- P0-18 Accepted WhatsApp sends reported as failed (`return: true` not read) - **done** (`WhatsAppProviderContractTest`; real acceptance recorded on the dev server after the fix).
+- P1-117 Settings alert names the excluded templates and their approved replacement - **done**.
+- P1-118 "Switch off" bypassed by the older per-type template setting - **done** (`WhatsAppTemplateCrudTest`).
+- P1-119 Operator: make "Society Visitor Approved" active and switch off `bookmizo_staff_booking_reschedule` in society 6 - **open** (starts real resident messages; not done by the agent).
+- P2-58 Remove the older `whatsapp_<type>_template_name` settings once every society's templates are records (they are only a fallback now).
+
+## 2026-10-15 Gate visitor approval round
+- P0-19 Guard / Staff could approve or reject any visitor (own request included) through the mobile API; decisions were not atomic - **done** (`VisitorApprovalWorkflowTest`).
+- P1-120 Visitor approval workflow end to end (request, recipients, decision, entry / exit, override, escalation, audit, API, web, Flutter) - **done**, see [VISITOR_APPROVAL.md](VISITOR_APPROVAL.md).
+- P1-121 Complaint assignment notified nobody - **done** (`ComplaintAssignmentNotificationTest`).
+- P1-122 Operator: make `society_visitor_approved` active for Visitor approved and `society_visitor_arrived` for Visitor at the gate (society 6), pass Verify configuration, then one approved real test send - **open** (starts real messages; not done by the agent).
+- P1-123 Operator: install the new debug build on the phone (not connected when the round ended) and try guard + resident + admin on a device - **open**.
+- P2-59 SMS for visitor events needs a DLT-approved template and a new SMS purpose - **open**.
+- P2-60 Notices edited / cancelled, gate pass updated / expired, payment status other than "received" send no notification - **open** (audit finding).
+- P2-61 Push notifications to the apps (FCM client) so a resident is prompted without opening the app - **open** (known limitation).
+- P2-62 Delivery receipts (Fast2SMS) so "queued / accepted" can become "delivered" - **open** (same as P2-57).
+- P2-63 Staff role: web Allow / Deny buttons were removed for Staff (they check in / out only) - confirm that is the intended policy with the society.

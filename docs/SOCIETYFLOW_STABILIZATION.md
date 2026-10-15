@@ -330,3 +330,55 @@ SQLite, 8 shards, exit code of every shard read: **2188 tests, 12386 assertions,
 - **The saved Phone Number ID for society 6 is still `1209719722434591`.** Set it to `1209719742234591` if the `society_*` templates (and the "Bookmizo" sender name) are intended, or to `941982805667233` for the "Sainiweb Solutions" number - their templates are under that number. Synced templates send from their own number regardless.
 - Legacy `whatsapp_*_template_name` settings of society 6 still name BookMizo templates (the sender refuses them).
 - I deleted `storage/logs/laravel.log` earlier in the session while isolating a test error, so older log lines are gone; the diagnosis above rests on the provider lookups and the database instead.
+
+## Round 7 - WhatsApp: real success answer read as a failure; the two excluded templates (2026-10-14)
+
+**Status stays READY FOR STAGING, NOT READY FOR PRODUCTION. REAL DELIVERY NOT CONFIRMED BY THE APP** (Fast2SMS acceptance only; no delivery receipts are consumed).
+
+### Defects and fixes
+| # | Defect | Fix | Where |
+|---|---|---|---|
+| R7-1 | Fast2SMS answers the documented `GET /dev/whatsapp?message_id=...` send with `{"return": true, "request_id": "...", "message": ["Whatsapp Message sent successfully."]}` (seen on the dev server). The handler accepted only the documented `status: true`, so **every accepted send - Test WhatsApp and every notification - was reported as "failed"** and logged as failed. Every test fake used the documented shape, so the suite never saw it. | Success = HTTP 200 and `status` or `return` true; `message` may be a list. `return: false`, any other HTTP status, or an HTTP 200 without either flag stay failures. Test fakes now use the real shape. | `WhatsAppService::sendByMessageId` |
+| R7-2 | The two "excluded" templates on Settings -> WhatsApp ("2 active template(s) cannot be sent") are `bookmizo_refund_full` on **Visitor approved** and `bookmizo_staff_booking_reschedule` on **Gate pass updates** (society 6), switched on by the carry-over of old settings. Exclusion is correct (a refund / booking message must not go to residents); the page did not say which two or what to do. | The alert names each template, its notification and reason, and the approved SocietyFlow template already assigned to that notification ("Make \"Society Visitor Approved\" active instead"), or says none exists yet. | settings WhatsApp partial |
+| R7-3 | The older `whatsapp_<type>_template_name` setting found a template by name whatever its switch said; the carry-over leaves that setting in place, so **"Switch off" did not stop a carried-over template**. | A template managed in Message Templates (it has a notification type) is sent only when it is the active one for that notification; the older setting is still honoured for a template never assigned there. | `WhatsAppService::sendNotification` |
+
+### Evidence
+SQLite, 8 shards, every shard exit code read: **2251 tests, 13079 assertions, 0 failures, 0 errors, 6 skipped, 8 of 8 exit 0** (one run covers Rounds 7 and 8). New tests: `test_the_real_fast2sms_return_true_response_shape_is_accepted_as_success`, `test_the_excluded_templates_are_named_with_the_reason_and_the_approved_replacement` (`WhatsAppProviderContractTest`), `test_switching_off_a_carried_over_template_stops_it_although_the_older_setting_still_names_it` (`WhatsAppTemplateCrudTest`). Mutation checks: with the `return` reading removed, the new test and the Test WhatsApp endpoint test fail; with the switch-off guard removed, its test fails. On the running dev server Settings -> WhatsApp recorded "Fast2SMS accepted a test message" at 13:01 UTC after the fix (the old handler could not record a `return: true` answer as accepted). MariaDB not re-run (no SQL changed).
+
+### Not changed (operator decisions)
+- Society 6's saved Phone Number ID is now `1209719742234591` (corrected by the operator; read, not changed).
+- No template was switched on or off: switching on a SocietyFlow template starts real messages to residents. To finish: Message Templates -> WhatsApp -> **Make active** on "Society Visitor Approved" (it switches `bookmizo_refund_full` off in the same step), and **Switch off** `bookmizo_staff_booking_reschedule` under Other templates (no SocietyFlow gate-pass template exists yet).
+- `society_visitor_arrived` is also assigned to Visitor approved in the data; its wording is about an arrival and no arrival notification exists, so it is the wrong choice for that notification.
+- Society 6's older settings for complaint, payment and document name BookMizo templates by display name; the sender refuses them and an active SocietyFlow template for those notifications takes precedence.
+
+## Round 8 - Gate visitor approval (MyGate-style) and event notifications across channels (2026-10-15)
+
+**Status stays READY FOR STAGING, NOT READY FOR PRODUCTION. REAL DELIVERY NOT TESTED; DELIVERY NOT CONFIRMED.** Procedure, who-may-do-what and the event x channel table: [VISITOR_APPROVAL.md](VISITOR_APPROVAL.md).
+
+### Root causes found
+| # | Defect | Fix |
+|---|---|---|
+| R8-1 | The mobile API let **any Guard or Staff approve or reject**, including their own request; a resident could be bypassed | `VisitorApprovalService::decide` - only the unit's owner / tenant or an Admin; Guard / Staff 403 |
+| R8-2 | The API picked the host as "the first active resident" (or the guard when none): not the unit's real owner, and nobody was ever told | `VisitorRecipients` - owner via `PropertyOccupancy` (flats.owner_id, else the owner record's address), active tenant, household accounts; notified = allowed to decide |
+| R8-3 | No notification on request, rejection, check-in, check-out; **the existing approval e-mail / WhatsApp / bell and the web denial e-mail reached nobody** (they read `visitor->created_by`, a column Visitors do not have, and `visitor->hostUser`, a relation it does not have) | `VisitorWorkflowEvent` -> `VisitorNotifications` (bell, e-mail, WhatsApp, SMS-as-honest-skip); `VisitorApproved` recipients fixed |
+| R8-4 | Decisions were plain UPDATEs: two simultaneous decisions could both "win"; no decision actor / time for a denial; no audit of who checked in | compare-and-swap UPDATEs (409 names the winner), `decided_by/at`, `checked_in_by`, `checked_out_by`, override columns, per-event `notified` history row |
+| R8-5 | Web: `checkIn` ignored approval (a denied visitor could be checked in by an Admin); `updateStatus` and the edit form set any status silently (an edit reset an allowed visitor to pending); Admin could flip a resident's denial with one click | all routed through the service; reset-to-pending refused; changing a decision = override with a mandatory reason, always notifies |
+| R8-6 | A retried POST created a second visitor and a second set of messages | `client_request_id` (unique per society), the app sends one id per submission |
+| R8-7 | **Complaint assignment** (moves it to in progress, gives it an owner) notified nobody | `TicketUpdated` for the resident + a bell entry for the assignee |
+| R8-8 | The live run on a copy of the dev data found `whatsapp=queued` for an older setting naming a BookMizo template (the sender then refused it) | status now asks the sender's own `resolveTemplate()` rule |
+| R8-9 | Found in my own review: photo extension came from the client's file name; HTML e-mail variables took guard-typed text raw; the visitor's full number went into mail and the delivery log | extension from content, variables HTML-escaped, number masked |
+
+### What was built
+Migrations `2026_10_15_000001/2` (nullable columns, `visitor_logs.action` widened, 4 e-mail templates seeded); `VisitorApprovalService`, `VisitorRecipients`, `VisitorNotifications`, `VisitorWorkflowEvent`; API `POST /visitors/{id}/override`, `can_*` flags and `status` on every visitor, optional photo; web allow / deny / check-in / status / edit rewired, override form on the visitor page; `visitors:escalate-unanswered` + Settings -> Security "Visitor no-response time" (never auto-admits); WhatsApp purpose `visitor_arrival` (template `society_visitor_arrived`); bounded retry (3 attempts, 30 s / 120 s) for transient WhatsApp failures only; Flutter: server-driven buttons, confirmations, reason dialogs, override, photo capture, retry-safe submit, 10 s refresh.
+
+### Evidence
+SQLite: **2251 tests, 13079 assertions, 0 failures, 0 errors, 6 skipped, 8 of 8 shard exit 0**. New: VisitorApprovalWorkflowTest (47), ComplaintAssignmentNotificationTest (3), retry and honest-status tests in WhatsAppProviderContractTest. Four older WhatsApp assertions that pinned no
+Live run: a **copy** of the dev database (credentials blanked, `EXTERNAL_MESSAGING_ENABLED=false`, own array cache, port 8124, torn down afterwards) driven over HTTP with real tokens for a real unit: request -> retry (duplicate) -> guard refused 403 -> other society 404 -> owner approves -> second household member gets 409 naming the winner -> guard sees approved -> resident check-in 403 -> guard check-in / out -> reject -> check-in 422 -> override without reason 422 / guard 403 / admin with reason 200 -> check-in -> unlinked unit tells the admins. Per-channel outcomes were read back from the history rows and the delivery log. The same run found R8-8. **It also showed that two servers on one `file` cache share it**; the e2e copy had touched the real app's cache, so `cache:clear` was run (settings are re-read from the database); later runs used an array cache.
+
+### Not changed / not done (stated, not hidden)
+- **SMS**: no DLT-approved SMS template purpose exists for visitor events (`sms_templates` is empty, purposes are notice / gate_pass / document only). Every event records `sms=skipped_no_template`. Needs a registered DLT template and a new purpose.
+- **WhatsApp**: nothing sent. `society_visitor_approved` / `society_visitor_arrived` are approved at the provider but not switched on for society 6 (operator step; starts real messages). Rejection, check-in, check-out have no approved WhatsApp template. "queued" is never "delivered".
+- **Push**: the apps have no push client; a resident learns of a waiting visitor by the bell / e-mail / WhatsApp or by opening the app (refreshes every 10 s).
+- **Gate pass (staff) entries** by pass scan do not notify the owner each time (volume, no template); a pre-approved guest's QR scan does.
+- Audit of other events (T-matrix in the final report): notice edit / cancel, gate-pass update / expiry, payment status other than "received" send nothing.
+- MariaDB not re-run for this round; the migration was rehearsed on a copy of the real SQLite data and applied (backup kept).

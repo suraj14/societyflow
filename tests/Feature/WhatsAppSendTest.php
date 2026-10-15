@@ -35,7 +35,7 @@ class WhatsAppSendTest extends TestCase
             parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
             $this->requests[] = ['url' => $url, 'q' => $q, 'data' => $data, 'headers' => $headers, 'path' => parse_url($url, PHP_URL_PATH)];
 
-            return [['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'wa' . count($this->requests)], 200];
+            return [['return' => true, 'message' => ['Whatsapp Message sent successfully.'], 'request_id' => 'wa' . count($this->requests)], 200];
         };
     }
 

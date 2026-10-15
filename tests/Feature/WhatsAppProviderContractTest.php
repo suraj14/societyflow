@@ -194,7 +194,7 @@ class WhatsAppProviderContractTest extends TestCase
             parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
             $this->calls[] = ['path' => parse_url($url, PHP_URL_PATH), 'q' => $q];
 
-            return [$answer ?? ['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'req-77'], $code];
+            return [$answer ?? ['return' => true, 'message' => ['Whatsapp Message sent successfully.'], 'request_id' => 'req-77'], $code];
         };
     }
 
@@ -254,9 +254,106 @@ class WhatsAppProviderContractTest extends TestCase
         $this->assertStringContainsString('Could not reach Fast2SMS', $down['message']);
 
         Cache::flush();
-        $this->capture(['message' => 'Unreadable response', 'raw' => '<html>'], 200);   // HTTP 200 but no `status: true`
+        $this->capture(['message' => 'Unreadable response', 'raw' => '<html>'], 200);   // HTTP 200 but no `status: true` or `return: true`
         $malformed = WhatsAppService::sendNotification('bill', '9876543210', $this->bill(), $this->society->id);
         $this->assertFalse($malformed['success'], 'an HTTP 200 alone is not acceptance');
+    }
+
+    /**
+     * The documented success shape uses `status: true`, but the actual Fast2SMS response (confirmed 2026-10-14)
+     * uses `return: true` with `message` as an array — the same shape as the SMS/OTP API. Both must be accepted.
+     * `return: false` is a failure even at HTTP 200.
+     */
+    public function test_the_real_fast2sms_return_true_response_shape_is_accepted_as_success(): void
+    {
+        $this->template();
+
+        // The real shape observed from Fast2SMS: {return: true, request_id, message: [string]}
+        $this->capture(['return' => true, 'request_id' => 'W6FS0WvSYxL61JS', 'message' => ['Whatsapp Message sent successfully.']]);
+        $r = WhatsAppService::sendNotification('bill', '9876543210', $this->bill(), $this->society->id);
+        $this->assertTrue($r['success'], 'return: true is success');
+        $this->assertSame('W6FS0WvSYxL61JS', $r['request_id']);
+        $this->assertStringContainsString('Whatsapp Message sent successfully.', (string) $r['raw'], 'the provider\'s own answer is kept for display');
+        $this->assertDatabaseHas('email_logs', ['channel' => 'whatsapp', 'trigger_action' => 'bill', 'status' => 'sent']);
+
+        // The documented shape must still work too
+        Cache::flush();
+        $this->calls = [];
+        $this->capture(['status' => true, 'request_id' => 'doc-shape', 'message' => 'Message sent successfully']);
+        $doc = WhatsAppService::sendNotification('bill', '9876543210', $this->bill(), $this->society->id);
+        $this->assertTrue($doc['success'], 'status: true is also success');
+        $this->assertSame('doc-shape', $doc['request_id']);
+
+        // return: false is a rejection even at HTTP 200
+        Cache::flush();
+        $this->calls = [];
+        $this->capture(['return' => false, 'message' => ['Invalid parameters']]);
+        $fail = WhatsAppService::sendNotification('bill', '9876543210', $this->bill(), $this->society->id);
+        $this->assertFalse($fail['success'], 'return: false is a failure');
+        $this->assertStringContainsString('Invalid parameters', $fail['message']);
+    }
+
+    /** @return \Illuminate\Contracts\Queue\Job&\Mockery\MockInterface */
+    private function queueJob(int $attempts, ?int $expectRelease)
+    {
+        $queueJob = \Mockery::mock(\Illuminate\Contracts\Queue\Job::class);
+        $queueJob->shouldReceive('attempts')->andReturn($attempts);
+        $expectRelease === null
+            ? $queueJob->shouldReceive('release')->never()
+            : $queueJob->shouldReceive('release')->once()->with($expectRelease);
+
+        return $queueJob;
+    }
+
+    private function runJob($queueJob): void
+    {
+        $job = new \App\Jobs\SendWhatsAppNotification('bill', '9876543210', $this->bill(), $this->society->id);
+        $job->setJob($queueJob);
+        $job->handle();
+    }
+
+    public function test_only_a_transient_failure_is_put_back_for_a_later_attempt_and_never_a_permanent_one(): void
+    {
+        $this->template();
+
+        // a rate limit and a provider-side failure can pass: second attempt after 30 seconds
+        foreach ([429, 500, 503] as $code) {
+            Cache::flush();
+            $this->capture(['status' => false, 'message' => 'try later'], $code);
+            $this->runJob($this->queueJob(1, 30));
+        }
+        // no answer at all (timeout / connection reset): the same
+        Cache::flush();
+        WhatsAppService::$transportOverride = fn () => [['transport_error' => 'Operation timed out'], 0];
+        $this->runJob($this->queueJob(1, 30));
+        // the third attempt waits longer; the fourth does not exist
+        Cache::flush();
+        $this->capture(['status' => false, 'message' => 'try later'], 503);
+        $this->runJob($this->queueJob(2, 120));
+        Cache::flush();
+        $this->runJob($this->queueJob(3, null));
+
+        // a refused key, an unknown number ID, a bad request, a template error: recorded once, never retried
+        foreach ([400, 401, 403, 404] as $code) {
+            Cache::flush();
+            $this->capture(['status' => false, 'message' => 'WABA or Phone Number not found'], $code);
+            $this->runJob($this->queueJob(1, null));
+        }
+        Cache::flush();
+        $this->capture(['error' => ['code' => 132000, 'message' => '(#132000) Number of parameters does not match']], 200);
+        $this->runJob($this->queueJob(1, null));
+    }
+
+    public function test_a_retry_after_an_accepted_send_does_not_message_the_resident_again(): void
+    {
+        $this->template();
+        $this->capture();
+
+        $this->runJob($this->queueJob(1, null));
+        $this->runJob($this->queueJob(2, null));   // the worker ran it again (a lost acknowledgement, a duplicate delivery)
+
+        $this->assertCount(1, $this->calls, 'one provider request in total');
+        $this->assertSame(1, \App\Models\EmailLog::where('channel', 'whatsapp')->where('status', 'sent')->count());
     }
 
     public function test_missing_key_or_phone_number_id_sends_nothing(): void
@@ -423,9 +520,36 @@ class WhatsAppProviderContractTest extends TestCase
         $html = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertOk()->getContent();
 
         $this->assertStringNotContainsString(self::KEY, $html);
-        $this->assertStringContainsString('(0 of 8 now)', $html);
+        $this->assertStringContainsString('(0 of ' . count(\App\Support\WhatsAppPurposes::selectable()) . ' now)', $html);
         $this->assertStringContainsString('cannot be sent', $html);
         $this->assertStringContainsString('Fixing', $html);
+    }
+
+    /**
+     * The two excluded templates in the development data: BookMizo's refund and staff-reschedule templates switched on for
+     * "Visitor approved" and "Gate pass updates", while the approved society_visitor_approved sat switched off. The page names
+     * each one, says why, and names the replacement - or says there is none yet.
+     */
+    public function test_the_excluded_templates_are_named_with_the_reason_and_the_approved_replacement(): void
+    {
+        $this->template(['name' => 'bookmizo_refund_full', 'purpose' => 'visitor', 'message_id' => '30381', 'var_count' => 0, 'body_text' => 'Your refund is processed.']);
+        $this->template(['name' => 'bookmizo_staff_booking_reschedule', 'purpose' => 'access_pass', 'message_id' => '30459', 'var_count' => 0, 'body_text' => 'Booking moved.']);
+        $this->template(['name' => 'society_visitor_approved', 'purpose' => 'visitor', 'is_active' => false, 'message_id' => '37327']);
+        $this->template(['name' => 'society_visitor_pending_review', 'purpose' => 'visitor', 'is_active' => false, 'status' => 'PENDING']);   // not a replacement
+        $this->provider([]);   // record any account lookup
+        $this->capture();      // record any send
+
+        $html = $this->actingAs($this->admin)->get('/settings?tab=whatsapp')->assertOk()->getContent();
+
+        $this->assertStringContainsString('2 switched-on template(s) cannot be sent', $html);
+        $this->assertStringContainsString('Bookmizo Refund Full', $html);
+        $this->assertStringContainsString('Bookmizo Staff Booking Reschedule', $html);
+        $this->assertStringContainsString('is a BookMizo template', $html);
+        $this->assertStringContainsString('Make &quot;Society Visitor Approved&quot; active instead', $html, 'the approved template assigned to the same notification');
+        $this->assertStringNotContainsString('Society Visitor Pending Review&quot; active', $html, 'an unapproved one is never offered');
+        $this->assertStringContainsString('No SocietyFlow template is assigned to this notification yet', $html, 'gate pass has no replacement');
+        $this->assertStringContainsString('scope=other', $html);
+        $this->assertSame([], $this->calls, 'rendering the page contacts nobody');
     }
 
     public function test_the_last_success_survives_a_later_failure_and_both_are_shown(): void

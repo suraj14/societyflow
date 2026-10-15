@@ -5,67 +5,46 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Api\ApiImageHelper;
 use App\Http\Controllers\Api\Concerns\ResolvesUserFlats;
+use App\Models\Flat;
 use App\Models\Visitor;
 use App\Models\User;
+use App\Services\VisitorApprovalService;
+use App\Services\VisitorWorkflowException;
+use App\Support\VisitorPropertyScope;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Log;
 
+/**
+ * Mobile visitor API: the guard logs a visitor and the residents of that unit (or an administrator) decide, all through
+ * App\Services\VisitorApprovalService so the rules are the same here and on the web. Authorisation is by property and
+ * society (VisitorPropertyScope), never by a client-supplied id alone: a resident sees and decides only visitors to
+ * their own unit, gate staff record and check in but never decide, and another society's visitors do not exist.
+ */
 class VisitorApiController extends Controller
 {
     use ResolvesUserFlats;
 
+    private const GATE_ROLES = ['Staff', 'Guard', 'Admin', 'Super Admin'];
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
 
-        $query = Visitor::with(['flat.building'])->latest();
+        $query = Visitor::with(['flat.building', 'flat.villaArea', 'decidedBy:id,name', 'requestedBy:id,name'])->latest();
 
-        if ($isStaff) {
+        if ($user->hasRole(self::GATE_ROLES)) {
             // Staff/Guard/Admin sees ALL visitors for the society
             $query->where('society_id', $user->society_id);
         } else {
-            // Residents/Owners see visitors for their own unit(s)
-            $flatIds = collect();
-
-            // Via residents table
-            $flatIds = $flatIds->merge($user->flats()->pluck('flats.id'));
-
-            // Via owner record (Villa Owner / Apartment Owner)
-            if ($user->owner_id) {
-                $owner = \App\Models\Owner::find($user->owner_id);
-                if ($owner) {
-                    if ($owner->villa_area_id && $owner->villa_no) {
-                        $flatIds = $flatIds->merge(
-                            \App\Models\Flat::where('villa_area_id', $owner->villa_area_id)
-                                ->where('flat_number', $owner->villa_no)->pluck('id')
-                        );
-                    }
-                    if ($owner->building_id && $owner->flat_no) {
-                        $flatIds = $flatIds->merge(
-                            \App\Models\Flat::where('building_id', $owner->building_id)
-                                ->where('flat_number', $owner->flat_no)->pluck('id')
-                        );
-                    }
-                }
-            }
-
-            $flatIds = $flatIds->unique()->values()->toArray();
-
-            $query->where(function ($q) use ($user, $flatIds) {
-                $q->where('host_user_id', $user->id);
-                if (!empty($flatIds)) {
-                    $q->orWhereIn('flat_id', $flatIds);
-                }
-            })->where('society_id', $user->society_id);
+            // Residents/Owners see visitors for their own unit(s) - the same rule that lets them decide on them
+            VisitorPropertyScope::scopeQuery($query, $user);
         }
 
         $visitors = $query->paginate(100);
 
         return response()->json([
             'success' => true,
-            'data'    => $visitors->map(fn($v) => $this->formatVisitor($v))->values()->toArray(),
+            'data'    => $visitors->map(fn($v) => $this->formatVisitor($v, $user))->values()->toArray(),
             'meta'    => [
                 'current_page' => $visitors->currentPage(),
                 'last_page'    => $visitors->lastPage(),
@@ -89,15 +68,21 @@ class VisitorApiController extends Controller
             // not trusted as sent.
             'visitor_id_proof'    => 'nullable|string|in:' . implode(',', \App\Support\IdProof::TYPES),
             'visitor_id_number'   => 'nullable|string|max:40',
+            // The gate app's own id for this submission: a retry of a POST it did not hear back from is the same visitor.
+            'client_request_id'   => 'nullable|string|max:64',
+            'photo'               => 'nullable|file|mimes:jpeg,png,jpg|max:3072',
         ]);
 
         $user    = $request->user();
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
+        $isStaff = $user->hasRole(self::GATE_ROLES);
         $flatId  = $request->flat_id;
 
         if ($isStaff) {
+            if (!$flatId) {
+                return response()->json(['success' => false, 'message' => 'Choose the property being visited.'], 422);
+            }
             // Staff-supplied flat must belong to the same society.
-            if ($flatId && !\App\Models\Flat::where('id', $flatId)->where('society_id', $user->society_id)->exists()) {
+            if (!Flat::where('id', $flatId)->where('society_id', $user->society_id)->exists()) {
                 return response()->json(['success' => false, 'message' => 'Invalid flat.'], 422);
             }
         } else {
@@ -117,49 +102,53 @@ class VisitorApiController extends Controller
             }
         }
 
-        // Find the resident (host) for this flat — notify them
-        $hostUserId = $user->id;
-        if ($isStaff && $flatId) {
-            $flat       = \App\Models\Flat::with('residents.user')->find($flatId);
-            $hostResident = $flat?->residents()->where('status', 'active')->first();
-            if ($hostResident?->user_id) {
-                $hostUserId = $hostResident->user_id;
-            }
+        $photoPath = null;
+        if ($request->hasFile('photo') && $request->file('photo')->isValid()) {
+            // same convention as the web uploads: a random name under public/storage, never the client's own filename - and the
+            // extension is the one the file's CONTENT says it is (a jpeg or a png), never the name the client gave it
+            $file = $request->file('photo');
+            $dir  = public_path('storage/visitor-photos');
+            @mkdir($dir, 0777, true);
+            $ext  = in_array($guessed = strtolower((string) $file->guessExtension()), ['jpg', 'jpeg', 'png'], true) ? ($guessed === 'jpeg' ? 'jpg' : $guessed) : 'jpg';
+            $name = time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+            $file->move($dir, $name);
+            $photoPath = 'visitor-photos/' . $name;
         }
 
-        // Guard/Staff registers as PENDING — resident must approve
-        // Residents/Owners registering their own visitor → auto-allowed
-        $approvalStatus = $isStaff ? 'pending' : 'allowed';
+        try {
+            $result = VisitorApprovalService::register($user, Flat::findOrFail($flatId), [
+                'visitor_name'        => $request->visitor_name,
+                'visitor_phone'       => $request->visitor_phone,
+                'visitor_type'        => $request->visitor_type,
+                'purpose'             => $request->purpose,
+                'vehicle_number'      => $request->vehicle_number,
+                'expected_entry_time' => $request->expected_entry_time,
+                'expected_exit_time'  => $request->expected_exit_time,
+                'photo'               => $photoPath,
+                'visitor_id_proof'    => $request->visitor_id_proof,
+                // An Aadhaar is reduced to its last four digits here, on arrival,
+                // however complete the client sent it.
+                'visitor_id_number'   => \App\Support\IdProof::redact($request->visitor_id_proof, $request->visitor_id_number),
+            ], $request->input('client_request_id'));
+        } catch (VisitorWorkflowException $e) {
+            return $this->failure($e);
+        }
 
-        $visitor = Visitor::create([
-            'society_id'          => $user->society_id,
-            'flat_id'             => $flatId,
-            'host_user_id'        => $hostUserId,
-            'visitor_name'        => $request->visitor_name ?? 'Visitor',
-            'visitor_phone'       => $request->visitor_phone,
-            'visitor_type'        => $request->visitor_type,
-            'purpose'             => $request->purpose,
-            'vehicle_number'      => $request->vehicle_number,
-            'expected_entry_time' => $request->expected_entry_time ?? now(),
-            'expected_exit_time'  => $request->expected_exit_time,
-            'approval_status'     => $approvalStatus,
-            'entry_status'        => 'pending',
-            'security_notes'      => $isStaff ? 'Registered by guard: ' . $user->name : null,
-            'visitor_id_proof'    => $request->visitor_id_proof,
-            // An Aadhaar is reduced to its last four digits here, on arrival,
-            // however complete the client sent it.
-            'visitor_id_number'   => \App\Support\IdProof::redact($request->visitor_id_proof, $request->visitor_id_number),
-        ]);
+        $visitor = $result['visitor']->load(['flat.building', 'flat.villaArea']);
 
-        $visitor->load('flat.building');
+        $message = match (true) {
+            !$result['created']      => 'This visitor was already registered.',
+            !$isStaff                => 'Visitor registered successfully',
+            $result['linked']        => 'Visitor registered. The resident has been notified and must approve before entry.',
+            default                  => 'Visitor registered, but no owner or tenant is linked to this property. The administrators have been asked to decide.',
+        };
 
         return response()->json([
             'success' => true,
-            'message' => $isStaff
-                ? 'Visitor registered. Resident has been notified for approval.'
-                : 'Visitor registered successfully',
-            'data'    => $this->formatVisitor($visitor),
-        ], 201);
+            'message' => $message,
+            'data'    => $this->formatVisitor($visitor, $user),
+            'meta'    => ['residents_linked' => $result['linked'], 'duplicate' => !$result['created']],
+        ], $result['created'] ? 201 : 200);
     }
 
     /**
@@ -214,7 +203,7 @@ class VisitorApiController extends Controller
             'success' => true,
             'data'    => [
                 'found'       => $visitor !== null || $pass !== null,
-                'visitor'     => $visitor ? $this->formatVisitor($visitor) : null,
+                'visitor'     => $visitor ? $this->formatVisitor($visitor, $user) : null,
                 'access_pass' => $pass ? [
                     'id'            => $pass->id,
                     'person_name'   => $pass->person_name,
@@ -232,22 +221,14 @@ class VisitorApiController extends Controller
         $user = $request->user();
         $visitor = Visitor::where('society_id', $user->society_id)->findOrFail($id);
 
-        // Only security/staff or the visitor's own host may record entry.
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
-        if (!$isStaff && $visitor->host_user_id !== $user->id) {
-            return response()->json(['success' => false, 'message' => 'You are not allowed to check in this visitor.'], 403);
+        try {
+            // Approval is not entry: the guard performs the check-in, and only for a visitor who was allowed.
+            VisitorApprovalService::checkIn($visitor, $user, $request->input('notes'));
+        } catch (VisitorWorkflowException $e) {
+            return $this->failure($e);
         }
 
-        if (!$visitor->isAllowed()) {
-            return response()->json(['success' => false, 'message' => 'Visitor must be approved before check-in.'], 422);
-        }
-        if ($visitor->hasEntered()) {
-            return response()->json(['success' => false, 'message' => 'Visitor already checked in.'], 422);
-        }
-
-        $visitor->markEntry($user, $request->notes);
-
-        return response()->json(['success' => true, 'message' => 'Visitor checked in successfully', 'data' => $this->formatVisitor($visitor->fresh('flat.building'))]);
+        return response()->json(['success' => true, 'message' => 'Visitor checked in successfully', 'data' => $this->formatVisitor($visitor->fresh(['flat.building', 'flat.villaArea']), $user)]);
     }
 
     public function checkOut(Request $request, int $id): JsonResponse
@@ -255,22 +236,13 @@ class VisitorApiController extends Controller
         $user = $request->user();
         $visitor = Visitor::where('society_id', $user->society_id)->findOrFail($id);
 
-        // Only security/staff or the visitor's own host may record exit.
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
-        if (!$isStaff && $visitor->host_user_id !== $user->id) {
-            return response()->json(['success' => false, 'message' => 'You are not allowed to check out this visitor.'], 403);
+        try {
+            VisitorApprovalService::checkOut($visitor, $user, $request->input('notes'));
+        } catch (VisitorWorkflowException $e) {
+            return $this->failure($e);
         }
 
-        if (!$visitor->hasEntered()) {
-            return response()->json(['success' => false, 'message' => 'Visitor has not checked in yet.'], 422);
-        }
-        if ($visitor->hasExited()) {
-            return response()->json(['success' => false, 'message' => 'Visitor already checked out.'], 422);
-        }
-
-        $visitor->markExit($user, $request->notes);
-
-        return response()->json(['success' => true, 'message' => 'Visitor checked out successfully', 'data' => $this->formatVisitor($visitor->fresh('flat.building'))]);
+        return response()->json(['success' => true, 'message' => 'Visitor checked out successfully', 'data' => $this->formatVisitor($visitor->fresh(['flat.building', 'flat.villaArea']), $user)]);
     }
 
     public function dashboard(Request $request): JsonResponse
@@ -278,37 +250,11 @@ class VisitorApiController extends Controller
         $user = $request->user();
         $societyId = $user->society_id;
         $today = \App\Support\SocietyClock::dayBounds($societyId);
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
 
-        if ($isStaff) {
-            $base = Visitor::where('society_id', $societyId);
-        } else {
-            // Owner/resident — scope to their flat
-            $flatIds = collect();
-            $flatIds = $flatIds->merge($user->flats()->pluck('flats.id'));
-            if ($user->owner_id) {
-                $owner = \App\Models\Owner::find($user->owner_id);
-                if ($owner) {
-                    if ($owner->villa_area_id && $owner->villa_no) {
-                        $flatIds = $flatIds->merge(
-                            \App\Models\Flat::where('villa_area_id', $owner->villa_area_id)
-                                ->where('flat_number', $owner->villa_no)->pluck('id')
-                        );
-                    }
-                    if ($owner->building_id && $owner->flat_no) {
-                        $flatIds = $flatIds->merge(
-                            \App\Models\Flat::where('building_id', $owner->building_id)
-                                ->where('flat_number', $owner->flat_no)->pluck('id')
-                        );
-                    }
-                }
-            }
-            $flatIds = $flatIds->unique()->values()->toArray();
-            $base = Visitor::where('society_id', $societyId)->where(function ($q) use ($user, $flatIds) {
-                $q->where('host_user_id', $user->id);
-                if (!empty($flatIds)) $q->orWhereIn('flat_id', $flatIds);
-            });
-        }
+        // gate staff see the whole society; a resident exactly the visitors they may see and decide on
+        $base = $user->hasRole(self::GATE_ROLES)
+            ? Visitor::where('society_id', $societyId)
+            : VisitorPropertyScope::scopeQuery(Visitor::query(), $user);
 
         return response()->json([
             'success' => true,
@@ -339,17 +285,15 @@ class VisitorApiController extends Controller
     public function approve(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
+        $visitor = $this->findFor($user, $id);
 
-        $query = Visitor::where('society_id', $user->society_id);
-        if (!$isStaff) {
-            $query->where('host_user_id', $user->id);
+        try {
+            $result = VisitorApprovalService::decide($visitor, $user, 'allowed');
+        } catch (VisitorWorkflowException $e) {
+            return $this->failure($e);
         }
 
-        $visitor = $query->findOrFail($id);
-        $visitor->allow($user);
-
-        return response()->json(['success' => true, 'message' => 'Visitor allowed', 'data' => $this->formatVisitor($visitor->fresh('flat.building'))]);
+        return response()->json(['success' => true, 'message' => 'Visitor allowed', 'data' => $this->formatVisitor($result['visitor']->load(['flat.building', 'flat.villaArea']), $user)]);
     }
 
     public function reject(Request $request, int $id): JsonResponse
@@ -357,35 +301,87 @@ class VisitorApiController extends Controller
         $request->validate(['reason' => 'nullable|string|max:255']);
 
         $user = $request->user();
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
+        $visitor = $this->findFor($user, $id);
 
-        $query = Visitor::where('society_id', $user->society_id);
-        if (!$isStaff) {
-            $query->where('host_user_id', $user->id);
+        try {
+            $result = VisitorApprovalService::decide($visitor, $user, 'denied', $request->input('reason'));
+        } catch (VisitorWorkflowException $e) {
+            return $this->failure($e);
         }
 
-        $visitor = $query->findOrFail($id);
-        $visitor->deny($user, $request->reason ?? 'Denied');
+        return response()->json(['success' => true, 'message' => 'Visitor denied', 'data' => $this->formatVisitor($result['visitor']->load(['flat.building', 'flat.villaArea']), $user)]);
+    }
 
-        return response()->json(['success' => true, 'message' => 'Visitor denied', 'data' => $this->formatVisitor($visitor->fresh('flat.building'))]);
+    /**
+     * Administrator only: change an earlier decision (or decide for residents who have not answered). `decision` is
+     * allow | deny; `reason` is mandatory. The residents and the guard are always told - see VisitorApprovalService::override.
+     */
+    public function override(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'decision' => 'required|in:allow,deny,allowed,denied',
+            'reason'   => 'required|string|min:5|max:500',
+        ]);
+
+        $user = $request->user();
+        $visitor = $this->findFor($user, $id);
+
+        try {
+            $result = VisitorApprovalService::override($visitor, $user, str_starts_with($data['decision'], 'allow') ? 'allowed' : 'denied', $data['reason']);
+        } catch (VisitorWorkflowException $e) {
+            return $this->failure($e);
+        }
+
+        return response()->json(['success' => true, 'message' => 'Decision changed. The residents and the guard have been told.', 'data' => $this->formatVisitor($result['visitor']->load(['flat.building', 'flat.villaArea']), $user)]);
     }
 
     public function show(int $id, Request $request): JsonResponse
     {
         $user = $request->user();
-        $isStaff = $user->hasRole(['Staff', 'Guard', 'Admin', 'Super Admin']);
+        $visitor = $this->findFor($user, $id, ['flat.building', 'flat.villaArea', 'decidedBy:id,name', 'requestedBy:id,name']);
 
-        $query = Visitor::with(['flat.building'])->where('society_id', $user->society_id);
-        if (!$isStaff) {
-            $query->where('host_user_id', $user->id);
+        $data = $this->formatVisitor($visitor, $user);
+
+        // The approval trail (who, when, why - and the per-channel notification outcome) is for the office.
+        if ($user->hasAnyRole(['Admin', 'Super Admin'])) {
+            $data['history'] = $visitor->logs()->with('user:id,name')->orderBy('id')->get()->map(fn ($l) => [
+                'action' => $l->action,
+                'by'     => $l->user?->name,
+                'notes'  => $l->notes,
+                'at'     => $l->created_at?->toIso8601String(),
+            ])->values()->all();
         }
 
-        $visitor = $query->findOrFail($id);
-        return response()->json(['success' => true, 'data' => $this->formatVisitor($visitor)]);
+        return response()->json(['success' => true, 'data' => $data]);
     }
 
-    private function formatVisitor(Visitor $v): array
+    // ── helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * The visitor if this user may see it, else 404 - another society's visitor, or another resident's, does not exist as
+     * far as they are concerned (a 403 would confirm that the id is real).
+     */
+    private function findFor(User $user, int $id, array $with = []): Visitor
     {
+        $visitor = Visitor::with($with)->where('society_id', $user->society_id)->findOrFail($id);
+
+        if (!$user->hasRole(self::GATE_ROLES) && !VisitorPropertyScope::canViewVisitor($user, $visitor)) {
+            abort(404);
+        }
+
+        return $visitor;
+    }
+
+    private function failure(VisitorWorkflowException $e): JsonResponse
+    {
+        return response()->json(['success' => false, 'message' => $e->getMessage(), 'status' => $e->currentStatus], $e->status);
+    }
+
+    private function formatVisitor(Visitor $v, ?User $viewer = null): array
+    {
+        $pending = $v->approval_status === 'pending' && $v->entry_status === 'pending';
+        $isAdmin = $viewer?->hasAnyRole(['Admin', 'Super Admin']) ?? false;
+
         return [
             'id'                   => $v->id,
             'visitor_name'         => $v->visitor_name,
@@ -395,6 +391,8 @@ class VisitorApiController extends Controller
             'vehicle_number'       => $v->vehicle_number,
             'approval_status'      => $v->approval_status,
             'entry_status'         => $v->entry_status,
+            // pending_approval | approved | rejected | checked_in | checked_out
+            'status'               => $v->workflowStatus(),
             'expected_entry_time'  => $v->expected_entry_time?->toIso8601String(),
             'expected_exit_time'   => $v->expected_exit_time?->toIso8601String(),
             'actual_entry_time'    => $v->actual_entry_time?->toIso8601String(),
@@ -404,7 +402,36 @@ class VisitorApiController extends Controller
                 'flat_number' => $v->flat->flat_number,
                 'building'    => $v->flat->building ? ['name' => $v->flat->building->name] : null,
             ] : null,
+            'unit'                 => $v->flat ? VisitorPropertyScope::unitLabel($v->flat) : null,
+            'requested_by'         => $v->requestedBy?->name,
+            'decided_by'           => $v->decidedBy?->name,
+            'decided_at'           => $v->decided_at?->toIso8601String(),
+            'decision_role'        => $v->decision_role,
+            'rejection_reason'     => $v->rejection_reason,
+            'override_reason'      => $v->override_reason,
+            'escalated'            => $v->escalated_at !== null,
+            // What THIS viewer may do now - the server's answer, so the app never offers a button the server would refuse.
+            'can_decide'           => $viewer !== null && $pending && $this->mayDecide($viewer, $v),
+            'can_override'         => $isAdmin && $v->entry_status === 'pending',
+            'can_check_in'         => $viewer !== null && $viewer->hasAnyRole(['Staff', 'Guard', 'Admin', 'Super Admin']) && $v->approval_status === 'allowed' && $v->entry_status === 'pending',
+            'can_check_out'        => $viewer !== null && $viewer->hasAnyRole(['Staff', 'Guard', 'Admin', 'Super Admin']) && $v->entry_status === 'entered',
             'created_at'           => $v->created_at->toIso8601String(),
         ];
+    }
+
+    /** The viewer's own units, worked out once per request (a list of 100 visitors must not repeat it 100 times). */
+    private ?array $viewerFlatIds = null;
+
+    private function mayDecide(User $viewer, Visitor $v): bool
+    {
+        if ($viewer->hasAnyRole(['Admin', 'Super Admin'])) {
+            return $viewer->hasRole('Super Admin') || (int) $viewer->society_id === (int) $v->society_id;
+        }
+        if (VisitorPropertyScope::isSocietyWide($viewer) || (int) $v->society_id !== (int) $viewer->society_id) {
+            return false;
+        }
+        $this->viewerFlatIds ??= VisitorPropertyScope::residentFlatIds($viewer);
+
+        return in_array((int) $v->flat_id, $this->viewerFlatIds, true);
     }
 }

@@ -29,6 +29,11 @@ class WhatsAppPurposes
                 'help'   => 'Tells a resident their visitor was approved.',
                 'fields' => ['resident_name' => 'Resident name', 'visitor_name' => 'Visitor name', 'visit_date' => 'Visit date', 'society_name' => 'Society name', 'society_phone' => 'Society phone (security contact)'],
             ],
+            'visitor_arrival' => [
+                'label'  => 'Visitor at the gate',
+                'help'   => 'Tells a resident a visitor has arrived at the gate and is waiting for their decision.',
+                'fields' => ['resident_name' => 'Resident name', 'visitor_name' => 'Visitor name', 'visit_date' => 'Arrival time', 'society_name' => 'Society name', 'society_phone' => 'Society phone (security contact)', 'unit_name' => 'Property being visited'],
+            ],
             'access_pass' => [
                 'label'  => 'Gate pass updates',
                 'help'   => 'When a gate pass is created or revoked.',
@@ -90,6 +95,7 @@ class WhatsAppPurposes
             'bill_ref' => 'MB-2026-0042', 'payment_date' => '12 Oct 2026', 'receipt_ref' => 'RCP-0042', 'event_name' => 'Diwali get-together',
             'event_date' => '25 Oct, 6:00 PM', 'event_status' => 'New event', 'society_phone' => '98765 43210', 'complaint_update' => 'Plumber visit booked',
             'bill_period' => 'October 2026', 'amount_number' => '2,700.00', 'event_day' => '25 Oct 2026', 'event_time' => '06:00 PM', 'event_location' => 'Clubhouse',
+            'unit_name' => 'Tower A - Flat 101',
         ][$field] ?? TemplateVariables::sample($field);
     }
 
@@ -97,7 +103,8 @@ class WhatsAppPurposes
     public static function recipient(?string $purpose): string
     {
         return [
-            'visitor' => 'The resident being visited', 'access_pass' => 'The resident who owns the pass', 'complaint' => 'The resident who raised it',
+            'visitor' => 'The resident being visited', 'visitor_arrival' => 'The owner / tenant of the property being visited',
+            'access_pass' => 'The resident who owns the pass', 'complaint' => 'The resident who raised it',
             'service_request' => 'The resident who asked', 'bill' => 'The resident billed', 'payment' => 'The resident who paid',
             'notice' => 'Residents the notice is for', 'event' => 'Owners in the event\'s audience', 'document' => 'Owners of the society',
         ][(string) $purpose] ?? 'Not assigned';

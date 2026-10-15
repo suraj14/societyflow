@@ -182,11 +182,11 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
   Future<void> loadVisitors() async {
     try {
       final vResult = await HttpService.instance.get(ApiConfig.visitors);
-      if (vResult.success && mounted) {
+      if (vResult.success && mounted && vResult.data?['data'] is List) {
+        // A successful answer is the truth, an empty one included: a resident whose last pending visitor was just decided
+        // elsewhere (the other owner, an admin) must see the list empty, not the stale card with live buttons.
         final newList = _parseVisitors(vResult.data);
-        if (newList.isNotEmpty) {
-          state = state.copyWith(visitors: newList, allVisitors: newList);
-        }
+        state = state.copyWith(visitors: newList, allVisitors: newList);
       }
 
       final sResult = await HttpService.instance.get('${ApiConfig.visitors}/dashboard');
@@ -218,30 +218,39 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
+  //
+  // Every action is the server's decision, not the app's: the visitor as the
+  // server now holds it replaces the card, so the screen can never claim a state
+  // the server did not reach. A refusal - someone else decided first (409), the
+  // visitor is not yours (404), you may not (403) - reloads the list so the real
+  // state shows, and surfaces the server's own plain message.
 
-  Future<void> allowVisitor(int id) async {
-    final result = await HttpService.instance.post('${ApiConfig.visitors}/$id/approve');
+  Future<void> _act(String path, {Map<String, dynamic>? body}) async {
+    final result = await HttpService.instance.post(path, body: body);
     if (result.success) {
-      _updateVisitorLocal(id, approvalStatus: 'allowed');
-      loadVisitors(); // background refresh stats
+      final data = result.data?['data'];
+      if (data is Map<String, dynamic>) _applyServerVisitor(VisitorModel.fromJson(data));
+      loadVisitors(); // background refresh of the list and the counts
     } else {
-      throw Exception(result.message);
+      if (const {403, 404, 409, 422}.contains(result.statusCode)) loadVisitors();
+      throw VisitorActionException(result.message, result.statusCode);
     }
   }
 
-  Future<void> denyVisitor(int id, {String reason = 'Denied'}) async {
-    final result = await HttpService.instance.post(
-      '${ApiConfig.visitors}/$id/reject',
-      body: {'reason': reason},
-    );
-    if (result.success) {
-      _updateVisitorLocal(id, approvalStatus: 'denied');
-      loadVisitors();
-    } else {
-      throw Exception(result.message);
-    }
-  }
+  /// A resident (or an administrator) lets the visitor in.
+  Future<void> allowVisitor(int id) => _act('${ApiConfig.visitors}/$id/approve');
 
+  /// A resident turns the visitor away; the reason is optional for them, required for an administrator (the server checks).
+  Future<void> denyVisitor(int id, {String? reason}) => _act(
+        '${ApiConfig.visitors}/$id/reject',
+        body: {if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim()},
+      );
+
+  /// An administrator changes an earlier decision. The reason is mandatory and the residents and the guard are told.
+  Future<void> overrideVisitor(int id, {required bool allow, required String reason}) => _act(
+        '${ApiConfig.visitors}/$id/override',
+        body: {'decision': allow ? 'allow' : 'deny', 'reason': reason.trim()},
+      );
   /// Has this number been here before, or does it hold a pass?
   ///
   /// Returns null when the question could not be answered - a failed lookup
@@ -265,27 +274,16 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
     }
   }
 
-  Future<void> checkIn(int id) async {
-    final result = await HttpService.instance.post('${ApiConfig.visitors}/$id/check-in');
-    if (result.success) {
-      _updateVisitorLocal(id, entryStatus: 'entered');
-      loadVisitors();
-    } else {
-      throw Exception(result.message);
-    }
-  }
+  Future<void> checkIn(int id) => _act('${ApiConfig.visitors}/$id/check-in');
 
-  Future<void> checkOut(int id) async {
-    final result = await HttpService.instance.post('${ApiConfig.visitors}/$id/check-out');
-    if (result.success) {
-      _updateVisitorLocal(id, entryStatus: 'exited');
-      loadVisitors();
-    } else {
-      throw Exception(result.message);
-    }
-  }
+  Future<void> checkOut(int id) => _act('${ApiConfig.visitors}/$id/check-out');
 
-  Future<void> addVisitor({
+  /// Logs a visitor at the gate (guard) or invites one (resident).
+  ///
+  /// [clientRequestId] identifies THIS submission: send the same one again for a retry - a tap that did not
+  /// seem to work, a request that timed out - and the server returns the visitor it already has instead of
+  /// creating a second one and notifying the residents twice.
+  Future<VisitorAddResult> addVisitor({
     required String phone,
     required String visitorType,
     int? flatId,
@@ -294,8 +292,10 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
     String? purpose,
     String? idProof,
     String? idNumber,
+    String? photoPath,
+    String? clientRequestId,
   }) async {
-    final body = <String, dynamic>{
+    final fields = <String, dynamic>{
       'visitor_phone': phone,
       'visitor_type':  visitorType,
       if (name != null && name.isNotEmpty)          'visitor_name':   name,
@@ -306,37 +306,73 @@ class VisitorsNotifier extends StateNotifier<VisitorsState> {
       // digits, and the API reduces it again rather than trusting us.
       if (idProof != null && idProof.isNotEmpty)    'visitor_id_proof':  idProof,
       if (idNumber != null && idNumber.isNotEmpty)  'visitor_id_number': idNumber,
+      if (clientRequestId != null && clientRequestId.isNotEmpty) 'client_request_id': clientRequestId,
     };
 
-    final result = await HttpService.instance.post(ApiConfig.visitors, body: body);
+    final result = (photoPath != null && photoPath.isNotEmpty)
+        ? await HttpService.instance.postMultipart(
+            ApiConfig.visitors,
+            fields: fields.map((k, v) => MapEntry(k, v.toString())),
+            filePaths: {'photo': photoPath},
+          )
+        : await HttpService.instance.post(ApiConfig.visitors, body: fields);
+
     if (result.success && result.data != null) {
       final newData = result.data!['data'];
-      if (newData is Map<String, dynamic>) {
-        final newVisitor = VisitorModel.fromJson(newData);
-        // Prepend to list immediately so it shows without waiting for refresh
-        final updated = [newVisitor, ...state.allVisitors];
-        if (mounted) state = state.copyWith(visitors: updated, allVisitors: updated);
-      }
-      // Background refresh to get accurate stats
-      loadVisitors();
-    } else {
-      throw Exception(
-        result.message.isNotEmpty ? result.message : 'Failed to add visitor',
+      if (newData is Map<String, dynamic>) _applyServerVisitor(VisitorModel.fromJson(newData), prependIfNew: true);
+      loadVisitors(); // background refresh to get accurate stats
+      final meta = result.data!['meta'];
+      return VisitorAddResult(
+        message: result.message,
+        residentsLinked: meta is Map ? meta['residents_linked'] != false : true,
+        duplicate: meta is Map && meta['duplicate'] == true,
       );
     }
+    throw VisitorActionException(
+      result.message.isNotEmpty ? result.message : 'Failed to add visitor',
+      result.statusCode,
+    );
   }
 
-  // ── Local state update ────────────────────────────────────────────────────
+  // ── State update from the server's answer ─────────────────────────────────
 
-  void _updateVisitorLocal(int id, {String? approvalStatus, String? entryStatus}) {
+  void _applyServerVisitor(VisitorModel fresh, {bool prependIfNew = false}) {
+    if (!mounted) return;
+    var found = false;
     final updated = state.allVisitors.map((v) {
-      if (v.id != id) return v;
-      return v.copyWith(approvalStatus: approvalStatus, entryStatus: entryStatus);
+      if (v.id != fresh.id) return v;
+      found = true;
+      return fresh;
     }).toList();
-    if (mounted) state = state.copyWith(visitors: updated, allVisitors: updated);
+    if (!found && prependIfNew) updated.insert(0, fresh);
+    state = state.copyWith(visitors: updated, allVisitors: updated);
   }
 }
 
+/// A refusal or failure from a visitor action. [toString] is the server's plain message, so a snackbar can show it as it is.
+class VisitorActionException implements Exception {
+  final String message;
+  final int statusCode;
+  const VisitorActionException(this.message, this.statusCode);
+
+  /// Someone else decided first, or the visitor has already moved on.
+  bool get isConflict => statusCode == 409;
+
+  @override
+  String toString() => message;
+}
+
+/// What the server said about a visitor that was just logged.
+class VisitorAddResult {
+  final String message;
+
+  /// False when the unit has no owner or tenant linked: the administrators were asked to decide instead.
+  final bool residentsLinked;
+
+  /// True when this was a retry of a submission the server already had.
+  final bool duplicate;
+  const VisitorAddResult({required this.message, this.residentsLinked = true, this.duplicate = false});
+}
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 final visitorsProvider = StateNotifierProvider<VisitorsNotifier, VisitorsState>(

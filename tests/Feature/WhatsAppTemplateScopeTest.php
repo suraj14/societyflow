@@ -45,7 +45,7 @@ class WhatsAppTemplateScopeTest extends TestCase
             parse_str((string) parse_url($url, PHP_URL_QUERY), $q);
             $this->calls[] = ['url' => $url, 'query' => $q, 'data' => $data];
 
-            return [['status' => true, 'request_id' => 'r1', 'messages' => [['id' => 'wamid.X']]], 200];
+            return [['return' => true, 'request_id' => 'r1', 'message' => ['Whatsapp Message sent successfully.']], 200];
         };
         $this->wa('whatsapp_enabled', true, 'boolean');
         $this->wa('whatsapp_api_key', 'wa-key-0123456789abcdefghij', 'encrypted');
@@ -480,7 +480,7 @@ class WhatsAppTemplateScopeTest extends TestCase
         $this->assertSame('APPROVED', $new->status);
         $this->assertSame('synced', $new->source);
         $this->assertFalse($new->is_active, 'discovered, not switched on');
-        $this->assertNull($new->purpose);
+        $this->assertSame('visitor_arrival', $new->purpose, 'an arrival template is attached to the gate-request notification (never the approval one), switched off');
         $this->assertSame('Hi {{1}}', $new->body_text);
         $this->assertSame(1, $new->var_count);
         $this->assertStringContainsString('society_visitor_arrived', $this->tab());

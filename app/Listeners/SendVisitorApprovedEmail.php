@@ -26,15 +26,12 @@ class SendVisitorApprovedEmail
             $visitor = $event->visitor;
             $societyId = $visitor->society_id;
 
-            // Allowed roles for visitor approved event
-            $allowedRoles = ['Owner', 'Villa Owner', 'Apartment Owner', 'Tenant'];
-
             $recipients = [];
 
-            // Add visitor requester
-            if ($visitor->created_by) {
-                $requester = User::find($visitor->created_by);
-                if ($requester && $requester->hasAnyRole($allowedRoles)) {
+            // The resident the visit was registered for, else the people of the visited unit other than whoever approved.
+            // (A Visitor row has no created_by, so reading only that column meant an approval emailed nobody.)
+            foreach (\App\Support\BusinessNotifications::visitorApprovedRecipients($visitor) as $requester) {
+                if (filter_var((string) $requester->email, FILTER_VALIDATE_EMAIL)) {
                     $recipients[] = [
                         'email' => $requester->email,
                         'name' => $requester->name,

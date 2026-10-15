@@ -15,6 +15,22 @@ class VisitorModel {
   final DateTime? actualExitTime;
   final String? photo;
 
+  // Gate approval workflow. The server decides what the signed-in person may do
+  // (`can_*`); a payload without them (an older server) falls back to the
+  // status, which is what the app did before.
+  final String? unitLabel;
+  final String? requestedBy;
+  final String? decidedBy;
+  final DateTime? decidedAt;
+  final String? decisionRole;
+  final String? rejectionReason;
+  final String? overrideReason;
+  final bool escalated;
+  final bool? canDecideFlag;
+  final bool? canOverrideFlag;
+  final bool? canCheckInFlag;
+  final bool? canCheckOutFlag;
+
   const VisitorModel({
     required this.id,
     required this.visitorName,
@@ -31,6 +47,18 @@ class VisitorModel {
     this.actualEntryTime,
     this.actualExitTime,
     this.photo,
+    this.unitLabel,
+    this.requestedBy,
+    this.decidedBy,
+    this.decidedAt,
+    this.decisionRole,
+    this.rejectionReason,
+    this.overrideReason,
+    this.escalated = false,
+    this.canDecideFlag,
+    this.canOverrideFlag,
+    this.canCheckInFlag,
+    this.canCheckOutFlag,
   });
 
   factory VisitorModel.fromJson(Map<String, dynamic> json) => VisitorModel(
@@ -49,6 +77,18 @@ class VisitorModel {
     actualEntryTime:    json['actual_entry_time'] != null ? DateTime.tryParse(json['actual_entry_time'].toString()) : null,
     actualExitTime:     json['actual_exit_time'] != null ? DateTime.tryParse(json['actual_exit_time'].toString()) : null,
     photo:              json['photo']?.toString(),
+    unitLabel:          json['unit']?.toString(),
+    requestedBy:        json['requested_by']?.toString(),
+    decidedBy:          json['decided_by']?.toString(),
+    decidedAt:          json['decided_at'] != null ? DateTime.tryParse(json['decided_at'].toString()) : null,
+    decisionRole:       json['decision_role']?.toString(),
+    rejectionReason:    json['rejection_reason']?.toString(),
+    overrideReason:     json['override_reason']?.toString(),
+    escalated:          json['escalated'] == true,
+    canDecideFlag:      json['can_decide'] as bool?,
+    canOverrideFlag:    json['can_override'] as bool?,
+    canCheckInFlag:     json['can_check_in'] as bool?,
+    canCheckOutFlag:    json['can_check_out'] as bool?,
   );
 
   bool get isPending   => approvalStatus == 'pending';
@@ -56,8 +96,35 @@ class VisitorModel {
   bool get isDenied    => approvalStatus == 'denied';
   bool get hasEntered  => entryStatus == 'entered';
   bool get hasExited   => entryStatus == 'exited';
-  bool get canCheckIn  => isAllowed && !hasEntered;
-  bool get canCheckOut => hasEntered && !hasExited;
+
+  /// Whether the signed-in person may allow or deny this visitor right now.
+  /// Gate staff never can: they record the visitor, the resident (or an admin) decides.
+  bool get canDecide   => canDecideFlag ?? (isPending && entryStatus == 'pending');
+
+  /// An administrator may change a decision (with a reason) until the visitor has entered.
+  bool get canOverride => canOverrideFlag ?? false;
+
+  bool get canCheckIn  => canCheckInFlag ?? (isAllowed && !hasEntered);
+  bool get canCheckOut => canCheckOutFlag ?? (hasEntered && !hasExited);
+
+  /// pending_approval | approved | rejected | checked_in | checked_out, derived the same way the server does.
+  String get status {
+    if (hasExited) return 'checked_out';
+    if (hasEntered) return 'checked_in';
+    if (isAllowed) return 'approved';
+    if (isDenied) return 'rejected';
+    return 'pending_approval';
+  }
+
+  String get statusLabel {
+    switch (status) {
+      case 'checked_out': return 'Checked out';
+      case 'checked_in':  return 'Inside';
+      case 'approved':    return 'Approved';
+      case 'rejected':    return 'Rejected';
+      default:            return escalated ? 'No answer yet' : 'Pending approval';
+    }
+  }
 
   String get unitDisplay => [buildingName, flatNumber].where((e) => e != null && e.isNotEmpty).join(' - ');
 
@@ -70,5 +137,12 @@ class VisitorModel {
     vehicleNumber: vehicleNumber, expectedEntryTime: expectedEntryTime,
     expectedExitTime: expectedExitTime, actualEntryTime: actualEntryTime,
     actualExitTime: actualExitTime, photo: photo,
+    unitLabel: unitLabel, requestedBy: requestedBy, decidedBy: decidedBy,
+    decidedAt: decidedAt, decisionRole: decisionRole,
+    rejectionReason: rejectionReason, overrideReason: overrideReason,
+    escalated: escalated,
+    // a local patch cannot know what the server would now allow: forget the flags
+    // and let the next refresh (or the server's own answer) set them
+    canDecideFlag: null, canOverrideFlag: null, canCheckInFlag: null, canCheckOutFlag: null,
   );
 }

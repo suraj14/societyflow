@@ -1075,6 +1075,8 @@ class SettingsController extends Controller
             'password_require_uppercase' => 'nullable|boolean',
             'password_require_number' => 'nullable|boolean',
             'password_require_special' => 'nullable|boolean',
+            // how long a visitor waits at the gate with no answer before the administrators are told (0 = never); a visitor is never admitted by waiting
+            'visitor_no_response_minutes' => 'nullable|integer|min:0|max:240',
         ]);
 
         $societyId = $user->hasRole('Super Admin') ? null : $user->society_id;
@@ -1090,6 +1092,9 @@ class SettingsController extends Controller
         SystemSetting::set('security', 'password_require_uppercase', $request->boolean('password_require_uppercase'), 'boolean', $societyId);
         SystemSetting::set('security', 'password_require_number', $request->boolean('password_require_number'), 'boolean', $societyId);
         SystemSetting::set('security', 'password_require_special', $request->boolean('password_require_special'), 'boolean', $societyId);
+        if (isset($validated['visitor_no_response_minutes'])) {
+            SystemSetting::set('security', 'visitor_no_response_minutes', (int) $validated['visitor_no_response_minutes'], 'integer', $societyId);
+        }
 
         return back()->with('success', 'Security settings updated successfully!');
     }

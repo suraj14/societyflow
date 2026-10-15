@@ -14,7 +14,15 @@
     // notifications that will really send: an active template of a type, and one the sender would accept (not BookMizo's, not unapproved)
     $sfWaInUse = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->get()
         ->filter(fn ($t) => $t->sendBlockReason() === null)->pluck('purpose')->unique()->count();
-    $sfWaBlocked = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->get()->filter(fn ($t) => $t->sendBlockReason() !== null)->count();
+    // switched on but refused by the sender: which notification, why, and which of the society's templates could take its place
+    $sfWaBlocked = \App\Models\WhatsAppTemplate::bySociety($sfWaSociety)->active()->whereNotNull('purpose')->get()
+        ->filter(fn ($t) => $t->sendBlockReason() !== null)
+        ->map(fn ($t) => [
+            'purpose'  => $t->purposeLabel(),
+            'reason'   => $t->sendBlockReason(),
+            'bookmizo' => \App\Support\WhatsAppTemplateScope::isBookMizo($t),
+            'instead'  => $sfWaTemplates->filter(fn ($c) => $c->purpose === $t->purpose && !$c->is_active && $c->sendBlockReason() === null)->map->displayName()->values()->all(),
+        ])->values();
     $sfInput = 'w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500';
     $sfWaJs = $sfWaTemplates->map(fn ($t) => ['id' => $t->id, 'label' => $t->displayName(), 'vars' => (int) $t->var_count, 'body' => (string) $t->body_text])->values();
 @endphp
@@ -74,8 +82,24 @@
             </div>
         @endif
 
-        @if ($sfWaBlocked)
-            <p class="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-900" role="alert"><i class="fas fa-circle-exclamation mr-1"></i> {{ $sfWaBlocked }} active template(s) cannot be sent (BookMizo's, or not approved by the provider) and are not counted above. See <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp']) }}" class="underline">Message Templates</a>.</p>
+        @if ($sfWaBlocked->isNotEmpty())
+            <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-900" role="alert">
+                <p class="font-semibold"><i class="fas fa-circle-exclamation mr-1"></i> {{ $sfWaBlocked->count() }} switched-on template(s) cannot be sent, so these notifications do not go out on WhatsApp (not counted above):</p>
+                <ul class="list-disc ml-5 mt-1 space-y-1">
+                    @foreach ($sfWaBlocked as $b)
+                        <li><span class="font-medium">{{ $b['purpose'] }}</span>: {{ $b['reason'] }}
+                            @if ($b['instead'])
+                                Make {{ collect($b['instead'])->map(fn ($n) => '"' . $n . '"')->join(', ', ' or ') }} active instead - it is approved and already assigned to this notification.
+                            @elseif ($b['bookmizo'])
+                                No SocietyFlow template is assigned to this notification yet. Switch this one off under <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp', 'scope' => 'other']) }}" class="underline">Other templates</a>.
+                            @else
+                                It can be used again once the provider approves it (Sync from Fast2SMS to refresh the status).
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+                <p class="mt-1">Change them in <a href="{{ route('admin.message-templates.index', ['channel' => 'whatsapp']) }}" class="underline">Message Templates</a>.</p>
+            </div>
         @endif
 
         {{-- 1. API Configuration --}}

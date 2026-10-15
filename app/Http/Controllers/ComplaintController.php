@@ -415,7 +415,16 @@ class ComplaintController extends BaseController
         ]);
 
         $assignee = User::findOrFail($request->assigned_to);
+        $previousStatus = $complaint->status;
         $complaint->assignTo($assignee, $request->message, Auth::user());
+
+        // Assigning moves the complaint to "in progress" and gives it an owner. The resident who raised it is told through
+        // the same event as any other status change (email, bell, WhatsApp where set up), and the assignee is told it is theirs.
+        // Before this, an assignment sent nobody anything.
+        if ($complaint->status !== $previousStatus) {
+            \App\Events\TicketUpdated::dispatch($complaint);
+        }
+        \App\Support\BusinessNotifications::complaintAssigned($complaint, $assignee, Auth::user());
 
         return back()->with('success', 'Complaint assigned successfully!');
     }

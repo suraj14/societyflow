@@ -151,31 +151,20 @@
                 <div class="border-t border-gray-200 pt-6">
                     <h3 class="text-md font-semibold text-gray-900 mb-4">Status Update</h3>
                     
+                    {{-- Shown, not editable: a decision or an entry is never changed by editing the record. Use Allow / Deny
+                         (an administrator's change of an earlier decision needs a written reason) and the gate's check-in / out,
+                         which record who did it and tell the people concerned. --}}
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <label for="approval_status" class="block text-sm font-medium text-gray-700 mb-2">
-                                Approval Status
-                            </label>
-                            <select name="approval_status" id="approval_status"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="pending" {{ old('approval_status', $visitor->approval_status) == 'pending' ? 'selected' : '' }}>Pending</option>
-                                <option value="approved" {{ old('approval_status', $visitor->approval_status) == 'approved' ? 'selected' : '' }}>Approved</option>
-                                <option value="rejected" {{ old('approval_status', $visitor->approval_status) == 'rejected' ? 'selected' : '' }}>Rejected</option>
-                            </select>
+                            <span class="block text-sm font-medium text-gray-700 mb-2">Approval Status</span>
+                            <p class="px-4 py-2 border border-gray-200 bg-gray-50 rounded-lg text-gray-800">{{ ucfirst($visitor->approval_status) }}</p>
                         </div>
-
                         <div>
-                            <label for="entry_status" class="block text-sm font-medium text-gray-700 mb-2">
-                                Entry Status
-                            </label>
-                            <select name="entry_status" id="entry_status"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                                <option value="pending" {{ old('entry_status', $visitor->entry_status) == 'pending' ? 'selected' : '' }}>Pending</option>
-                                <option value="entered" {{ old('entry_status', $visitor->entry_status) == 'entered' ? 'selected' : '' }}>Checked In</option>
-                                <option value="exited" {{ old('entry_status', $visitor->entry_status) == 'exited' ? 'selected' : '' }}>Checked Out</option>
-                            </select>
+                            <span class="block text-sm font-medium text-gray-700 mb-2">Entry Status</span>
+                            <p class="px-4 py-2 border border-gray-200 bg-gray-50 rounded-lg text-gray-800">{{ ['pending' => 'Not arrived', 'entered' => 'Checked in', 'exited' => 'Checked out'][$visitor->entry_status] ?? ucfirst($visitor->entry_status) }}</p>
                         </div>
                     </div>
+                    <p class="mt-2 text-xs text-gray-500">To change a decision, open the visitor and use Allow / Deny. Changing one already made needs a reason and notifies the residents and the guard.</p>
                 </div>
 
                 <!-- Additional Details -->

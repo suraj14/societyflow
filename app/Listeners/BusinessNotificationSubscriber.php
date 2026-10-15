@@ -12,7 +12,9 @@ use App\Events\PaymentReceived;
 use App\Events\SocietyDocumentPublished;
 use App\Events\TicketUpdated;
 use App\Events\VisitorApproved;
+use App\Events\VisitorWorkflowEvent;
 use App\Support\BusinessNotifications;
+use App\Support\VisitorNotifications;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Support\Facades\Log;
 
@@ -28,6 +30,7 @@ class BusinessNotificationSubscriber
     {
         return [
             VisitorApproved::class              => 'onVisitorApproved',
+            VisitorWorkflowEvent::class         => 'onVisitorWorkflow',
             TicketUpdated::class                => 'onTicketUpdated',
             PaymentReceived::class              => 'onPaymentReceived',
             BillGenerated::class                => 'onBillGenerated',
@@ -42,6 +45,7 @@ class BusinessNotificationSubscriber
     }
 
     public function onVisitorApproved(VisitorApproved $e): void { $this->safely(fn () => BusinessNotifications::visitorApproved($e->visitor)); }
+    public function onVisitorWorkflow(VisitorWorkflowEvent $e): void { $this->safely(fn () => VisitorNotifications::handle($e)); }
     public function onTicketUpdated(TicketUpdated $e): void { $this->safely(fn () => BusinessNotifications::complaintUpdated($e->complaint)); }
     public function onPaymentReceived(PaymentReceived $e): void { $this->safely(fn () => BusinessNotifications::paymentReceived($e->payment)); }
     public function onBillGenerated(BillGenerated $e): void { $this->safely(fn () => BusinessNotifications::billGenerated($e->bill)); }

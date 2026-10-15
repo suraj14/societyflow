@@ -46,7 +46,7 @@ class WhatsAppTemplateScope
     public static function purposeCategory(?string $purpose): ?string
     {
         return [
-            'visitor' => self::VISITORS, 'access_pass' => self::VISITORS,
+            'visitor' => self::VISITORS, 'visitor_arrival' => self::VISITORS, 'access_pass' => self::VISITORS,
             'complaint' => self::SERVICES, 'service_request' => self::SERVICES,
             'bill' => self::BILLS, 'payment' => self::BILLS,
             'notice' => self::NOTICES, 'event' => self::NOTICES, 'document' => self::NOTICES,

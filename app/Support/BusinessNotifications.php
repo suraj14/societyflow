@@ -26,16 +26,39 @@ class BusinessNotifications
 
     public static function visitorApproved(object $visitor): void
     {
-        $user = $visitor->created_by ? User::find($visitor->created_by) : null;
-        if (!$user || !$user->hasAnyRole(self::RESIDENT_ROLES)) {
+        $users = self::visitorApprovedRecipients($visitor);
+        if ($users->isEmpty()) {
             return;
         }
         $when = $visitor->expected_entry_time ? Carbon::parse($visitor->expected_entry_time)->format('d M, h:i A') : '';
 
-        InAppNotifier::send([$user], 'visitor', 'Visitor approved', trim(($visitor->visitor_name ?? 'Your visitor') . ' can enter' . ($when ? " ({$when})" : '') . '.'), self::url('visitors.show', $visitor->id), 'fa-user-check');
-        self::whatsapp('visitor', [$user], $visitor->society_id, fn ($u) => [
+        InAppNotifier::send($users, 'visitor', 'Visitor approved', trim(($visitor->visitor_name ?? 'Your visitor') . ' can enter' . ($when ? " ({$when})" : '') . '.'), self::url('visitors.show', $visitor->id), 'fa-user-check');
+        self::whatsapp('visitor', $users, $visitor->society_id, fn ($u) => [
             'resident_name' => $u->name, 'visitor_name' => $visitor->visitor_name ?? '', 'visit_date' => $when,
         ]);
+    }
+
+    /**
+     * Who is told "your visitor was approved": the resident the visit was registered for (`created_by`, the earlier
+     * shape of this event), else the people of the visited unit other than whoever approved - they already know. A
+     * Visitor row has no created_by, so before this fallback an approval reached nobody at all.
+     *
+     * @return Collection<int,User>
+     */
+    public static function visitorApprovedRecipients(object $visitor): Collection
+    {
+        if (!empty($visitor->created_by)) {
+            $user = User::find($visitor->created_by);
+
+            return $user && $user->hasAnyRole(self::RESIDENT_ROLES) ? collect([$user]) : collect();
+        }
+        if (empty($visitor->flat_id) || !$visitor instanceof \App\Models\Visitor) {
+            return collect();
+        }
+
+        $approver = (int) ($visitor->decided_by ?? $visitor->approved_by ?? 0);
+
+        return VisitorRecipients::forVisitor($visitor)['residents']->reject(fn (User $u) => $u->id === $approver)->values();
     }
 
     /** Called directly from ComplaintController::store - never throws into it. */
@@ -69,6 +92,21 @@ class BusinessNotifications
             // the office's own note when there is one, else what changed - both real data, never invented text
             'complaint_update' => trim((string) ($complaint->resolution_notes ?? '')) !== '' ? trim((string) $complaint->resolution_notes) : "Status changed to {$status}",
         ]);
+    }
+
+    /** A complaint was assigned to someone: tell them it is theirs (not when they assigned it to themselves). Never throws. */
+    public static function complaintAssigned(object $complaint, User $assignee, ?User $by = null): void
+    {
+        self::guard(function () use ($complaint, $assignee, $by) {
+            if ($by && $by->id === $assignee->id || (int) $assignee->society_id !== (int) $complaint->society_id) {
+                return;
+            }
+            InAppNotifier::send(
+                [$assignee], 'complaint', 'Complaint assigned to you',
+                trim(($complaint->complaint_number ?? '') . ' ' . ($complaint->title ?? '')) . ($by ? " - assigned by {$by->name}." : '.'),
+                self::url('complaints.show', $complaint->id), 'fa-ticket'
+            );
+        });
     }
 
     /** A resident asked for a service: the office needs to arrange it. Never throws. */
@@ -381,14 +419,55 @@ class BusinessNotifications
     /** @param iterable<User|null> $users */
     private static function whatsapp(string $purpose, iterable $users, ?int $societyId, callable $values, ?string $dedupeKey = null): void
     {
-        if (!$societyId || !self::hasTemplate($purpose, $societyId)) {
-            return;
+        self::dispatchWhatsApp($purpose, $users, $societyId, $values, $dedupeKey);
+    }
+
+    /**
+     * Queues one WhatsApp notification per person - and says what happened, so a caller can record an honest status
+     * instead of assuming. Nothing is queued unless the society has switched WhatsApp on, holds a key and a Phone Number
+     * ID, and has a sendable template (provider-approved, SocietyFlow's, switched on) for this notification type.
+     * "queued" is not "delivered": the send itself, and its outcome, are WhatsAppService's and the delivery log's.
+     *
+     * @param  iterable<User|null> $users
+     * @return array{status: string, count: int}  status: queued | skipped_not_configured | skipped_no_template
+     *         | skipped_disabled | skipped_template_not_approved | skipped_template_not_sendable (another product's
+     *         template) | skipped_no_recipient | skipped_duplicate
+     */
+    public static function dispatchWhatsApp(string $purpose, iterable $users, ?int $societyId, callable $values, ?string $dedupeKey = null): array
+    {
+        if (!$societyId) {
+            return ['status' => 'skipped_not_configured', 'count' => 0];
         }
+
+        // Ask the sender's own question - which template, and may it be sent - so what is reported is what will happen:
+        // an older setting that names another product's template, or a template that is pending or switched off, is
+        // "skipped", not "queued" for a job that would then refuse it.
+        $resolved = \App\Services\WhatsAppService::resolveTemplate($purpose, $societyId, log: false);
+        $template = $resolved['template'];
+        $skip = [
+            'no_template'  => 'skipped_no_template',
+            'switched_off' => 'skipped_no_template',
+            'not_approved' => 'skipped_template_not_approved',
+            'not_sendable' => 'skipped_template_not_sendable',
+        ][$resolved['check']] ?? null;
+        if ($skip !== null) {
+            return ['status' => $skip, 'count' => 0];
+        }
+        if (!(bool) SystemSetting::get('whatsapp', 'whatsapp_enabled', false, $societyId)) {
+            return ['status' => 'skipped_disabled', 'count' => 0];
+        }
+        if (\App\Services\WhatsAppService::apiKey($societyId) === ''
+            || (!$template?->phone_number_id && trim((string) SystemSetting::get('whatsapp', 'whatsapp_phone_number_id', '', $societyId)) === '')) {
+            return ['status' => 'skipped_not_configured', 'count' => 0];
+        }
+
         $societyRow = Society::find($societyId);
         $society = $societyRow?->name ?? '';
         // the society's own phone, offered to templates that print a contact number; absent when none is saved
         $societyPhone = trim((string) ($societyRow?->phone ?? ''));
 
+        $queued = 0;
+        $duplicates = 0;
         foreach ($users as $user) {
             if (!$user instanceof User || !$user->phone) {
                 continue;
@@ -396,14 +475,20 @@ class BusinessNotifications
             // The same message to the same person is queued once, however many times the
             // triggering event is delivered (a retried listener, a double submit).
             if ($dedupeKey !== null && !\Illuminate\Support\Facades\Cache::add("wa:{$dedupeKey}:{$user->id}", 1, now()->addDays(2))) {
+                $duplicates++;
                 continue;
             }
             try {
                 SendWhatsAppNotification::dispatch($purpose, $user->phone, $values($user) + ['society_name' => $society] + ($societyPhone !== '' ? ['society_phone' => $societyPhone] : []), $societyId)->afterCommit();
+                $queued++;
             } catch (\Throwable $e) {
                 Log::warning('WhatsApp notification not queued', ['purpose' => $purpose, 'class' => get_class($e)]);
             }
         }
+
+        return $queued > 0
+            ? ['status' => 'queued', 'count' => $queued]
+            : ['status' => $duplicates > 0 ? 'skipped_duplicate' : 'skipped_no_recipient', 'count' => 0];
     }
 
     private static function hasTemplate(string $purpose, int $societyId): bool

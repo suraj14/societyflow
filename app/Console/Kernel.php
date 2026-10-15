@@ -18,6 +18,12 @@ class Kernel extends ConsoleKernel
                  ->withoutOverlapping()
                  ->runInBackground();
 
+        // A visitor waiting at the gate with no answer: tell the office once (never admits anyone)
+        $schedule->command('visitors:escalate-unanswered')
+                 ->everyMinute()
+                 ->withoutOverlapping()
+                 ->runInBackground();
+
         // Clock-time jobs fire on the societies' calendar, not the storage
         // timezone: with APP_TIMEZONE=UTC "09:00" was 14:30 IST.
         $tz = config('app.society_timezone', 'Asia/Kolkata');

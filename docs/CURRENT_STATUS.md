@@ -4,6 +4,17 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-11 (complete web audit and repair)
 
+## 2026-10-15 - Gate visitor approval (MyGate-style) + event notifications
+
+Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION; REAL DELIVERY NOT TESTED.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 8; behaviour and event x channel table: [VISITOR_APPROVAL.md](VISITOR_APPROVAL.md).
+- Built and tested: guard logs a visitor -> owner / tenant + admin told (bell, e-mail, WhatsApp when set up) -> allow / deny (atomic, 409 names the winner) -> guard checks in / out -> admin override with a reason; no-answer escalation never auto-admits; per-event channel outcomes in the visitor's history. Guard / Staff can no longer decide; a denied visitor cannot be checked in.
+- The dev database was migrated (additive; backup kept). The new debug APK builds; the phone was not connected, so it is not installed.
+- Operator: switch on the two visitor WhatsApp templates, verify, one approved real test; SMS has no approved visitor template.
+## 2026-10-14 (latest) - WhatsApp success read as failure; the two excluded templates
+
+Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION; DELIVERY NOT CONFIRMED BY THE APP.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 7.
+- Fixed with tests: Fast2SMS's real success answer (`return: true`, message as a list) was reported as "Test WhatsApp failed" and every notification send as failed; "Switch off" could be bypassed by an older setting; the settings alert now names the two excluded templates (BookMizo's, on Visitor approved and Gate pass updates) and the approved replacement.
+- Operator: Make active "Society Visitor Approved"; switch off `bookmizo_staff_booking_reschedule` (Other templates). Phone Number ID already corrected.
 ## 2026-10-14 (later) - WhatsApp 404 / Phone Number ID
 
 Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION; REAL DELIVERY NOT TESTED.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 6.

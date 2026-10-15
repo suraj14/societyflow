@@ -80,6 +80,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/visitors/lookup',   [VisitorApiController::class, 'lookup']);
         Route::post('/visitors/{id}/approve', [VisitorApiController::class, 'approve']);
         Route::post('/visitors/{id}/reject',  [VisitorApiController::class, 'reject']);
+        Route::post('/visitors/{id}/override', [VisitorApiController::class, 'override']);
         Route::post('/visitors/{id}/check-in',  [VisitorApiController::class, 'checkIn']);
         Route::post('/visitors/{id}/check-out', [VisitorApiController::class, 'checkOut']);
         Route::get('/visitors/{id}',     [VisitorApiController::class, 'show']);

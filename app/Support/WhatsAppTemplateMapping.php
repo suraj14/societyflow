@@ -98,17 +98,19 @@ class WhatsAppTemplateMapping
      * Which notification a freshly synced template is clearly meant for, judged from its NAME (the name is what its
      * author chose it for; wording alone is too loose to attach a message to a resident event). Null when the name does
      * not say, when SocietyFlow has no sender for it, or when its variables could not all be filled by that notification.
-     * "Arrived" templates return null on purpose: the only visitor sender fires on approval, and an arrival message would
-     * go out with the wrong meaning.
+     * An "arrived" visitor template belongs to the gate-request sender (`visitor_arrival`, fired when a guard logs a visitor),
+     * never to the approval one: the wording would go out with the wrong meaning.
      */
     public static function suggestPurpose(string $name, string $body = ''): ?string
     {
         $n = strtolower(str_replace(['-', ' '], '_', $name));
-        if (str_contains($n, 'arriv') || str_contains($n, 'booking') || str_contains($n, 'bookmizo')) {
+        if (str_contains($n, 'booking') || str_contains($n, 'bookmizo')) {
             return null;
         }
 
         $purpose = match (true) {
+            (bool) preg_match('/visitor_(arrived|arrival|at_gate|waiting)/', $n) => 'visitor_arrival',
+            str_contains($n, 'arriv')                                           => null,
             (bool) preg_match('/visitor_(approved|approval|allowed|entry)/', $n) => 'visitor',
             (bool) preg_match('/(gate|access)_?pass/', $n)                      => 'access_pass',
             str_contains($n, 'complaint')                                       => 'complaint',

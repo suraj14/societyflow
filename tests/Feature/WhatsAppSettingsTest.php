@@ -214,7 +214,7 @@ class WhatsAppSettingsTest extends TestCase
         $admin = $this->admin();
         $this->save($admin, ['whatsapp_api_key' => self::KEY]);
         $tpl = $this->syncedTemplate($admin);
-        $this->fakeTransport(['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'abc123'], 200, $sent);
+        $this->fakeTransport(['return' => true, 'message' => ['Whatsapp Message sent successfully.'], 'request_id' => 'abc123'], 200, $sent);
 
         $result = WhatsAppService::sendTestTemplate($tpl, '98765 43210', $admin->society_id);
 
@@ -291,7 +291,7 @@ class WhatsAppSettingsTest extends TestCase
         $this->save($admin, ['whatsapp_api_key' => self::KEY]);
         $tpl = $this->approvedTemplate($admin);
 
-        $this->fakeTransport(['status' => true, 'message' => 'Message sent successfully', 'request_id' => 'abc123'], 200, $sent);
+        $this->fakeTransport(['return' => true, 'message' => ['Whatsapp Message sent successfully.'], 'request_id' => 'abc123'], 200, $sent);
 
         $resp = $this->actingAs($admin)->postJson(route('settings.whatsapp.test-template'), ['phone' => '9876543210', 'template_id' => $tpl->id, 'variables' => 'Asha'])->assertOk();
 

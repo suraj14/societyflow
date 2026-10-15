@@ -73,7 +73,17 @@ class WhatsAppService
      * refused here with a clear reason - Meta would reject it anyway, with a
      * far less readable error.
      */
-    public static function sendNotification(string $purpose, string $phone, array $values, ?int $societyId = null): array
+    /**
+     * Which template a notification would be sent with - and whether it may be sent at all. The one place that rule lives:
+     * sendNotification() sends by it, and a caller that wants to say honestly what WILL happen before queueing
+     * (BusinessNotifications::dispatchWhatsApp) asks the same question instead of guessing.
+     *
+     * `check` is ok | no_template | switched_off | not_approved | not_sendable; when it is not `ok`, `outcome` is the
+     * result sendNotification() returns for it.
+     *
+     * @return array{template: ?\App\Models\WhatsAppTemplate, name: ?string, check: string, outcome: ?array}
+     */
+    public static function resolveTemplate(string $purpose, ?int $societyId, bool $log = true): array
     {
         // The template the admin made active for this notification (Message Templates -> WhatsApp). The earlier settings key
         // is only a fallback for a society whose choice was saved before templates were managed as records.
@@ -85,24 +95,50 @@ class WhatsAppService
             // own "not configured" early return, this does not write a
             // Delivery Log row either; an admin who has not set up WhatsApp
             // at all should not see a growing list of "failed" rows for it.
-            return ['success' => false, 'status' => 'skipped_not_configured', 'message' => "No active WhatsApp template configured for '{$purpose}'. Add one in Message Templates \u{2192} WhatsApp."];
+            return ['template' => null, 'name' => null, 'check' => 'no_template', 'outcome' => ['success' => false, 'status' => 'skipped_not_configured', 'message' => "No active WhatsApp template configured for '{$purpose}'. Add one in Message Templates \u{2192} WhatsApp."]];
         }
 
-        $template ??= \App\Models\WhatsAppTemplate::where('society_id', $societyId)->where('name', $templateName)->first();
+        if (!$template) {
+            $template = \App\Models\WhatsAppTemplate::where('society_id', $societyId)->where('name', $templateName)->first();
+            // The older setting names a template that is managed in Message Templates (it has a notification type) but is not
+            // the active one for this notification - forPurpose() above would have returned it. An admin switched it off, or
+            // it belongs to another notification: the setting must not bring it back, or "Switch off" would not stop it.
+            // Only a template never assigned there (or a bare name with no record) is still sent through the older setting.
+            if ($template && $template->purpose !== null) {
+                $why = $template->purpose === $purpose ? 'is switched off' : 'is used for ' . $template->purposeLabel();
+
+                return ['template' => $template, 'name' => $templateName, 'check' => 'switched_off', 'outcome' => ['success' => false, 'status' => 'skipped_not_configured', 'message' => "No active WhatsApp template configured for '{$purpose}': \"{$template->displayName()}\" {$why}. Make a template active for it in Message Templates \u{2192} WhatsApp."]];
+            }
+        }
 
         // Pending / rejected / paused templates and another product's templates are never sent, whatever is switched on.
         if ($template && ($blocked = $template->sendBlockReason())) {
-            Log::warning('WhatsApp template not sent', ['purpose' => $purpose, 'template_id' => $template->id, 'status' => $template->status]);
+            if ($log) {
+                Log::warning('WhatsApp template not sent', ['purpose' => $purpose, 'template_id' => $template->id, 'status' => $template->status]);
+            }
 
-            return ['success' => false, 'status' => 'blocked_template', 'message' => $blocked];
+            return ['template' => $template, 'name' => $templateName, 'check' => $template->isKnownUnapproved() ? 'not_approved' : 'not_sendable', 'outcome' => ['success' => false, 'status' => 'blocked_template', 'message' => $blocked]];
         }
 
         // An older settings value naming a BookMizo template (it matches no saved row, e.g. a display name) is not sent either.
         if (!$template && \App\Support\WhatsAppTemplateScope::nameLooksBookMizo((string) $templateName)) {
-            Log::warning('WhatsApp template not sent', ['purpose' => $purpose, 'reason' => 'legacy name is a BookMizo template']);
+            if ($log) {
+                Log::warning('WhatsApp template not sent', ['purpose' => $purpose, 'reason' => 'legacy name is a BookMizo template']);
+            }
 
-            return ['success' => false, 'status' => 'blocked_template', 'message' => "\"{$templateName}\" is a BookMizo template, not a SocietyFlow one, so it is not sent to residents. Switch on a SocietyFlow template for this notification in Message Templates."];
+            return ['template' => null, 'name' => $templateName, 'check' => 'not_sendable', 'outcome' => ['success' => false, 'status' => 'blocked_template', 'message' => "\"{$templateName}\" is a BookMizo template, not a SocietyFlow one, so it is not sent to residents. Switch on a SocietyFlow template for this notification in Message Templates."]];
         }
+
+        return ['template' => $template, 'name' => $templateName, 'check' => 'ok', 'outcome' => null];
+    }
+
+    public static function sendNotification(string $purpose, string $phone, array $values, ?int $societyId = null): array
+    {
+        $resolved = self::resolveTemplate($purpose, $societyId);
+        if ($resolved['outcome'] !== null) {
+            return $resolved['outcome'];
+        }
+        ['template' => $template, 'name' => $templateName] = $resolved;
 
         // The saved text and the saved variable count must agree: {{1}}..{{n}} with none missing, n = var_count.
         if ($template && trim((string) $template->body_text) !== '') {
@@ -302,7 +338,11 @@ class WhatsAppService
      * Fast2SMS "Send Template Message (Simple)":
      *   GET /dev/whatsapp?message_id=<int>&phone_number_id=..&numbers=..&variables_values=a|b
      * (docs.fast2sms.com/reference/sendwhatsappmessage). It takes the integer Fast2SMS message_id from the
-     * template sync - never the long Meta template_id. Success is {status: true, request_id}.
+     * template sync - never the long Meta template_id.
+     *
+     * The documented success shape is `{status: true, request_id}`, but the actual provider response
+     * (confirmed 2026-10-14) uses `{return: true, request_id, message: ["..."]}` - the same shape as
+     * the Fast2SMS SMS/OTP API. Both are accepted.
      *
      * @param list<string> $params
      */
@@ -326,7 +366,9 @@ class WhatsAppService
         $url = Fast2SmsService::whatsappUrl((int) $template->message_id, (string) $phoneNumberId, self::toE164($phone, $societyId), $params);
 
         $handler = function ($body, $httpCode) use ($phone, $apiKey, $logContext) {
-            if ($httpCode === 200 && filter_var($body['status'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+            // The documented shape uses `status: true`; the actual provider response (confirmed 2026-10-14)
+            // uses `return: true` and `message` as an array - the same shape as the SMS/OTP API. Accept both.
+            if ($httpCode === 200 && filter_var($body['status'] ?? $body['return'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
                 return ['success' => true, 'message' => 'WhatsApp message sent', 'request_id' => $body['request_id'] ?? null, 'raw' => SmsService::rawResponse($body, $apiKey)];
             }
 
@@ -337,7 +379,9 @@ class WhatsAppService
                 'phone' => SmsService::maskPhone($phone), 'provider_msg' => SmsService::safeProviderMessage((string) $error, $apiKey),
             ]));
 
-            return ['success' => false, 'message' => \App\Support\WhatsAppProviderError::describe(SmsService::safeProviderMessage((string) $error, $apiKey), (int) $httpCode, $body['error']['code'] ?? null), 'http_status' => $httpCode, 'raw' => SmsService::rawResponse($body, $apiKey)];
+            // Only a rate limit or a provider-side failure is worth trying again later; a refused key, an unknown number ID, a bad
+            // request or a template error would fail the same way every time.
+            return ['success' => false, 'message' => \App\Support\WhatsAppProviderError::describe(SmsService::safeProviderMessage((string) $error, $apiKey), (int) $httpCode, $body['error']['code'] ?? null), 'http_status' => $httpCode, 'transient' => $httpCode === 429 || $httpCode >= 500, 'raw' => SmsService::rawResponse($body, $apiKey)];
         };
 
         // The same handling for the real transport and a test's mock: status 0 means nothing came back.
@@ -352,7 +396,8 @@ class WhatsAppService
                 return ['success' => false, 'skipped' => true, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
             }
 
-            return ['success' => false, 'message' => 'WhatsApp service unavailable: ' . \App\Support\WhatsAppProviderError::forHttp(0) . ' (' . SmsService::safeProviderMessage((string) ($body['transport_error'] ?? 'no response')) . ')'];
+            // no answer at all (timeout, connection reset, DNS): worth trying again shortly
+            return ['success' => false, 'transient' => true, 'message' => 'WhatsApp service unavailable: ' . \App\Support\WhatsAppProviderError::forHttp(0) . ' (' . SmsService::safeProviderMessage((string) ($body['transport_error'] ?? 'no response')) . ')'];
         }
 
         return $handler($body, $httpCode);
@@ -403,10 +448,10 @@ class WhatsAppService
     }
 
     /**
-     * Fast2SMS's WhatsApp endpoints do not use the SMS API's `return: true`
-     * shape - success is an HTTP 200 with a `messages` array carrying each
-     * message's id. Anything else is read as a rejection and the provider's
-     * own error text (sanitised) is surfaced, never assumed to be success.
+     * Handler for the POST `/dev/whatsapp/{version}/{phone_number_id}/messages`
+     * (Meta-style) endpoint. Success is an HTTP 200 with a `messages` array
+     * carrying each message's id. The GET `/dev/whatsapp?message_id=...`
+     * endpoint uses `return: true` instead (see sendByMessageId).
      */
     private static function responseHandler(string $phone, string $apiKey, array $logContext): callable
     {

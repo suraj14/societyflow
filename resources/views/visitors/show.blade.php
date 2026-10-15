@@ -35,6 +35,20 @@
                     </button>
                 </form>
             @endif
+            {{-- An administrator can change a decision already made (a resident's rejection included), only with a written
+                 reason, and the residents and the guard are told. Pressing Allow/Deny never does it silently. --}}
+            @if($canDecide && $visitor->approval_status !== 'pending' && auth()->user()->hasRole(['Admin', 'Super Admin']))
+                @php $denied = $visitor->approval_status === 'denied'; @endphp
+                <form action="{{ route($denied ? 'visitors.allow' : 'visitors.deny', $visitor) }}" method="POST" class="inline-flex items-center gap-2">
+                    @csrf
+                    <input type="text" name="reason" required minlength="5" maxlength="500"
+                           placeholder="Reason for changing the decision"
+                           class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500">
+                    <button type="submit" class="{{ $denied ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700' }} text-white px-6 py-3 rounded-lg font-medium transition-colors inline-flex items-center">
+                        <i class="fas fa-scale-balanced mr-2"></i>{{ $denied ? 'Allow anyway (override)' : 'Revoke approval (override)' }}
+                    </button>
+                </form>
+            @endif
             {{-- Was 'approved' - not a value this column ever holds (the
                  model/controller both use 'allowed'), so this button never
                  appeared. --}}
