@@ -144,6 +144,30 @@ SH));
         $this->assertStringNotContainsString('--expect-release', $r['smoke'], 'after a rollback the OLD release is live, so no release is expected');
     }
 
+    public function test_a_rollback_does_not_leave_the_rolled_back_release_looking_live(): void
+    {
+        // before: not a packaged release at all (no RELEASE.txt). After the rollback nothing may still say the failed release is live.
+        $ws = $this->stagingWorkspace();
+        $r = $this->apply($ws, $this->stubbedTools($ws), ['STUB_COMPOSER' => 'fail']);
+        $this->assertStringContainsString('status=ROLLED_BACK', $r['deployments']);
+        $this->assertFileDoesNotExist($ws['app'] . '/RELEASE.txt', 'the failed release\'s RELEASE.txt would make the health endpoint and inspect-server report it as live');
+        $this->assertFileDoesNotExist($ws['app'] . '/RELEASE.sha256');
+        $this->assertStringContainsString('removed the RELEASE.txt of the rolled-back release', $r['all']);
+    }
+
+    public function test_a_rollback_puts_back_the_previous_release_marker(): void
+    {
+        // before: a packaged release P is live. After a failed deploy of the new release the marker must name P again, not the failed one.
+        $ws = $this->stagingWorkspace();
+        file_put_contents($ws['app'] . '/RELEASE.txt', "release_id=20260901-000000-previous\nbuilt_utc=2026-09-01 00:00:00\n");
+        $r = $this->apply($ws, $this->stubbedTools($ws), ['STUB_COMPOSER' => 'fail']);
+
+        $this->assertStringContainsString('status=ROLLED_BACK', $r['deployments']);
+        $this->assertStringContainsString('previous=20260901-000000-previous', $r['deployments']);
+        $this->assertStringContainsString('release_id=20260901-000000-previous', (string) file_get_contents($ws['app'] . '/RELEASE.txt'), 'the marker must name the release that is live again');
+        $this->assertStringNotContainsString($ws['id'], (string) file_get_contents($ws['app'] . '/RELEASE.txt'));
+    }
+
     public function test_a_failing_command_that_happens_to_exit_3_is_not_mistaken_for_pending_migrations(): void
     {
         $ws = $this->stagingWorkspace();

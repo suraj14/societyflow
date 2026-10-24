@@ -67,6 +67,13 @@ The MariaDB run is slower (~40 min) than SQLite (~20 min).
 | `WebSmokeTest` | 40 screens render across three roles, with data present |
 | `QueryPerformanceTest` | List endpoints do not N+1 |
 | `HealthEndpointTest` | The server-identity contract the mobile app depends on |
+| `ReleaseFingerprintTest` | The opaque `X-SocietyFlow-Release` header on the health answer (what lets a deploy prove which release is live); the body stays unchanged |
+| `DeploymentArtifactsTest` | Static rules for the deployment files: who may deploy, host-key checking, no secrets, no destructive command, a fresh clone has what the pipeline needs |
+| `DeploymentScriptsBehaviourTest` | `deploy.sh` EXECUTED against fake ssh/scp (it opens no connection unless it is on the designated branch at the packaged commit), `smoke-check.sh` against a stub site, `apply-release.sh`'s staging-folder reuse, `inspect-server.sh`'s OPcache report |
+| `ApplyReleaseFlowTest` | `apply-release.sh` + `rollback-code.sh` run end to end against a throw-away live app: a good release, a pending migration, composer/smoke failures (unattended = previous code restored), a failed rollback, an interactive failure, lost records |
+
+The last three need `bash` (Linux, or **Git for Windows** - the helper in `tests/Concerns/RunsDeploymentScripts.php` finds it even when it is not on PATH), `curl`, `sha256sum` and `tar`; they skip with a message
+when those are missing, and the `apply-release.sh` ones also skip when run as root (the script refuses root on purpose). They start a throw-away PHP server on 127.0.0.1 and touch nothing outside the temp folder.
 
 ### Two habits worth keeping
 

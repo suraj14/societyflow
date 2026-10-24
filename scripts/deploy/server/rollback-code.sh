@@ -67,6 +67,13 @@ art down --retry=60 || say "   (artisan down failed - continuing; the site may b
 say "== Restoring the files"
 tar -xzf "$BACKUP" -C "$APP_DIR" --no-same-owner
 ok "files restored from $BACKUP"
+# RELEASE.txt / RELEASE.sha256 describe the release that was just rolled back. If the backup held them (the previous release was a packaged one) tar
+# has put them back; if the previous state had none, the stale ones must go, because things DO read them: the health endpoint's release tag,
+# inspect-server.sh, and the next deployment's "currently live". Files the new release added are otherwise left alone (nothing refers to them).
+if ! grep -qE '^(\./)?RELEASE\.txt$' "$LIST"; then
+    rm -f "$APP_DIR/RELEASE.txt" "$APP_DIR/RELEASE.sha256"
+    ok "removed the RELEASE.txt of the rolled-back release (the code before it was not a packaged release)"
+fi
 say "== Rebuilding caches from the restored code"
 art config:clear; art route:clear; art view:clear; art event:clear || true
 rm -f "$APP_DIR"/bootstrap/cache/packages.php "$APP_DIR"/bootstrap/cache/services.php

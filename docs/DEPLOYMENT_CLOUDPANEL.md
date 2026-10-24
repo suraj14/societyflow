@@ -118,7 +118,8 @@ back up the database with `db-backup.sh` and verify it; record the upload file n
 **nothing is deleted**; `.env`, `storage/`, `public/storage` are not in the package so cannot be touched); `composer install --no-dev --optimize-autoloader`; clear config / route / view caches;
 **show pending migrations and the SQL they would run, then ask you to type `MIGRATE`** (never automatic; no seeding, no rollback); `storage:link` only if `public/storage` does not exist;
 rebuild config / route / view caches; `queue:restart`; `artisan up`; verify `RELEASE.sha256`, uploads unchanged, `/login` = 200, `/api/v1/health` identifies SocietyFlow, no new ERROR lines.
-If anything fails after maintenance mode started, it **stays in maintenance mode** and prints the rollback command, so a half-updated site is never shown to users.
+If anything fails after maintenance mode started, an interactive run **stays in maintenance mode** and prints the rollback command, so a half-updated site is never shown to users (the unattended pipeline run
+restores the previous code by itself instead - see BITBUCKET_PIPELINES_SETUP.md section 2). The dry run's unpacked folder `~/releases/<release id>` is reused by the `--apply` run when it is identical to the package.
 
 Flags: `--skip-db-backup` (asks again; only for a release with no migrations), `--skip-composer`, `--clear-app-cache` (also flushes rate-limit counters / settings cache), `--no-queue-restart`.
 It never runs: `migrate:fresh`, `migrate:rollback`, `db:seed`, `db:wipe`, `storage:setup`, or anything that restarts Nginx / PHP-FPM / MariaDB.
