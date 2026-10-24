@@ -89,13 +89,16 @@ trait RunsDeploymentScripts
      * @param list<string> $argv command and arguments
      * @return array{code:int, out:string, err:string}
      */
-    protected function execute(array $argv, ?array $env = null, int $timeoutSeconds = 90): array
+    protected function execute(array $argv, ?array $env = null, int $timeoutSeconds = 90, ?string $stdin = null): array
     {
         $dir = $this->scratchDir('sfrun');
         $outFile = $dir . DIRECTORY_SEPARATOR . 'out.txt';
         $errFile = $dir . DIRECTORY_SEPARATOR . 'err.txt';
         $proc = proc_open($argv, [0 => ['pipe', 'r'], 1 => ['file', $outFile, 'w'], 2 => ['file', $errFile, 'w']], $pipes, null, $env);
         $this->assertIsResource($proc, 'could not start ' . $argv[0]);
+        if ($stdin !== null) {
+            fwrite($pipes[0], $stdin);
+        }
         fclose($pipes[0]);
 
         $deadline = microtime(true) + $timeoutSeconds;
@@ -130,7 +133,7 @@ trait RunsDeploymentScripts
      * @param array<string,string> $env
      * @return array{code:int, out:string, err:string}
      */
-    protected function runScript(string $script, array $args, array $env, string $fakeBinDir): array
+    protected function runScript(string $script, array $args, array $env, string $fakeBinDir, ?string $stdin = null): array
     {
         $argv = [$this->bash, '-c', 'fake="$1"; shift; exec env -i PATH="$fake:$PATH" HOME="$fake" "$@"', 'bash', $this->posix($fakeBinDir)];
         foreach ($env as $name => $value) {
@@ -138,7 +141,121 @@ trait RunsDeploymentScripts
         }
         array_push($argv, 'bash', $this->posix($script), ...$args);
 
-        return $this->execute($argv);
+        return $this->execute($argv, null, 90, $stdin);
+    }
+
+    /** Script text with Unix line endings, whatever the checkout did to this PHP file (git on Windows may have made it CRLF). */
+    protected function lf(string $text): string
+    {
+        return str_replace("\r\n", "\n", $text);
+    }
+
+    protected function skipWhenRoot(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('apply-release.sh refuses to run as root, on purpose; this runs on a developer machine');
+        }
+    }
+
+    /**
+     * A throw-away "live application" (the files the pre-flight and the code backup look for), a tiny release package for it, and stand-ins for
+     * what cannot run here: a php wrapper (claims the extensions are loaded, plays `artisan` - down/up make and remove storage/framework/down,
+     * every call is logged - and answers the migrations probe with "nothing pending", otherwise runs the real PHP) and a composer whose
+     * outcome STUB_COMPOSER chooses (ok / fail / corrupt = fail after damaging the code backup).
+     *
+     * @return array{id:string, app:string, releases:string, backups:string, bin:string, package:string, pkgDir:string, php:string, logs:string}
+     */
+    protected function stagingWorkspace(string $id = '20261024-130000-aaaaaaaaaa'): array
+    {
+        $dir = $this->scratchDir();
+        $app = $dir . DIRECTORY_SEPARATOR . 'live';
+        foreach (['bootstrap', 'bootstrap/cache', 'public', 'vendor', 'storage', 'storage/logs', 'storage/framework', 'storage/app/public'] as $d) {
+            mkdir($app . DIRECTORY_SEPARATOR . $d, 0700, true);
+        }
+        file_put_contents($app . '/artisan', "<?php\n");
+        file_put_contents($app . '/.env', "APP_ENV=testing\nAPP_URL=http://127.0.0.1:9\n");
+        file_put_contents($app . '/bootstrap/app.php', "<?php\n");
+        file_put_contents($app . '/public/index.php', "<?php\n");
+        file_put_contents($app . '/vendor/autoload.php', "<?php\n");
+        file_put_contents($app . '/app-file.txt', "live version\n");
+
+        $bin = $dir . DIRECTORY_SEPARATOR . 'bin';
+        $logs = $dir . DIRECTORY_SEPARATOR . 'logs';
+        mkdir($bin, 0700, true);
+        mkdir($logs, 0700, true);
+        file_put_contents($bin . '/php', $this->lf(<<<'SH'
+#!/usr/bin/env bash
+case "$1" in
+  -m) printf '%s\n' ctype dom fileinfo filter gd hash iconv json libxml mbstring openssl pcre pdo_mysql session simplexml tokenizer xml xmlreader xmlwriter zip zlib curl;;
+  artisan)
+    shift
+    echo "artisan $*" >> "$STUB_LOG_DIR/artisan-calls.log"
+    case "$1" in
+      down) mkdir -p storage/framework; : > storage/framework/down;;
+      up) rm -f storage/framework/down;;
+      --version) echo "Laravel Framework (stub)";;
+    esac
+    exit 0;;
+  -r) if printf '%s' "$2" | grep -q 'migrations'; then
+        # the "which migrations are pending?" probe: STUB_MIGRATIONS = none (default) | pending (one is) | unreadable (the database cannot be read)
+        case "${STUB_MIGRATIONS:-none}" in pending) echo "2026_10_24_000001_example_pending_migration";; unreadable) exit 4;; esac
+        exit 0
+      fi
+      exec "__REAL_PHP__" "$@";;
+  *) exec "__REAL_PHP__" "$@";;
+esac
+SH));
+        file_put_contents($bin . '/php', str_replace('__REAL_PHP__', $this->posix(PHP_BINARY), (string) file_get_contents($bin . '/php')));
+        file_put_contents($bin . '/composer', $this->lf(<<<'SH'
+#!/usr/bin/env bash
+case "${STUB_COMPOSER:-ok}" in
+  ok) echo "stub composer: installed"; exit 0;;
+  fail) echo "stub composer: Your lock file does not contain a compatible set of packages" >&2; exit 2;;
+  exit3) echo "stub composer: fails with exit code 3" >&2; exit 3;;
+  corrupt) for f in "$STUB_BACKUP_DIR"/code-*.tar.gz; do : > "$f"; done; echo "stub composer: failed, and the code backup got damaged" >&2; exit 2;;
+esac
+SH));
+        $this->assertSame(0, $this->bashSnippet('chmod +x ' . escapeshellarg($this->posix($bin . '/php')) . ' ' . escapeshellarg($this->posix($bin . '/composer')))['code']);
+
+        $workspace = ['id' => $id, 'app' => $app, 'releases' => $dir . DIRECTORY_SEPARATOR . 'releases', 'backups' => $dir . DIRECTORY_SEPARATOR . 'backups', 'bin' => $bin, 'logs' => $logs,
+            'package' => $dir . DIRECTORY_SEPARATOR . 'incoming' . DIRECTORY_SEPARATOR . "societyflow-$id.tar.gz", 'pkgDir' => $dir . DIRECTORY_SEPARATOR . 'pkg', 'php' => $bin . '/php'];
+        $this->buildPackage($workspace, 'new version');
+
+        return $workspace;
+    }
+
+    /** (Re)builds the package in $ws['package'] with the given content for app-file.txt, in the shape scripts/deploy/ci/build-release.sh makes. */
+    protected function buildPackage(array $ws, string $content): void
+    {
+        $this->assertSame(0, $this->bashSnippet('rm -rf ' . escapeshellarg($this->posix($ws['pkgDir'])))['code']);
+        mkdir($ws['pkgDir'] . '/app', 0700, true);
+        @mkdir(dirname($ws['package']), 0700, true);
+        file_put_contents($ws['pkgDir'] . '/app-file.txt', $content . "\n");
+        file_put_contents($ws['pkgDir'] . '/app/Example.php', "<?php\n// {$content}\n");
+        file_put_contents($ws['pkgDir'] . '/RELEASE.txt', "release_id={$ws['id']}\nbuilt_utc=2026-10-24 13:00:00\nsource_head=aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd\nfiles=3\n");
+        $pkg = escapeshellarg($this->posix($ws['pkgDir']));
+        $out = escapeshellarg($this->posix($ws['package']));
+        $incoming = escapeshellarg($this->posix(dirname($ws['package'])));
+        $list = escapeshellarg($this->posix(dirname($ws['package']) . '/list.txt'));
+        // member names WITHOUT a leading ./ and RELEASE.sha256 hashing every other file - the shape build-release.sh produces
+        $r = $this->bashSnippet(
+            "cd $pkg && find . -type f ! -name RELEASE.sha256 | sed 's|^\\./||' | LC_ALL=C sort | while IFS= read -r p; do sha256sum -- \"\$p\"; done > RELEASE.sha256"
+            . " && find . -type f | sed 's|^\\./||' | LC_ALL=C sort > $list && tar -czf $out -C $pkg -T $list"
+            . " && cd $incoming && sha256sum " . escapeshellarg(basename($ws['package'])) . ' > ' . escapeshellarg(basename($ws['package']) . '.sha256'),
+        );
+        $this->assertSame(0, $r['code'], $r['err']);
+    }
+
+    /** a fingerprint of everything under a folder (path + content hash of every file) */
+    protected function treeOf(string $dir): string
+    {
+        $lines = [];
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)) as $file) {
+            $lines[] = str_replace('\\', '/', substr($file->getPathname(), strlen($dir))) . ' ' . sha1_file($file->getPathname());
+        }
+        sort($lines);
+
+        return implode("\n", $lines);
     }
 
     /** Fake ssh and scp: each call is appended to the returned log file and fails, so a run never reaches a server. */

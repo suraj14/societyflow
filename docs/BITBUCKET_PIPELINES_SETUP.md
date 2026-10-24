@@ -42,8 +42,14 @@ git push  ->  Bitbucket pipeline
 What the server does in `apply-release.sh --non-interactive` (all of it logged): verify checksums -> **stop with exit 3, changing nothing, if the release has a pending migration** -> exclusive lock ->
 back up code + `.env` copy (600) + database (verified) -> record upload names and **business-table record counts** -> maintenance mode -> copy the release over the code (never deletes,
 never touches `.env`, `storage/`, `public/storage`) -> `composer install --no-dev` -> rebuild caches -> `queue:restart` -> back online -> compare record counts (any lost row = failure) ->
-smoke check (home, login, `/owners` protected, health, no error pages, no demo-credentials card, **and the live site reports this release**) -> **if the smoke check fails: the previous code is restored
-automatically** (safe because no migration ran) -> `deployments.log` line (with the release's `tag=`), and `LAST_SUCCESSFUL_RELEASE` only after everything passed.
+smoke check (home, login, `/owners` protected, health, no error pages, no demo-credentials card, **and the live site reports this release**) -> `deployments.log` line (with the release's `tag=`), and
+`LAST_SUCCESSFUL_RELEASE` only after everything passed.
+
+**If anything fails after the files were copied** (composer, an unwritable folder, the smoke check, the release check) the unattended run **restores the previous code by itself and brings the site back up** - safe because this mode never runs a
+migration, so there is no database change the old code could clash with. It records `ROLLED_BACK`, runs the smoke check again on the restored site and exits non-zero (the pipeline step goes red). If that rollback *also* fails it says
+`AUTOMATIC ROLLBACK FAILED`, records `ROLLBACK_FAILED`, and leaves the site in maintenance mode with the exact recovery command - then a person must act. An *interactive* run (you at an SSH prompt) does the opposite on purpose: it stops,
+leaves the site in maintenance mode and tells you, because you are there to decide. Lost records are reported (`FAILED_CHECKS`) but never answered with a code swap: restoring code cannot bring rows back.
+Exit codes of `apply-release.sh`: 0 deployed; **3 = stopped before changing anything because a migration is pending** (a failing command that happens to exit 3 is reported as 1, so the two cannot be confused); anything else = failed.
 
 **How "the live site serves this release" is checked.** The packaged deploy puts `RELEASE.txt` (with `release_id=`) in the application root. `GET /api/v1/health` then answers with the usual body plus a header
 `X-SocietyFlow-Release: <tag>`, where `tag` = the first 16 hex characters of `sha256(release id)` - a hash, so the public answer reveals neither the build time nor the commit. After the copy the deploy polls that header for up to
@@ -147,7 +153,7 @@ Checklist before enabling any automation: [ ] `inspect-server.sh` clean [ ] DB b
 
 * **Which release is live / was the last good one:** `cat <app>/RELEASE.txt` (id, commit, build time); `cat ~/backups/societyflow/LAST_SUCCESSFUL_RELEASE`; `tail ~/backups/societyflow/deployments.log` (every attempt: OK / ROLLED_BACK / FAILED_CHECKS with the previous release
   and the release's `tag=`, which is what the live health header shows). From outside: `curl -sI https://societyflow.joboapps.com/api/v1/health | grep -i x-societyflow-release`.
-* **Code:** `bash ~/deploy-tools/rollback-code.sh --backup ~/backups/societyflow/code-<stamp>.tar.gz --apply`. Restores the previous code and `vendor/`; never touches `.env`, uploads or the database. The pipeline already does this by itself when its smoke check fails.
+* **Code:** `bash ~/deploy-tools/rollback-code.sh --backup ~/backups/societyflow/code-<stamp>.tar.gz --apply`. Restores the previous code and `vendor/`; never touches `.env`, uploads or the database. The unattended (pipeline) run already does this by itself when any step after the copy fails, including a failed smoke or release check; read `deployments.log` for `ROLLED_BACK` / `ROLLBACK_FAILED`.
 * **Database:** separate and rarely needed. Never `migrate:rollback`. A code-only release changes no schema, so there is nothing to undo. A release with migrations: additive ones are compatible with the old code (leave them); anything that
   rewrote data needs a restore from the dump taken just before - and a restore **loses everything written after it**, so decide with the business, restore into a scratch database first and copy tables back deliberately. Never restore an old dump over a newer production database to "undo a deploy".
 * **Uploads** are never part of a release; they live in `storage/app` and `public/storage` and are listed (names + sizes) before and after each deploy.

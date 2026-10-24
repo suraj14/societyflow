@@ -61,6 +61,44 @@ class DeploymentArtifactsTest extends TestCase
         $this->assertContains('deploy.sh', array_map(fn ($l) => basename(explode(' ', trim($l))[1] ?? ''), array_filter($step['script'], fn ($l) => str_contains($l, 'deploy.sh'))));
     }
 
+    public function test_a_fresh_clone_has_everything_the_pipeline_needs_to_start(): void
+    {
+        // Found by simulating the pipeline on a clean `git archive`: PHPUnit 10 stops with "Test directory not found" when phpunit.xml lists a
+        // directory that git does not track (git keeps no empty directories), and composer's package:discover dies without bootstrap/cache.
+        $git = trim((string) @shell_exec('git --version 2>&1'));
+        if (!str_starts_with($git, 'git version')) {
+            $this->markTestSkipped('git is not available here');
+        }
+        $suites = simplexml_load_file($this->root('phpunit.xml'))->xpath('//testsuite/directory');
+        $this->assertNotEmpty($suites);
+        foreach ($suites as $dir) {
+            $tracked = trim((string) shell_exec('git -C ' . escapeshellarg(base_path()) . ' ls-files ' . escapeshellarg((string) $dir) . ' 2>&1'));
+            $this->assertNotSame('', $tracked, "phpunit.xml lists $dir but git tracks nothing in it: a fresh clone would not have that directory and PHPUnit would refuse to start");
+        }
+
+        // none of Laravel's writable folders is tracked, so the install step must create them before composer install
+        $script = implode("\n", $this->pipeline()['pipelines']['default'][0]['step']['script']);
+        foreach (['bootstrap/cache', 'storage/app/public', 'storage/framework/cache/data', 'storage/framework/sessions', 'storage/framework/views', 'storage/logs'] as $folder) {
+            $this->assertStringContainsString($folder, $script, "the install step does not create $folder");
+        }
+        $this->assertLessThan(strpos($script, 'composer install'), strpos($script, 'mkdir -p bootstrap/cache'), 'the folders must exist before composer install runs package:discover');
+    }
+
+    public function test_the_build_image_installs_only_extensions_it_does_not_already_have_and_checks_the_rest(): void
+    {
+        // The official php image compiles mbstring, pdo_sqlite, curl, dom, fileinfo ... in; installing them again loads them twice and PHP then
+        // prints "Module is already loaded" warnings that would pollute the lint step's output.
+        $script = implode("\n", $this->pipeline()['pipelines']['default'][0]['step']['script']);
+        preg_match('/docker-php-ext-install[^\n]*/', $script, $m);
+        foreach (['mbstring', 'pdo_sqlite', 'curl', 'dom', 'fileinfo', 'xml', 'tokenizer', 'ctype', 'openssl'] as $builtIn) {
+            $this->assertDoesNotMatchRegularExpression('/\b' . $builtIn . '\b/', $m[0], "$builtIn is compiled into the image; do not install it again");
+        }
+        foreach (['gd', 'zip', 'bcmath', 'pdo_mysql', 'exif'] as $needed) {
+            $this->assertMatchesRegularExpression('/\b' . $needed . '\b/', $m[0], "$needed is not in the image and the application needs it");
+        }
+        $this->assertStringContainsString('PHP extension missing in the build image', $script, 'a missing extension must stop the build with a clear message');
+    }
+
     public function test_tests_run_before_a_package_is_built_and_before_any_deploy(): void
     {
         $steps = $this->pipeline()['pipelines']['branches']['production-readiness'];

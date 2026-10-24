@@ -28,11 +28,17 @@ definitions:
         caches:
           - composer-cache
         script:
-          - apt-get update -qq && apt-get install -y -qq git unzip libzip-dev libpng-dev libjpeg-dev libfreetype6-dev libonig-dev libxml2-dev libsqlite3-dev > /dev/null
+          - apt-get update -qq && apt-get install -y -qq git unzip curl libzip-dev libpng-dev libjpeg-dev libfreetype6-dev libxml2-dev > /dev/null
           - docker-php-ext-configure gd --with-freetype --with-jpeg > /dev/null
-          - docker-php-ext-install -j"$(nproc)" gd zip bcmath pdo_sqlite pdo_mysql mbstring exif > /dev/null
-          - php -v && php -m | grep -iE '^(gd|zip|pdo_sqlite|pdo_mysql|mbstring|fileinfo|openssl|curl)$' | sort | tr '\n' ' ' && echo
+          # only extensions the official image does NOT already compile in (mbstring, pdo_sqlite, curl, dom, fileinfo ... are built in; asking for them
+          # again loads them twice and PHP prints "Module is already loaded" warnings that would pollute the lint step)
+          - docker-php-ext-install -j"$(nproc)" gd zip bcmath pdo_mysql exif > /dev/null
+          - php -v
+          - 'M="$(php -m)"; for e in gd zip bcmath exif pdo_mysql pdo_sqlite mbstring fileinfo openssl curl dom tokenizer ctype xml; do echo "$M" | grep -qix "$e" || { echo "PHP extension missing in the build image: $e"; exit 1; }; done; echo "PHP extensions present"'
           - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --quiet
+          # a fresh clone has none of Laravel's writable folders (git tracks nothing under storage/ or bootstrap/cache/): composer's package:discover
+          # and Blade's compiled-view path both fail without them
+          - mkdir -p bootstrap/cache storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs
           - composer validate --no-check-publish
           - composer install --no-interaction --prefer-dist --no-progress
           - composer check-platform-reqs

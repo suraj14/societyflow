@@ -113,70 +113,6 @@ class DeploymentScriptsBehaviourTest extends TestCase
 
     // ---------------------------------------------------------------------------------------------- apply-release.sh: dry run, then apply
 
-    private function skipWhenRoot(): void
-    {
-        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
-            $this->markTestSkipped('apply-release.sh refuses to run as root, on purpose; this runs on a developer machine');
-        }
-    }
-
-    /**
-     * A throw-away "live application" (only the files the pre-flight looks for) and a tiny release package for it, plus a php wrapper that
-     * claims the extensions are loaded and otherwise runs the real PHP.
-     *
-     * @return array{id:string, app:string, releases:string, backups:string, bin:string, package:string, pkgDir:string, php:string}
-     */
-    private function stagingWorkspace(string $id = '20261024-130000-aaaaaaaaaa'): array
-    {
-        $dir = $this->scratchDir();
-        $app = $dir . DIRECTORY_SEPARATOR . 'live';
-        foreach (['bootstrap', 'public', 'vendor', 'storage'] as $d) {
-            mkdir($app . DIRECTORY_SEPARATOR . $d, 0700, true);
-        }
-        file_put_contents($app . '/artisan', "<?php\n");
-        file_put_contents($app . '/.env', "APP_ENV=testing\n");
-        file_put_contents($app . '/bootstrap/app.php', "<?php\n");
-        file_put_contents($app . '/public/index.php', "<?php\n");
-        file_put_contents($app . '/vendor/autoload.php', "<?php\n");
-        file_put_contents($app . '/app-file.txt', "live version\n");
-
-        $bin = $dir . DIRECTORY_SEPARATOR . 'bin';
-        mkdir($bin, 0700, true);
-        file_put_contents(
-            $bin . '/php',
-            "#!/usr/bin/env bash\ncase \"\$1\" in\n  -m) printf '%s\\n' ctype dom fileinfo filter gd hash iconv json libxml mbstring openssl pcre pdo_mysql session simplexml tokenizer xml xmlreader xmlwriter zip zlib curl;;\n  *) exec \"" . $this->posix(PHP_BINARY) . "\" \"\$@\";;\nesac\n",
-        );
-        $this->assertSame(0, $this->bashSnippet('chmod +x ' . escapeshellarg($this->posix($bin . '/php')))['code']);
-
-        $workspace = ['id' => $id, 'app' => $app, 'releases' => $dir . DIRECTORY_SEPARATOR . 'releases', 'backups' => $dir . DIRECTORY_SEPARATOR . 'backups', 'bin' => $bin,
-            'package' => $dir . DIRECTORY_SEPARATOR . 'incoming' . DIRECTORY_SEPARATOR . "societyflow-$id.tar.gz", 'pkgDir' => $dir . DIRECTORY_SEPARATOR . 'pkg', 'php' => $bin . '/php'];
-        $this->buildPackage($workspace, 'new version');
-
-        return $workspace;
-    }
-
-    /** (Re)builds the package in $ws['package'] with the given content for app-file.txt. */
-    private function buildPackage(array $ws, string $content): void
-    {
-        $this->assertSame(0, $this->bashSnippet('rm -rf ' . escapeshellarg($this->posix($ws['pkgDir'])))['code']);
-        mkdir($ws['pkgDir'] . '/app', 0700, true);
-        @mkdir(dirname($ws['package']), 0700, true);
-        file_put_contents($ws['pkgDir'] . '/app-file.txt', $content . "\n");
-        file_put_contents($ws['pkgDir'] . '/app/Example.php', "<?php\n// {$content}\n");
-        file_put_contents($ws['pkgDir'] . '/RELEASE.txt', "release_id={$ws['id']}\nbuilt_utc=2026-10-24 13:00:00\nsource_head=aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd\nfiles=3\n");
-        $pkg = escapeshellarg($this->posix($ws['pkgDir']));
-        $out = escapeshellarg($this->posix($ws['package']));
-        $incoming = escapeshellarg($this->posix(dirname($ws['package'])));
-        $list = escapeshellarg($this->posix(dirname($ws['package']) . '/list.txt'));
-        // same shape as scripts/deploy/ci/build-release.sh: member names WITHOUT a leading ./, RELEASE.sha256 hashing every other file
-        $r = $this->bashSnippet(
-            "cd $pkg && find . -type f ! -name RELEASE.sha256 | sed 's|^\\./||' | LC_ALL=C sort | while IFS= read -r p; do sha256sum -- \"\$p\"; done > RELEASE.sha256"
-            . " && find . -type f | sed 's|^\\./||' | LC_ALL=C sort > $list && tar -czf $out -C $pkg -T $list"
-            . " && cd $incoming && sha256sum " . escapeshellarg(basename($ws['package'])) . ' > ' . escapeshellarg(basename($ws['package']) . '.sha256'),
-        );
-        $this->assertSame(0, $r['code'], $r['err']);
-    }
-
     /** @param list<string> $extra @return array{code:int,out:string,err:string} */
     private function applyRelease(array $ws, array $extra = []): array
     {
@@ -184,21 +120,9 @@ class DeploymentScriptsBehaviourTest extends TestCase
             base_path('scripts/deploy/server/apply-release.sh'),
             array_merge(['--package', $this->posix($ws['package']), '--app-dir', $this->posix($ws['app']), '--releases-dir', $this->posix($ws['releases']),
                 '--backup-dir', $this->posix($ws['backups']), '--site-user', 'siteuser'], $extra),
-            ['PHP_BIN' => $this->posix($ws['php']), 'COMPOSER_BIN' => 'composer'],
+            ['PHP_BIN' => $this->posix($ws['php']), 'COMPOSER_BIN' => 'composer', 'STUB_LOG_DIR' => $this->posix($ws['logs']), 'STUB_MIGRATIONS' => 'unreadable'],
             $ws['bin'],
         );
-    }
-
-    /** a fingerprint of everything under the fake live application */
-    private function treeOf(string $dir): string
-    {
-        $lines = [];
-        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)) as $file) {
-            $lines[] = str_replace('\\', '/', substr($file->getPathname(), strlen($dir))) . ' ' . sha1_file($file->getPathname());
-        }
-        sort($lines);
-
-        return implode("\n", $lines);
     }
 
     public function test_a_dry_run_followed_by_a_second_run_reuses_its_own_unpacked_folder(): void

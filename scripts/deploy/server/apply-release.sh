@@ -18,9 +18,9 @@
 #            --non-interactive    for the automated pipeline (needs --apply and --confirm-release <id>, which must equal the package's
 #                                 release id). It deploys ONLY when the release has no pending migration: if any migration is pending it
 #                                 stops BEFORE changing anything and tells you to run the interactive deploy. After the site is up it
-#                                 runs the smoke check (which includes: the live site reports THIS release's fingerprint), and if that
-#                                 fails it restores the previous CODE automatically (safe because no migration ran, so there is no
-#                                 database change to be incompatible with).
+#                                 runs the smoke check (which includes: the live site reports THIS release's fingerprint). If that - or any
+#                                 step after the files were copied, e.g. composer - fails, it restores the previous CODE automatically
+#                                 (safe because no migration ran, so there is no database change to be incompatible with).
 #            --confirm-release ID the release id the pipeline expects to deploy (non-interactive only)
 #            --no-smoke           skip the post-deploy smoke check (not allowed with --non-interactive)
 #   env      PHP_BIN (default php; use /usr/bin/php8.2 etc. to match the site's PHP), COMPOSER_BIN (default composer)
@@ -32,8 +32,10 @@
 # What it NEVER does: delete or overwrite .env, storage/, public/storage, bootstrap/cache contents it did not create, databases or uploads;
 # run migrate:fresh / rollback / seed / db:wipe; run storage:setup; restart Nginx / PHP-FPM / MariaDB; print a secret.
 # Files that exist on the server but are not in the package are LEFT IN PLACE (nothing is mirrored or removed).
-# If any step fails after the site was put into maintenance mode, the script STOPS and leaves it in maintenance mode so a half-updated
-# site is not exposed; it tells you whether to fix forward or to run rollback-code.sh.
+# If any step fails after the site was put into maintenance mode, an INTERACTIVE run STOPS and leaves it in maintenance mode so a half-updated
+# site is not exposed; it tells you whether to fix forward or to run rollback-code.sh. An UNATTENDED (--non-interactive) run has nobody to read
+# that, so it restores the previous code itself (no migration can have run in that mode) and brings the site back; if that rollback also fails
+# it says so loudly and leaves the site in maintenance mode.
 set -Eeuo pipefail
 umask 022
 
@@ -69,7 +71,7 @@ done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-DOWN=0
+DOWN=0; RELEASE_APPLIED=0
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf '   ok    %s\n' "$*"; }
@@ -80,9 +82,38 @@ down_hint() {
     printf '  - to go back to the previous code:   bash %s/rollback-code.sh --backup %s --apply\n' "$HERE" "${BACKUP_CODE:-<code backup>}" >&2
     printf '  - or fix the cause, finish the remaining steps by hand, then:   cd %s && %s artisan up\n' "$APP_DIR" "$PHP_BIN" >&2
 }
-die()  { printf '\nSTOPPED: %s\n' "$*" >&2; down_hint; exit 1; }
 art()  { ( cd "$APP_DIR" && "$PHP_BIN" artisan "$@" ); }
 env_val() { local v; v="$(grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"; v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"; printf '%s' "$v"; }
+# tag = the value the health endpoint shows in X-SocietyFlow-Release for this release, so a header seen on the live site can be matched to a line here
+record() { printf '%s release=%s commit=%s tag=%s status=%s previous=%s\n' "$STAMP" "$RELEASE_ID" "${SRC_HEAD:-?}" "$(printf '%s' "$RELEASE_ID" | sha256sum | cut -c1-16)" "$1" "${PREV_RELEASE_ID:-none}" >> "$BACKUP_DIR/deployments.log"; }
+# Unattended runs only (--non-interactive). Once the release has been copied, ANY failure - a failed composer install, an unwritable folder, a failed
+# smoke check - must not leave the live site down or half-updated with nobody there to read the hint: put the previous CODE back. That is safe
+# because this mode never runs migrations (a pending one stops the run before anything changes), so there is no database change the old code could
+# clash with. An interactive run keeps the old behaviour: it stops, leaves the site in maintenance mode and tells the person what to do.
+auto_rollback() { # auto_rollback "<what failed>"
+    [ "$NON_INTERACTIVE" = 1 ] && [ "$RELEASE_APPLIED" = 1 ] && [ -f "${BACKUP_CODE:-}" ] || return 0
+    # The ERR trap also fires INSIDE ( ... ) subshells such as the composer call, and those share no variables with the parent shell: a marker
+    # file is how the second handler learns that the first already rolled back (and whether it worked), so it is never done twice.
+    local mark="$BACKUP_DIR/.auto-rollback-$STAMP"
+    if [ -e "$mark" ]; then [ "$(cat "$mark" 2>/dev/null)" = restored ] && DOWN=0; return 0; fi
+    : > "$mark"
+    trap - ERR; set +e
+    printf '\n%s: restoring the previous code automatically (code only; this deploy did not change the database).\n' "$1" >&2
+    printf 'ROLLBACK\n' | PHP_BIN="$PHP_BIN" bash "$HERE/rollback-code.sh" --backup "$BACKUP_CODE" --app-dir "$APP_DIR" --apply
+    local rc=$? url; url="$(env_val APP_URL)"
+    if [ "$rc" = 0 ]; then
+        echo restored > "$mark"; DOWN=0
+        if command -v curl >/dev/null 2>&1 && [ -n "$url" ]; then bash "$HERE/smoke-check.sh" --url "$url" | sed 's/^/   (after rollback) /'; fi
+        record ROLLED_BACK
+        printf '\nFAILED: release %s was NOT deployed. The previous code is back and the site is live again. Logs: %s\n' "$RELEASE_ID" "${LOG:-none}" >&2
+    else
+        echo failed > "$mark"
+        record ROLLBACK_FAILED
+        printf '\nFAILED - AND THE AUTOMATIC ROLLBACK FAILED (exit %s). The site may be in maintenance mode on half-updated code; a person must act now (hints below).\n' "$rc" >&2
+    fi
+    return 0
+}
+die()  { printf '\nSTOPPED: %s\n' "$*" >&2; auto_rollback "A step failed after the release was copied"; down_hint; exit 1; }
 confirm() { # confirm "<prompt>" "<exact text to type>"
     if [ "$NON_INTERACTIVE" = 1 ]; then
         # the pipeline states which release it means to deploy; nothing else can be confirmed without a human
@@ -97,7 +128,11 @@ confirm() { # confirm "<prompt>" "<exact text to type>"
 on_error() {
     local code=$? line=$1
     printf '\nFAILED at line %s (exit %s).\n' "$line" "$code" >&2
+    auto_rollback "A step failed after the release was copied"
     down_hint
+    # exit code 3 is reserved: it tells deploy.sh "stopped before changing anything because migrations are pending". Some other failing command
+    # (curl, composer ...) can exit with 3 as well and must not be mistaken for that.
+    [ "$code" = 3 ] && code=1
     exit "$code"
 }
 trap 'on_error $LINENO' ERR
@@ -310,6 +345,7 @@ LOG_FILE="$(ls -t "$APP_DIR"/storage/logs/*.log 2>/dev/null | head -n1 || true)"
 step "4. Maintenance mode, then copy the release over the code (adds and overwrites only; nothing is deleted)"
 art down --retry=60
 DOWN=1
+RELEASE_APPLIED=1   # from here on a failure leaves the live code changed or at risk: unattended runs restore the previous code (auto_rollback)
 ok "site is in maintenance mode"
 ( cd "$STAGE" && tar --exclude='./.preview' -cf - . ) | ( cd "$APP_DIR" && tar -xpf - --no-same-owner )
 ( cd "$APP_DIR" && sha256sum -c --quiet RELEASE.sha256 ) || die "after copying, files on the server do not match RELEASE.sha256"
@@ -395,15 +431,8 @@ if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
     [ "$NEW_ERR" = 0 ] && ok "no new ERROR/CRITICAL lines in $(basename "$LOG_FILE")" || warn "$NEW_ERR new ERROR/CRITICAL line(s) in $(basename "$LOG_FILE") since the deploy began - read them"
 fi
 
-# tag = the value the health endpoint shows in X-SocietyFlow-Release for this release, so a header seen on the live site can be matched to a line here
-record() { printf '%s release=%s commit=%s tag=%s status=%s previous=%s\n' "$STAMP" "$RELEASE_ID" "${SRC_HEAD:-?}" "$(printf '%s' "$RELEASE_ID" | sha256sum | cut -c1-16)" "$1" "${PREV_RELEASE_ID:-none}" >> "$BACKUP_DIR/deployments.log"; }
 if [ "$SMOKE_OK" = 0 ] && [ "$NON_INTERACTIVE" = 1 ]; then
-    # No migration ran in this mode, so putting the previous CODE back cannot clash with the database.
-    printf '\nThe smoke check FAILED: restoring the previous code automatically (code only; the database was not changed by this deploy).\n' >&2
-    printf 'ROLLBACK\n' | PHP_BIN="$PHP_BIN" bash "$HERE/rollback-code.sh" --backup "$BACKUP_CODE" --app-dir "$APP_DIR" --apply || true
-    bash "$HERE/smoke-check.sh" --url "$APP_URL" | sed 's/^/   (after rollback) /' || true
-    record ROLLED_BACK
-    printf '\nFAILED: release %s did not pass its smoke check and was rolled back. Logs: %s\n' "$RELEASE_ID" "$LOG" >&2
+    auto_rollback "The smoke check FAILED"
     exit 1
 fi
 if [ "$SMOKE_OK" = 0 ] || [ "$DATA_OK" = 0 ]; then

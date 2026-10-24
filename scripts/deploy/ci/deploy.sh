@@ -83,7 +83,11 @@ rsh "cd ~ && $REMOTE_ENV bash ~/deploy-tools/apply-release.sh $APPLY_ARGS --appl
 CODE=$?
 set -e
 if [ "$CODE" = 3 ]; then echo "deploy: NOT deployed - this release has pending database migrations; a person must run the interactive deploy (docs/BITBUCKET_PIPELINES_SETUP.md section 6)" >&2; exit 3; fi
-[ "$CODE" = 0 ] || { echo "deploy: the server-side apply failed (exit $CODE); see its output above. The previous code was kept or restored." >&2; exit 1; }
+[ "$CODE" = 0 ] || {
+    echo "deploy: the server-side apply failed (exit $CODE). Its output above says what state the site is in: normally 'the previous code is back and the site is live again' (or nothing had changed yet)." >&2
+    echo "        If it says the automatic rollback ALSO failed, or the site is in maintenance mode, a person must act now: bash ~/deploy-tools/rollback-code.sh --backup <the code backup it names> --apply" >&2
+    exit 1
+}
 
 # 4) a check from OUTSIDE the server, independent of the server's own report. It also proves WHICH release answers: the health endpoint's
 #    X-SocietyFlow-Release header must be this release's fingerprint (smoke-check.sh --expect-release), not the previous release's.
