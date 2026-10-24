@@ -2,7 +2,16 @@
 
 Update this after every major task. Keep it short; link, don't paste.
 
-**Last updated:** 2026-10-23 (security hardening, OTP migration applied locally, CloudPanel deployment tooling)
+**Last updated:** 2026-10-24 (Bitbucket pipelines and automatic-deployment tooling; both repositories on Bitbucket)
+
+## 2026-10-24 - Bitbucket + automatic deployment (built, tested locally, NOT enabled, NOT run against the server)
+
+Web `production-readiness` and mobile `main` are on Bitbucket (hashes verified). Full guide: [BITBUCKET_PIPELINES_SETUP.md](BITBUCKET_PIPELINES_SETUP.md); branches: [BITBUCKET_WORKFLOW.md](BITBUCKET_WORKFLOW.md); endpoint match: [API_COMPATIBILITY.md](API_COMPATIBILITY.md).
+- **URGENT (TODO P0-21): the live login page still advertises demo credentials.** Seen from the public page source only; not tried. The live code is older than this branch. Also P0-20: a real `APP_KEY` was committed in `.env.mysql.template` (sanitised; history still holds it).
+- **Pipelines:** every push runs tests + a package build; the production step is a manual button on `production-readiness`. Migrations are never run by the pipeline (a release with a pending migration stops with exit 3, changing nothing); a failed smoke check restores the previous code automatically; two deployments cannot overlap; record counts of 29 business tables are compared before and after.
+- **Tested on a scratch copy of the app (not CloudPanel, not Bitbucket):** refusal on a pending migration (live tree byte-identical), a full automated deploy, automatic rollback after a failed smoke check (file restored bit-for-bit), live and stale locks, the record-loss detector, the package builders (identical 775-file lists), the mobile release guards. `DeploymentArtifactsTest` (9 tests, mutation-checked) pins the safety properties.
+- **Live site facts (public GETs only, 24 Oct):** reachable behind Cloudflare; `/`, `/login` 200; `/owners` 302 to `/login`; `/api/v1/health` OK. Everything else about the server (PHP, database, queue, applied migrations, SSH) is UNVERIFIED.
+- **Next (operator):** handle the live demo accounts; decide `TRUSTED_PROXIES`; create the Bitbucket SSH key / known host / `PROD_*` variables; run `inspect-server.sh`; do the supervised first deploy.
 
 ## 2026-10-23 - security hardening, OTP migration, PHP upgrade prep, CloudPanel deployment tooling (UNCOMMITTED)
 

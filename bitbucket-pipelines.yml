@@ -1,0 +1,92 @@
+# SocietyFlow web - Bitbucket Pipelines
+#
+# What runs where (nothing deploys until you have done docs/BITBUCKET_PIPELINES_SETUP.md):
+#   every branch and pull request ....... install dependencies, run the PHPUnit suite (in-memory SQLite), build the release package as a check
+#   branch  production-readiness ........ the same, then a package artifact and a MANUAL "Deploy to production" step (deployment: production)
+#   custom pipelines (Run pipeline) ..... "server-dry-run"      : uploads + dry run on the server, changes nothing live
+#                                         "production-deploy"   : same as the manual step, started by hand on any commit of the branch
+#
+# The production step is `trigger: manual` on purpose: until the checklist in the setup guide is signed off (server facts verified, a restore of
+# a backup rehearsed, SSH key + known host configured) nothing may deploy by itself. Removing the `trigger: manual` line later makes it automatic.
+# Migrations are NEVER run by the pipeline: a release with a pending migration stops with exit code 3 and needs the interactive deploy.
+#
+# Secrets live only in Bitbucket (SSH key store + repository/deployment variables). This file contains none and never prints one.
+image: php:8.2-cli
+
+definitions:
+  caches:
+    composer-cache: ~/.composer/cache
+  steps:
+    - step: &install-and-test
+        name: Install and test (PHP 8.2, SQLite in memory)
+        caches:
+          - composer-cache
+        script:
+          - apt-get update -qq && apt-get install -y -qq git unzip libzip-dev libpng-dev libjpeg-dev libfreetype6-dev libonig-dev libxml2-dev libsqlite3-dev > /dev/null
+          - docker-php-ext-configure gd --with-freetype --with-jpeg > /dev/null
+          - docker-php-ext-install -j"$(nproc)" gd zip bcmath pdo_sqlite pdo_mysql mbstring exif > /dev/null
+          - php -v && php -m | grep -iE '^(gd|zip|pdo_sqlite|pdo_mysql|mbstring|fileinfo|openssl|curl)$' | sort | tr '\n' ' ' && echo
+          - curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --quiet
+          - composer validate --no-check-publish
+          - composer install --no-interaction --prefer-dist --no-progress
+          - composer check-platform-reqs
+          - 'if git ls-files -z "*.php" ":!*.blade.php" | xargs -0 -n1 php -l | grep -v "^No syntax errors"; then echo "PHP syntax errors found"; exit 1; fi'
+          - cp .env.example .env && php artisan key:generate --ansi
+          - php artisan route:list > /dev/null
+          - mkdir -p test-results
+          - php vendor/phpunit/phpunit/phpunit --no-progress --log-junit test-results/junit.xml
+        artifacts:
+          - test-results/**
+    - step: &build-package
+        name: Build the release package (committed files only)
+        script:
+          - apt-get update -qq && apt-get install -y -qq git > /dev/null
+          - bash scripts/deploy/ci/build-release.sh build/release
+        artifacts:
+          - build/release/**
+    - step: &deploy-production
+        name: Deploy to production (dry run first, then apply)
+        deployment: production
+        trigger: manual
+        script:
+          - apt-get update -qq && apt-get install -y -qq openssh-client curl > /dev/null
+          - bash scripts/deploy/ci/deploy.sh build/release apply
+
+pipelines:
+  default:
+    - step: *install-and-test
+    - step: *build-package
+
+  pull-requests:
+    '**':
+      - step: *install-and-test
+      - step: *build-package
+
+  branches:
+    # The branch that may deploy. Initially production-readiness (it holds the application); change it to `main` only after
+    # integration/main-merge has been merged by pull request - see docs/BITBUCKET_WORKFLOW.md.
+    production-readiness:
+      - step: *install-and-test
+      - step: *build-package
+      - step: *deploy-production
+
+  custom:
+    server-dry-run:
+      - step: *install-and-test
+      - step: *build-package
+      - step:
+          name: Server dry run (changes nothing on the live site)
+          deployment: production
+          script:
+            - apt-get update -qq && apt-get install -y -qq openssh-client curl > /dev/null
+            - bash scripts/deploy/ci/deploy.sh build/release dry-run
+    production-deploy:
+      - step: *install-and-test
+      - step: *build-package
+      - step:
+          # started by hand from "Run pipeline", so no second manual click is needed here
+          name: Deploy to production (dry run first, then apply)
+          deployment: production
+          script:
+            - apt-get update -qq && apt-get install -y -qq openssh-client curl > /dev/null
+            - bash scripts/deploy/ci/deploy.sh build/release apply

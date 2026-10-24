@@ -15,7 +15,18 @@
 #            --skip-composer      do not run composer (only if composer.lock did not change)
 #            --clear-app-cache    also run cache:clear (resets rate-limit counters and the settings cache)
 #            --no-queue-restart   do not run queue:restart
+#            --non-interactive    for the automated pipeline (needs --apply and --confirm-release <id>, which must equal the package's
+#                                 release id). It deploys ONLY when the release has no pending migration: if any migration is pending it
+#                                 stops BEFORE changing anything and tells you to run the interactive deploy. After the site is up it
+#                                 runs the smoke check, and if that fails it restores the previous CODE automatically (safe because no
+#                                 migration ran, so there is no database change to be incompatible with).
+#            --confirm-release ID the release id the pipeline expects to deploy (non-interactive only)
+#            --no-smoke           skip the post-deploy smoke check (not allowed with --non-interactive)
 #   env      PHP_BIN (default php; use /usr/bin/php8.2 etc. to match the site's PHP), COMPOSER_BIN (default composer)
+#
+# Every deployment takes an exclusive lock (two cannot run at once), records before/after record counts of the business tables
+# (data-fingerprint.sh) and fails loudly if any table lost rows, and appends one line to <backup-dir>/deployments.log; the release that last
+# passed every check is written to <backup-dir>/LAST_SUCCESSFUL_RELEASE.
 #
 # What it NEVER does: delete or overwrite .env, storage/, public/storage, bootstrap/cache contents it did not create, databases or uploads;
 # run migrate:fresh / rollback / seed / db:wipe; run storage:setup; restart Nginx / PHP-FPM / MariaDB; print a secret.
@@ -32,7 +43,7 @@ BACKUP_DIR="/home/joboapps-societyflow/backups/societyflow"
 RELEASES_DIR="/home/joboapps-societyflow/releases"
 PHP_BIN="${PHP_BIN:-php}"
 COMPOSER_BIN="${COMPOSER_BIN:-composer}"
-PACKAGE=""; APPLY=0; SKIP_DB=0; SKIP_COMPOSER=0; CLEAR_APP_CACHE=0; QUEUE_RESTART=1
+PACKAGE=""; APPLY=0; SKIP_DB=0; SKIP_COMPOSER=0; CLEAR_APP_CACHE=0; QUEUE_RESTART=1; NON_INTERACTIVE=0; CONFIRM_RELEASE=""; NO_SMOKE=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -47,7 +58,10 @@ while [ $# -gt 0 ]; do
         --skip-composer)    SKIP_COMPOSER=1; shift;;
         --clear-app-cache)  CLEAR_APP_CACHE=1; shift;;
         --no-queue-restart) QUEUE_RESTART=0; shift;;
-        -h|--help)          sed -n '2,30p' "$0"; exit 0;;
+        --non-interactive)  NON_INTERACTIVE=1; shift;;
+        --confirm-release)  CONFIRM_RELEASE="$2"; shift 2;;
+        --no-smoke)         NO_SMOKE=1; shift;;
+        -h|--help)          sed -n '2,40p' "$0"; exit 0;;
         *) echo "unknown option: $1" >&2; exit 2;;
     esac
 done
@@ -69,6 +83,12 @@ die()  { printf '\nSTOPPED: %s\n' "$*" >&2; down_hint; exit 1; }
 art()  { ( cd "$APP_DIR" && "$PHP_BIN" artisan "$@" ); }
 env_val() { local v; v="$(grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"; v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"; printf '%s' "$v"; }
 confirm() { # confirm "<prompt>" "<exact text to type>"
+    if [ "$NON_INTERACTIVE" = 1 ]; then
+        # the pipeline states which release it means to deploy; nothing else can be confirmed without a human
+        [ "$2" = "$RELEASE_ID" ] && [ "$CONFIRM_RELEASE" = "$RELEASE_ID" ] || die "non-interactive mode can only confirm the release id (--confirm-release '$CONFIRM_RELEASE' vs package '$RELEASE_ID'); '$2' needs a person."
+        printf '\n%s\n   non-interactive: --confirm-release matches the package (%s)\n' "$1" "$RELEASE_ID"
+        return 0
+    fi
     local answer; printf '\n%s\n   type exactly "%s" to continue, anything else stops here: ' "$1" "$2"
     IFS= read -r answer || answer=""
     [ "$answer" = "$2" ] || die "not confirmed - nothing further was changed."
@@ -84,6 +104,12 @@ trap 'on_error $LINENO' ERR
 # ---------------------------------------------------------------------------------------------------- 0. preconditions
 step "0. Preconditions   (mode: $([ "$APPLY" = 1 ] && echo APPLY || echo 'DRY RUN - the live site is not changed'))"
 [ -n "$PACKAGE" ] || die "--package is required"
+if [ "$NON_INTERACTIVE" = 1 ]; then
+    [ "$APPLY" = 1 ] || die "--non-interactive is for the pipeline and needs --apply"
+    [ -n "$CONFIRM_RELEASE" ] || die "--non-interactive needs --confirm-release <release id>"
+    [ "$NO_SMOKE" = 0 ] || die "--no-smoke is not allowed with --non-interactive (the smoke check is what triggers the automatic code rollback)"
+    [ "$SKIP_DB" = 0 ] || die "--skip-db-backup is not allowed with --non-interactive"
+fi
 [ "$(id -u)" -ne 0 ] || die "do not run this as root: files would become root-owned and PHP-FPM could no longer write them. Use the site user ($SITE_USER)."
 [ "$(id -un)" = "$SITE_USER" ] || warn "running as $(id -un), the site user is $SITE_USER"
 for t in tar gzip sha256sum cmp find df stat awk; do command -v "$t" >/dev/null 2>&1 || die "required tool not found: $t"; done
@@ -168,6 +194,24 @@ LOCK_CHANGED=0; cmp -s "$STAGE/composer.lock" "$APP_DIR/composer.lock" || LOCK_C
 say "   composer.lock changed: $([ "$LOCK_CHANGED" = 1 ] && echo YES - composer install will run || echo no)"
 if grep -qE '^(\.env|storage/|public/storage|vendor/)' "$LISTS/add.txt" "$LISTS/change.txt"; then die "the preview touches a protected path (.env, storage, public/storage or vendor) - this should be impossible; do not continue"; fi
 ok "no protected path (.env, storage/, public/storage, vendor/) would be touched"
+SRC_HEAD="$(grep -E '^source_head=' "$STAGE/RELEASE.txt" | cut -d= -f2 || true)"
+
+# Migrations this release would run = migration files in the package that the database has not recorded. A read-only SELECT through the
+# live application's own connection. Migrations are NEVER run automatically: see the non-interactive gate below.
+PENDING_PKG="$( cd "$APP_DIR" && "$PHP_BIN" -r '
+    require "vendor/autoload.php";
+    $app = require "bootstrap/app.php";
+    $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+    set_exception_handler(function (Throwable $e) { fwrite(STDERR, "cannot read the migrations table (" . get_class($e) . ")\n"); exit(4); });
+    $ran = Illuminate\Support\Facades\Schema::hasTable("migrations") ? Illuminate\Support\Facades\DB::table("migrations")->pluck("migration")->all() : [];
+    $files = array_map(fn ($f) => basename($f, ".php"), glob($argv[1] . "/database/migrations/*.php"));
+    sort($files);
+    foreach (array_diff($files, $ran) as $m) { echo $m, "\n"; }
+' "$STAGE" 2>/dev/null )" && PENDING_KNOWN=1 || { PENDING_KNOWN=0; PENDING_PKG=""; }
+PENDING_N=0; [ -n "$PENDING_PKG" ] && PENDING_N="$(printf '%s\n' "$PENDING_PKG" | grep -c .)"
+if [ "$PENDING_KNOWN" = 0 ]; then warn "could not read which migrations the database has already run (database unreachable from this script)"
+elif [ "$PENDING_N" = 0 ]; then ok "this release has no pending migration: no database change"
+else warn "$PENDING_N migration(s) in this release are not yet applied to this database - they will run ONLY in an interactive deploy, after a verified backup and your 'MIGRATE':"; printf '%s\n' "$PENDING_PKG" | sed -n '1,60p' | sed 's/^/        /'; fi
 
 if [ "$APPLY" != 1 ]; then
     printf '\nDRY RUN complete. The live site was not changed. The package is unpacked at %s (outside the web root).\n' "$STAGE"
@@ -176,8 +220,32 @@ if [ "$APPLY" != 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------------------------------- 3. confirm, back up
+if [ "$NON_INTERACTIVE" = 1 ]; then
+    # The automated path only ever ships code. A release that needs the database changed is a human decision (backup review, SQL preview, MIGRATE).
+    if [ "$PENDING_KNOWN" = 0 ] || [ "$PENDING_N" != 0 ]; then
+        printf '\nSTOPPED (nothing was changed): the automated deploy does not run migrations, and this release has %s pending (or the database could not be read).\n' "$PENDING_N" >&2
+        printf 'Run the interactive deploy once, from an SSH session:  bash %s/apply-release.sh --package %s --apply\n' "$HERE" "$PACKAGE" >&2
+        exit 3
+    fi
+fi
 confirm "About to deploy $RELEASE_ID to the LIVE site $DOMAIN ($APP_DIR)." "$RELEASE_ID"
 mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR" 2>/dev/null || true
+# one deployment at a time (a second pipeline run, or a person, waits outside)
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$BACKUP_DIR/.deploy.lock"
+    flock -n 9 || die "another deployment is running (lock: $BACKUP_DIR/.deploy.lock) - nothing was changed"
+else
+    # portable fallback: mkdir is atomic; the owner's PID tells a live deployment from a lock left behind by a crashed one
+    LOCKDIR="$BACKUP_DIR/.deploy.lock.d"
+    if ! mkdir "$LOCKDIR" 2>/dev/null; then
+        OLD_PID="$(cat "$LOCKDIR/pid" 2>/dev/null || true)"
+        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then die "another deployment is running (pid $OLD_PID, lock: $LOCKDIR) - nothing was changed"; fi
+        warn "removing a stale lock left by a deployment that is no longer running (pid ${OLD_PID:-unknown})"
+        rm -rf "$LOCKDIR"; mkdir "$LOCKDIR" || die "could not take the deployment lock at $LOCKDIR"
+    fi
+    echo "$$" > "$LOCKDIR/pid"
+    trap 'rm -rf "$LOCKDIR"' EXIT
+fi
 LOG="$BACKUP_DIR/deploy-$STAMP.log"
 exec > >(tee -a "$LOG") 2>&1
 say "log: $LOG"
@@ -197,7 +265,8 @@ grep -qE '^(\./)?vendor/autoload\.php$' "$BACKUP_LIST" || die "the code backup d
 ok "code backup: $BACKUP_CODE ($(stat -c %s "$BACKUP_CODE") bytes, $(wc -l < "$BACKUP_LIST") entries, gzip ok, artisan and vendor present)"
 ( umask 077; cp -p "$APP_DIR/.env" "$BACKUP_DIR/env-$STAMP.bak"; chmod 600 "$BACKUP_DIR/env-$STAMP.bak" )
 ok ".env copied to $BACKUP_DIR/env-$STAMP.bak (mode 600 - contains secrets, keep it private; the deploy does not modify .env)"
-[ -f "$APP_DIR/RELEASE.txt" ] && cp -p "$APP_DIR/RELEASE.txt" "$BACKUP_DIR/previous-RELEASE-$STAMP.txt" || true
+PREV_RELEASE_ID=""
+[ -f "$APP_DIR/RELEASE.txt" ] && { cp -p "$APP_DIR/RELEASE.txt" "$BACKUP_DIR/previous-RELEASE-$STAMP.txt"; PREV_RELEASE_ID="$(grep -E '^release_id=' "$APP_DIR/RELEASE.txt" | cut -d= -f2)"; } || true
 
 step "3b. Back up the database"
 DB_BACKUP=""
@@ -215,6 +284,9 @@ step "3c. Record the uploads (names and sizes only) so they can be compared afte
 UPL_BEFORE="$BACKUP_DIR/uploads-before-$STAMP.txt"
 ( cd "$APP_DIR" && find -L storage/app public/storage -type f -printf '%s %p\n' 2>/dev/null | sort -k2 ) > "$UPL_BEFORE" || true
 ok "$(wc -l < "$UPL_BEFORE") upload files recorded in $UPL_BEFORE"
+FP_BEFORE="$BACKUP_DIR/fingerprint-before-$STAMP.txt"
+APP_DIR="$APP_DIR" PHP_BIN="$PHP_BIN" bash "$HERE/data-fingerprint.sh" > "$FP_BEFORE" || die "could not take the record-count fingerprint (database unreadable?) - nothing was changed"
+ok "business-table record counts recorded: $(grep -vc '^#' "$FP_BEFORE") tables in $FP_BEFORE (owners: $(awk -F'\t' '$1=="owners"{print $2}' "$FP_BEFORE"), payments: $(awk -F'\t' '$1=="payments"{print $2}' "$FP_BEFORE"), users: $(awk -F'\t' '$1=="users"{print $2}' "$FP_BEFORE"))"
 LOG_FILE="$(ls -t "$APP_DIR"/storage/logs/*.log 2>/dev/null | head -n1 || true)"; LOG_OFFSET=0; [ -n "$LOG_FILE" ] && LOG_OFFSET="$(stat -c %s "$LOG_FILE")"
 
 # ---------------------------------------------------------------------------------------------------- 4. maintenance mode and copy
@@ -286,19 +358,44 @@ UPL_AFTER="$BACKUP_DIR/uploads-after-$STAMP.txt"
 ( cd "$APP_DIR" && find -L storage/app public/storage -type f -printf '%s %p\n' 2>/dev/null | sort -k2 ) > "$UPL_AFTER" || true
 LOST="$(comm -23 "$UPL_BEFORE" "$UPL_AFTER" | wc -l)"
 [ "$LOST" = 0 ] && ok "uploads: nothing missing or changed ($(wc -l < "$UPL_AFTER") files now, $(comm -13 "$UPL_BEFORE" "$UPL_AFTER" | wc -l) new since the snapshot)" || warn "$LOST upload file(s) from the snapshot are missing or changed in size: compare $UPL_BEFORE and $UPL_AFTER"
+
+# Did any business table lose rows? (rows may be added by the people using the site meanwhile; none may disappear)
+FP_AFTER="$BACKUP_DIR/fingerprint-after-$STAMP.txt"
+DATA_OK=1
+if APP_DIR="$APP_DIR" PHP_BIN="$PHP_BIN" bash "$HERE/data-fingerprint.sh" > "$FP_AFTER" 2>/dev/null; then
+    bash "$HERE/data-fingerprint.sh" --compare "$FP_BEFORE" "$FP_AFTER" | sed 's/^/   /' && ok "record counts: nothing lost" || { DATA_OK=0; warn "RECORDS WENT MISSING - see the LOST lines above; do not carry on, restore from $DB_BACKUP after a decision"; }
+else DATA_OK=0; warn "could not read the database after the deploy"; fi
+
 APP_URL="$(env_val APP_URL)"
-if command -v curl >/dev/null 2>&1 && [ -n "$APP_URL" ]; then
-    CODE="$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$APP_URL/login" 2>/dev/null || echo 000)"
-    [ "$CODE" = 200 ] && ok "GET $APP_URL/login -> 200" || warn "GET $APP_URL/login -> $CODE"
-    HEALTH="$(curl -sS -m 30 "$APP_URL/api/v1/health" 2>/dev/null || true)"
-    printf '%s' "$HEALTH" | grep -q '"application":"societyflow"' && ok "GET $APP_URL/api/v1/health identifies as societyflow" || warn "health endpoint answer unexpected: ${HEALTH:0:120}"
-else warn "curl or APP_URL missing - run the browser checks in docs/DEPLOYMENT_CLOUDPANEL.md section 9"; fi
+SMOKE_OK=1
+if [ "$NO_SMOKE" = 1 ]; then warn "smoke check skipped (--no-smoke)"
+elif command -v curl >/dev/null 2>&1 && [ -n "$APP_URL" ]; then
+    bash "$HERE/smoke-check.sh" --url "$APP_URL" --expect-sha "$SRC_HEAD" | sed 's/^/   /' || SMOKE_OK=0
+else SMOKE_OK=0; warn "curl or APP_URL missing: the smoke check could not run"; fi
 if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
     NEW_ERR="$(tail -c +"$((LOG_OFFSET + 1))" "$LOG_FILE" | grep -c '\.ERROR\|\.CRITICAL' || true)"
     [ "$NEW_ERR" = 0 ] && ok "no new ERROR/CRITICAL lines in $(basename "$LOG_FILE")" || warn "$NEW_ERR new ERROR/CRITICAL line(s) in $(basename "$LOG_FILE") since the deploy began - read them"
 fi
 
-printf '\nDONE. Release %s is live.\n' "$RELEASE_ID"
-printf '  code backup : %s\n  .env copy   : %s\n  db backup   : %s\n  log         : %s\n' "$BACKUP_CODE" "$BACKUP_DIR/env-$STAMP.bak" "${DB_BACKUP:-none}" "$LOG"
+record() { printf '%s release=%s commit=%s status=%s previous=%s\n' "$STAMP" "$RELEASE_ID" "${SRC_HEAD:-?}" "$1" "${PREV_RELEASE_ID:-none}" >> "$BACKUP_DIR/deployments.log"; }
+if [ "$SMOKE_OK" = 0 ] && [ "$NON_INTERACTIVE" = 1 ]; then
+    # No migration ran in this mode, so putting the previous CODE back cannot clash with the database.
+    printf '\nThe smoke check FAILED: restoring the previous code automatically (code only; the database was not changed by this deploy).\n' >&2
+    printf 'ROLLBACK\n' | PHP_BIN="$PHP_BIN" bash "$HERE/rollback-code.sh" --backup "$BACKUP_CODE" --app-dir "$APP_DIR" --apply || true
+    bash "$HERE/smoke-check.sh" --url "$APP_URL" | sed 's/^/   (after rollback) /' || true
+    record ROLLED_BACK
+    printf '\nFAILED: release %s did not pass its smoke check and was rolled back. Logs: %s\n' "$RELEASE_ID" "$LOG" >&2
+    exit 1
+fi
+if [ "$SMOKE_OK" = 0 ] || [ "$DATA_OK" = 0 ]; then
+    record FAILED_CHECKS
+    printf '\nATTENTION: release %s is in place but a post-deploy check failed. Roll the code back with:\n  bash %s/rollback-code.sh --backup %s --apply\n' "$RELEASE_ID" "$HERE" "$BACKUP_CODE" >&2
+    exit 1
+fi
+
+record OK
+printf '%s\n' "release_id=$RELEASE_ID" "commit=${SRC_HEAD:-unknown}" "deployed_utc=$STAMP" "previous_release=${PREV_RELEASE_ID:-none}" "code_backup=$BACKUP_CODE" > "$BACKUP_DIR/LAST_SUCCESSFUL_RELEASE"
+printf '\nDONE. Release %s is live and passed its checks.\n' "$RELEASE_ID"
+printf '  code backup : %s\n  .env copy   : %s\n  db backup   : %s\n  log         : %s\n  records     : %s\n' "$BACKUP_CODE" "$BACKUP_DIR/env-$STAMP.bak" "${DB_BACKUP:-none}" "$LOG" "$BACKUP_DIR/deployments.log"
 printf '  rollback    : bash %s/rollback-code.sh --backup %s --apply     (code only; see docs/DEPLOYMENT_CLOUDPANEL.md section 8 for the database)\n' "$HERE" "$BACKUP_CODE"
 printf '  The unpacked package stays in %s (delete it yourself when you no longer need it).\n' "$STAGE"

@@ -26,3 +26,9 @@ moving `main` there is a plain fast-forward - no force push, no history lost. Do
 
 * `.env.mysql.template` carried a real `APP_KEY` from the first commit until c939ffa: treat that key as exposed (TODO P0-20). History was not rewritten.
 * A nested clone `societyflow-web/` and a stray text file `SocietyFlow` sit untracked in the project root; they are excluded locally (`.git/info/exclude`) and must not be committed. The mobile folder has two stray files (`h -u origin main`, `societyflowmob`) from mistyped commands; they are untracked and safe to delete.
+
+## Pipelines (added 2026-10-24)
+
+`bitbucket-pipelines.yml` (web) and the mobile repository's own `bitbucket-pipelines.yml` run the tests on every push and pull request. Only the web branch
+`production-readiness` carries a production deploy step, and it is a **manual** button until the checklist in [BITBUCKET_PIPELINES_SETUP.md](BITBUCKET_PIPELINES_SETUP.md)
+section 7 is signed off. The mobile pipeline never deploys the backend and never publishes the app. Your everyday Git commands are in section 9 of that guide and in the mobile `README.md`.

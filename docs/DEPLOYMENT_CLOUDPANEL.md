@@ -1,7 +1,8 @@
 # Deploying SocietyFlow to CloudPanel (societyflow.joboapps.com)
 
-**Status 2026-10-23: PREPARED, NOT EXECUTED.** Nothing has been uploaded, nothing was run on the live server, and the live server was **never contacted**
-(no SSH, no HTTP request to it). Everything about it below is either from your message or marked **UNVERIFIED**. The scripts were tested against a
+> **Automated deployment from Bitbucket (pipeline, non-interactive mode, automatic code rollback, Cloudflare / `TRUSTED_PROXIES`, first-deploy procedure):** [BITBUCKET_PIPELINES_SETUP.md](BITBUCKET_PIPELINES_SETUP.md). This page remains the manual, supervised process and the rollback reference.
+**Status 2026-10-23: PREPARED, NOT EXECUTED.** Nothing has been uploaded, nothing was run on the live server, and it was **never logged into or changed** (the only contact was a few plain public GET requests on 2026-10-24, listed in BITBUCKET_PIPELINES_SETUP.md section 1)
+(no SSH). Everything about it below is either from your message or marked **UNVERIFIED**. The scripts were tested against a
 scratch copy of the application on this PC (section 10), not against CloudPanel.
 
 | Fact | Value | Source |
