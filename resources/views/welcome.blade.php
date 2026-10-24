@@ -36,7 +36,7 @@
                 </div>
                 
                 <div class="mt-8">
-                    <a href="/dashboard" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                    <a href="{{ url('/') }}/dashboard" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors">
                         Go to Dashboard
                     </a>
                 </div>

@@ -481,7 +481,7 @@ window.visitorStatusDropdowns = window.visitorStatusDropdowns || {};
 function openDenyModal(visitorId, visitorName, flatInfo) {
     document.getElementById('deny_visitor_name').textContent = visitorName;
     document.getElementById('deny_visitor_flat').textContent = 'Visiting: ' + flatInfo;
-    document.getElementById('denyForm').action = '/visitors/' + visitorId + '/deny';
+    document.getElementById('denyForm').action = '{{ url('/') }}/visitors/' + visitorId + '/deny';
     document.getElementById('denyModal').classList.remove('hidden');
 }
 
@@ -580,7 +580,7 @@ function changeVisitorStatusAction(visitorId, action, visitorName, flatInfo, eve
 function submitVisitorStatusChange(visitorId, action) {
     const form = document.createElement('form');
     form.method = 'POST';
-    form.action = '/visitors/' + visitorId + '/' + action;
+    form.action = '{{ url('/') }}/visitors/' + visitorId + '/' + action;
     form.style.display = 'none';
     
     const csrfToken = document.createElement('input');
@@ -663,7 +663,7 @@ document.addEventListener('click', function(event) {
     function checkForUpdates() {
         if (!isPageVisible) return;
 
-        fetch('/visitors/stats', {
+        fetch('{{ url('/') }}/visitors/stats', {
             headers: {
                 'X-Requested-With': 'XMLHttpRequest',
                 'Accept': 'application/json',

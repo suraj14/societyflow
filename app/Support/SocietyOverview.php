@@ -69,11 +69,9 @@ class SocietyOverview
             // date column is payment_date. On SQLite a double-quoted unknown
             // column degrades to a string literal, so this silently summed to
             // zero instead of erroring; on MySQL it is a hard failure.
-            'monthly_revenue' => Payment::when($societyId, fn ($q) => $q->where('society_id', $societyId))
-                ->success()
-                ->whereMonth('payment_date', $now->month)
-                ->whereYear('payment_date', $now->year)
-                ->sum('amount'),
+            // What the society actually received this month - the Financial Report's "Actual Collections": verified, not owner
+            // rent, not "unrecorded", facility money net of refunds, by the day it arrived. One definition, not a second sum.
+            'monthly_revenue' => \App\Services\FinancialReportService::societyCollections($societyId, ...\App\Services\FinancialReportService::currentMonthBounds($societyId))['amount'],
             // Society/common expenses only - a property's own expense is
             // never society spend (see FinancialReportService).
             'monthly_expenses' => self::monthlySocietyExpenses($societyId),

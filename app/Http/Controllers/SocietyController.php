@@ -117,7 +117,7 @@ class SocietyController extends BaseController
                 'registered_on' => 'nullable|date|before_or_equal:today',
             ]);
 
-            $validated['slug'] = Str::slug($validated['name']);
+            $validated['slug'] = Society::uniqueSlug($validated['name'], $society->id);
             $validated['registration_number'] = filled($validated['registration_number'] ?? null) ? trim($validated['registration_number']) : null;
             $validated['registered_on'] = $validated['registered_on'] ?? null;
             $society->update($validated);

@@ -149,12 +149,12 @@
                     <h3 class="text-md font-semibold text-gray-900 mb-4">Notification Options</h3>
                     <div class="flex flex-wrap gap-6">
                         <label class="inline-flex items-center">
-                            <input type="checkbox" name="send_email" value="1" {{ old('send_email') ? 'checked' : '' }}
+                            <input type="checkbox" name="send_email" value="1" {{ (old() ? old('send_email') : true) ? 'checked' : '' }}
                                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                             <span class="ml-2 text-sm text-gray-700">Send Email Notification</span>
                         </label>
                         <label class="inline-flex items-center">
-                            <input type="checkbox" name="send_sms" value="1" {{ old('send_sms') ? 'checked' : '' }}
+                            <input type="checkbox" name="send_sms" value="1" {{ (old() ? old('send_sms') : true) ? 'checked' : '' }}
                                    class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                             <span class="ml-2 text-sm text-gray-700">Send SMS Notification</span>
                         </label>

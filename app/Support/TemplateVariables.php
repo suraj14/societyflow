@@ -26,6 +26,10 @@ class TemplateVariables
         'pass_status'      => 'revoked',
         'document_title'   => 'Society Rules',
         'document_version' => 'v2',
+        'complaint_ref'    => 'C102',
+        'complaint_status' => 'In Progress',
+        'bill_label'       => 'Maintenance October 2026',
+        'amount_plain'     => '2500',
     ];
 
     /**
@@ -61,6 +65,24 @@ class TemplateVariables
                 'variables' => $wa['access_pass']['fields'],
                 'required'  => [],
                 'via'       => 'a revoked gate pass',
+            ],
+            // The two below have a real sender (BusinessNotifications) and an approved telecom text (App\Support\DltTemplates).
+            // They send only through a template with a Message ID, never as Quick SMS.
+            'complaint' => [
+                'label'     => 'Complaint status update',
+                'help'      => 'When a complaint changes status, to the resident who raised it. Needs a template with a Fast2SMS Message ID.',
+                'audience'  => 'resident',
+                'variables' => ['complaint_ref' => 'Complaint number', 'complaint_status' => 'New status', 'society_name' => 'Society name'],
+                'required'  => ['complaint_ref', 'complaint_status'],
+                'via'       => 'a complaint status change',
+            ],
+            'bill' => [
+                'label'     => 'Bill generated',
+                'help'      => 'When a bill is generated, to the resident billed. Needs a template with a Fast2SMS Message ID.',
+                'audience'  => 'resident',
+                'variables' => ['bill_label' => 'Bill type and month, e.g. Maintenance October 2026', 'amount_plain' => 'Amount in whole rupees, digits only', 'society_name' => 'Society name'],
+                'required'  => ['bill_label', 'amount_plain'],
+                'via'       => 'a generated bill',
             ],
             'document' => [
                 'label'     => 'Society document published',

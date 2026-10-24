@@ -1,0 +1,2 @@
+# Shell scripts run on Linux servers (CloudPanel): always LF, whatever core.autocrlf says on a Windows checkout.
+scripts/deploy/server/*.sh text eol=lf

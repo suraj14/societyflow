@@ -41,9 +41,14 @@
         </button>
     </form>
 
+    {{-- green = the provider accepted it; amber = deliberately NOT sent (the safety switch / test allow-list - nothing is wrong with
+         the provider settings); red = a real problem (bad settings, provider refused). --}}
     <div x-show="result" x-cloak class="mt-4 rounded-xl px-4 py-3 text-sm"
-         :class="result && result.success ? 'bg-green-100 text-green-900' : 'bg-red-100 text-red-900'">
-        <p class="font-medium" x-text="(result && result.success ? '✓ ' : '✕ ') + (result ? result.message : '')"></p>
+         :class="result && result.blocked ? 'bg-amber-100 text-amber-900' : (result && result.success ? 'bg-green-100 text-green-900' : 'bg-red-100 text-red-900')">
+        <p class="font-medium" x-text="(result && result.blocked ? '⛔ ' : (result && result.success ? '✓ ' : '✕ ')) + (result ? result.message : '')"></p>
+        <template x-if="result && result.hint">
+            <p class="mt-1 text-xs" x-text="result.hint"></p>
+        </template>
         <template x-if="result && result.details">
             <details class="mt-1 text-xs">
                 <summary class="cursor-pointer select-none">View technical details</summary>
@@ -81,7 +86,14 @@ function sfChannelTest(url) {
                 if (r.status === 422) {
                     this.result = { success: false, message: Object.values(data.errors || {}).flat()[0] || 'Please check the details entered.' };
                 } else {
-                    this.result = { success: !!data.success, message: data.message || 'Something went wrong.', details: data.details || null, raw: data.raw || null };
+                    // A blocked send is not an error in the settings. When the global safety switch is what stopped it, say that in plain words and do not repeat
+        // the technical sentence the server also returns (the server's answer, the switch and every check are unchanged).
+                    const switchOff = data.blocked && data.reason === 'messaging_disabled';
+                    this.result = {
+                        success: !!data.success, blocked: !!(data.blocked || data.skipped),
+                        message: switchOff ? 'Blocked by the safety switch — delivery is currently disabled. This is not a settings error.' : (data.message || 'Something went wrong.'),
+                        hint: data.hint || null, details: data.details || null, raw: data.raw || null,
+                    };
                 }
             } catch (e) {
                 this.result = { success: false, message: 'Could not reach the server. Check your connection and try again.' };

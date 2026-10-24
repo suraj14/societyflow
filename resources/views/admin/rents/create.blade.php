@@ -334,9 +334,9 @@ async function handlePropertyTypeChange() {
     unitSelect.disabled = true;
     
     try {
-        console.log('Making API call to:', `/admin/api/rent/units?property_type=${propertyType}`);
+        console.log('Making API call to:', `{{ url('/') }}/admin/api/rent/units?property_type=${propertyType}`);
         
-        const response = await fetch(`/admin/api/rent/units?property_type=${propertyType}`, {
+        const response = await fetch(`{{ url('/') }}/admin/api/rent/units?property_type=${propertyType}`, {
             headers: {
                 'X-Requested-With': 'XMLHttpRequest',
                 'Accept': 'application/json',
@@ -435,7 +435,7 @@ async function validateRentRecord() {
     }
     
     try {
-        const response = await fetch('/admin/api/rent/validate', {
+        const response = await fetch('{{ url('/') }}/admin/api/rent/validate', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

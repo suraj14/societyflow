@@ -467,6 +467,12 @@ class EmailTriggerService
         string $templateSlug,
         ?int $societyId
     ): void {
+        if ($why = \App\Support\RecipientEligibility::emailSkipReason($recipient['email'] ?? null, $societyId, $templateSlug)) {
+            \App\Models\EmailLog::recordSkipped($template->id, $societyId, $recipient['email'] ?? null, $recipient['name'] ?? null, $template->slug, "not sent: {$why}");
+
+            return;
+        }
+
         try {
             // Check if recipient's role can receive this email type
             if (!self::canReceiveEmail($recipient['role'], $templateSlug)) {
@@ -493,7 +499,9 @@ class EmailTriggerService
                         ->subject($subject);
             });
 
-            // Log successful send
+            // "sent" only when a real mail server took it; a log-only / kill-switch run is "simulated" (see MailDelivery)
+            $delivery = \App\Support\MailDelivery::outcome($recipient['email'] ?? null);
+            $outcome = $delivery['status'];
             EmailLog::create([
                 'email_template_id' => $template->id,
                 'society_id' => $societyId,
@@ -501,11 +509,12 @@ class EmailTriggerService
                 'recipient_name' => $recipient['name'] ?? null,
                 'trigger_action' => $template->slug,
                 'variables' => $variables,
-                'status' => 'sent',
-                'sent_at' => now(),
+                'status' => $outcome,
+                'error_message' => $delivery['reason'],
+                'sent_at' => $outcome === 'sent' ? now() : null,
             ]);
 
-            Log::info('Email sent successfully', [
+            Log::info($outcome === 'sent' ? 'Email handed to the mail server' : 'Email simulated only (not sent)', [
                 'recipient' => $recipient['email'],
                 'template_slug' => $template->slug,
                 'role' => $recipient['role'],

@@ -32,4 +32,20 @@ class ResetPasswordNotification extends ResetPassword implements ShouldQueue
         parent::__construct($token);
         $this->afterCommit = true;
     }
+
+    /**
+     * Sent through the account's society mail settings. Someone asking for a reset link is signed out, so nothing has
+     * applied those settings to the request (LoadSocietyEmailSettings only runs for a signed-in user) - without this the
+     * link went out through the bare .env mailer, which on a server configured only through Settings is a placeholder.
+     */
+    public function toMail($notifiable)
+    {
+        $message = parent::toMail($notifiable);
+
+        if ($mailer = \App\Services\EmailConfigurationService::mailerFor($notifiable->society_id ?? null)) {
+            $message->mailer($mailer);
+        }
+
+        return $message;
+    }
 }

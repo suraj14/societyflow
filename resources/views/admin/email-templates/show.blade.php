@@ -16,11 +16,21 @@
                     <p class="text-gray-600 mt-2">Template details and preview</p>
                 </div>
                 <div class="flex space-x-3">
+                    @if($emailTemplate->society_id === null && !auth()->user()->hasRole('Super Admin'))
+                    <form method="POST" action="{{ route('admin.email-templates.customise', $emailTemplate) }}">
+                        @csrf
+                        <button type="submit" class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl">
+                            <i class="fas fa-copy mr-2"></i>
+                            Customise for my society
+                        </button>
+                    </form>
+                    @else
                     <a href="{{ route('admin.email-templates.edit', $emailTemplate) }}" 
                        class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-medium rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl">
                         <i class="fas fa-edit mr-2"></i>
                         Edit Template
                     </a>
+                    @endif
                     <a href="{{ route('admin.email-templates.index') }}" 
                        class="inline-flex items-center px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors shadow-sm">
                         <i class="fas fa-arrow-left mr-2"></i>
@@ -154,22 +164,26 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="p-6 bg-white min-h-[300px] max-h-[600px] overflow-y-auto">
-                                    {!! str_replace([
-                                        '{{user_name}}', 
-                                        '{{society_name}}', 
-                                        '{{amount}}', 
-                                        '{{due_date}}',
-                                        '{{view_url}}',
-                                        '{{login_url}}'
-                                    ], [
-                                        '<span class="bg-yellow-200 px-2 py-1 rounded text-sm font-medium">John Doe</span>', 
-                                        '<span class="bg-yellow-200 px-2 py-1 rounded text-sm font-medium">Sample Society</span>', 
-                                        '<span class="bg-yellow-200 px-2 py-1 rounded text-sm font-medium">$500.00</span>', 
-                                        '<span class="bg-yellow-200 px-2 py-1 rounded text-sm font-medium">March 15, 2026</span>',
-                                        '<span class="bg-yellow-200 px-2 py-1 rounded text-sm font-medium">#view-link</span>',
-                                        '<span class="bg-yellow-200 px-2 py-1 rounded text-sm font-medium">#login-link</span>'
-                                    ], $emailTemplate->body) !!}
+                                <div class="bg-white">
+                                    {{-- The body is HTML somebody typed: shown in a sandboxed frame (no scripts, no access to this page), never inline. --}}
+                                    @php
+                                        $sfPreviewHtml = str_replace([
+                                            '{{user_name}}',
+                                            '{{society_name}}',
+                                            '{{amount}}',
+                                            '{{due_date}}',
+                                            '{{view_url}}',
+                                            '{{login_url}}'
+                                        ], [
+                                            '<span style="background:#fef08a;padding:2px 6px;border-radius:4px;font-weight:500">John Doe</span>',
+                                            '<span style="background:#fef08a;padding:2px 6px;border-radius:4px;font-weight:500">Sample Society</span>',
+                                            '<span style="background:#fef08a;padding:2px 6px;border-radius:4px;font-weight:500">$500.00</span>',
+                                            '<span style="background:#fef08a;padding:2px 6px;border-radius:4px;font-weight:500">March 15, 2026</span>',
+                                            '<span style="background:#fef08a;padding:2px 6px;border-radius:4px;font-weight:500">#view-link</span>',
+                                            '<span style="background:#fef08a;padding:2px 6px;border-radius:4px;font-weight:500">#login-link</span>'
+                                        ], (string) $emailTemplate->body);
+                                    @endphp
+                                    <iframe sandbox="" class="w-full h-[500px] border-0" title="Email preview" srcdoc="{{ $sfPreviewHtml }}"></iframe>
                                 </div>
                             </div>
                         </div>
@@ -347,9 +361,9 @@ function testTemplate() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showToast('Test email sent successfully!', 'success');
+            showToast(data.message || 'The mail server accepted the test email.', 'success');
         } else {
-            showToast('Failed to send test email: ' + data.message, 'error');
+            showToast(data.message || 'The test email was not sent.', 'error');
         }
     })
     .catch(error => {

@@ -21,15 +21,15 @@
 @endphp
 
 @section('content')
-<div class="p-4 space-y-5">
+<div class="p-4 space-y-5 md:p-6 md:space-y-6">
 
     {{-- Four numbers, nothing else. --}}
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         @php
             $sfCards = [
                 ['key' => 'waiting',  'label' => 'Waiting',   'value' => $stats['waiting'],  'bg' => 'bg-amber-500',  'icon' => 'fa-hourglass-half'],
                 ['key' => 'expected', 'label' => 'Expected',  'value' => $stats['expected'], 'bg' => 'bg-blue-500',   'icon' => 'fa-calendar-check'],
-                ['key' => 'inside',   'label' => 'Inside',    'value' => $stats['inside'],   'bg' => 'bg-green-600',  'icon' => 'fa-person-walking-arrow-right'],
+                ['key' => 'inside',   'label' => 'Inside',    'value' => $stats['inside'],   'bg' => 'bg-green-600',  'icon' => 'fa-user-check'],
                 ['key' => 'departed', 'label' => 'Departed',  'value' => $stats['departed'], 'bg' => 'bg-gray-500',   'icon' => 'fa-right-from-bracket'],
             ];
         @endphp
@@ -48,6 +48,7 @@
          temporary service providers and pre-approved guests all go through
          here with nothing to type - "Register Visitor" is for the one case
          that genuinely has no pass: an unannounced, unknown visitor. --}}
+    <div class="grid grid-cols-1 gap-5 md:grid-cols-3 md:gap-4">
     <a href="{{ route('guard.scan') }}"
        class="tap-target w-full bg-purple-700 hover:bg-purple-800 text-white rounded-xl flex items-center justify-center gap-3 text-lg font-semibold shadow py-4">
         <i class="fas fa-qrcode"></i> Scan QR
@@ -60,6 +61,10 @@
        class="tap-target w-full bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center justify-center gap-3 text-base font-medium py-3">
         <i class="fas fa-clock"></i> My Shift
     </a>
+    </div>
+
+    {{-- The three lists: one under another on a phone, side by side on a wide screen. --}}
+    <div class="space-y-5 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
 
     {{-- Waiting on resident approval --}}
     <section>
@@ -150,6 +155,7 @@
             @endforelse
         </div>
     </section>
+    </div>
 </div>
 
 @push('scripts')
@@ -166,7 +172,7 @@
     function toast(message, isError) {
         const el = document.createElement('div');
         el.textContent = message;
-        el.className = 'fixed left-4 right-4 bottom-20 z-30 rounded-lg px-4 py-3 text-sm font-medium shadow-lg text-white text-center ' +
+        el.className = 'fixed left-4 right-4 bottom-20 z-30 md:left-auto md:right-6 md:bottom-6 md:w-96 rounded-lg px-4 py-3 text-sm font-medium shadow-lg text-white text-center ' +
             (isError ? 'bg-red-600' : 'bg-green-600');
         document.body.appendChild(el);
         setTimeout(function () { el.remove(); }, 2500);

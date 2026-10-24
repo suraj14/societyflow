@@ -142,10 +142,35 @@ class Society extends Model
         parent::boot();
 
         static::creating(function ($society) {
-            if (empty($society->slug)) {
-                $society->slug = Str::slug($society->name);
+            // Two societies may share a name (Green Valley in two cities): the address of each (slug, subdomain) must still be unique, so a
+            // taken one gets a numeric suffix instead of failing the registration with a database error.
+            $original = $society->slug ?: $society->name;
+            $slug = static::uniqueSlug((string) $original);
+            if (!empty($society->subdomain) && Str::slug((string) $society->subdomain) === Str::slug((string) $original)) {
+                $society->subdomain = $slug;
             }
+            $society->slug = $slug;
         });
+    }
+
+    /** A slug (also usable as the subdomain) that no other society holds, as slug or as subdomain. */
+    public static function uniqueSlug(string $name, ?int $ignoreId = null): string
+    {
+        $base = Str::slug($name) ?: 'society';
+        $candidate = $base;
+        for ($i = 2; static::slugTaken($candidate, $ignoreId); $i++) {
+            $candidate = $base . '-' . $i;
+        }
+
+        return $candidate;
+    }
+
+    private static function slugTaken(string $slug, ?int $ignoreId): bool
+    {
+        return static::query()
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->where(fn ($q) => $q->where('slug', $slug)->orWhere('subdomain', $slug))
+            ->exists();
     }
 
     // Relationships
@@ -333,7 +358,8 @@ class Society extends Model
             throw new \Exception('No admin assigned to this society.');
         }
 
-        $this->admin->update(['password' => bcrypt($newPassword)]);
+        // the one shared path: new password, this admin's API tokens deleted, remember token cycled (nobody else is touched)
+        app(\App\Services\AdminPasswordResetService::class)->reset($this->admin, $newPassword);
     }
 
     public function getLogoUrlAttribute(): string

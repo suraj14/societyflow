@@ -31,7 +31,7 @@
     @endif
 
     <!-- Statistics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-6 mb-4">
         <div class="bg-white overflow-hidden shadow-md rounded-lg">
             <div class="p-5">
                 <div class="flex items-center">
@@ -53,7 +53,7 @@
                         <i class="fas fa-clock text-yellow-600"></i>
                     </div>
                     <div class="ml-4">
-                        <p class="text-sm font-medium text-gray-500">Pending</p>
+                        <p class="text-sm font-medium text-gray-500" title="Waiting for the office to approve or reject the request. This is not about payment.">Pending Approval</p>
                         <p class="text-xl font-bold text-gray-900">{{ $stats['pending'] }}</p>
                     </div>
                 </div>
@@ -101,7 +101,32 @@
                 </div>
             </div>
         </div>
+
+        <div class="bg-white overflow-hidden shadow-md rounded-lg">
+            <div class="p-5">
+                <div class="flex items-center">
+                    <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-ban text-gray-600"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-500">Cancelled</p>
+                        <p class="text-xl font-bold text-gray-900">{{ $stats['cancelled'] }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <div class="mb-3 inline-flex flex-wrap items-center gap-2 px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-900">
+        <i class="fas fa-rupee-sign"></i>
+        <span><strong>Payment Pending:</strong> {{ $stats['awaiting_count'] }} {{ \Illuminate\Support\Str::plural('booking', $stats['awaiting_count']) }} &middot; <strong>₹{{ number_format($stats['awaiting_amount'], 2) }}</strong></span>
+        <span class="text-yellow-700">approved or completed, with a charge, and no payment recorded yet (cancelled and rejected bookings are not counted)</span>
+    </div>
+    <p class="text-sm text-gray-600 mb-6">
+        Payments recorded as received: <strong>₹{{ number_format($stats['received_amount'], 2) }}</strong>
+        @if($stats['refunded_amount'] > 0) &middot; refunded ₹{{ number_format($stats['refunded_amount'], 2) }}@endif
+        &middot; approved bookings still awaiting payment: <strong>₹{{ number_format($stats['awaiting_amount'], 2) }}</strong> <span class="text-gray-500">(owed to the society - not income until a payment is recorded)</span>
+    </p>
 
     <!-- Filters -->
     <div class="bg-white rounded-lg shadow-md p-4 mb-6">

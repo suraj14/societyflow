@@ -58,9 +58,7 @@ Route::middleware('guest')->group(function () {
 Route::post('/logout', [App\Http\Controllers\AuthController::class, 'logout'])->name('logout')->middleware('auth');
 
 // GET logout fallback - redirect to login page
-Route::get('/logout', function () {
-    return redirect()->route('login');
-});
+Route::match(['get', 'head'], '/logout', \Illuminate\Routing\RedirectController::class)->defaults('destination', '/login')->defaults('status', 302);
 
 // Return from an impersonated admin session. Deliberately NOT under
 // role:Super Admin - the active session holds the borrowed admin's role
@@ -226,9 +224,7 @@ Route::prefix('tenant')->name('tenant.')->middleware(['auth', 'role:Tenant'])->g
 
 // Staff Dashboard
 Route::prefix('staff')->name('staff.')->middleware(['auth'])->group(function () {
-    Route::get('/dashboard', function () {
-        return view('staff.dashboard');
-    })->name('dashboard');
+    Route::view('/dashboard', 'staff.dashboard')->name('dashboard');
 });
 
 // Society Management Routes (Admin & Super Admin only) - RESTRICTED FOR STAFF
@@ -275,7 +271,7 @@ Route::middleware(['auth', 'role:Super Admin|Admin|Society Admin', 'restrict.sta
 // been able to save a resident. Naming this route residents.index (with
 // index excluded from the resource above) keeps route('residents.index')
 // working while matching only GET|HEAD.
-Route::get('/residents', fn () => redirect('/owners'))
+Route::match(['get', 'head'], '/residents', \Illuminate\Routing\RedirectController::class)->defaults('destination', '/owners')->defaults('status', 302)
     ->middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])
     ->name('residents.index');
 
@@ -295,6 +291,8 @@ Route::middleware(['auth', 'role:Super Admin|Admin|Society Admin', 'restrict.sta
 
 // Payment Management Routes (Admin can manage all, others see own) - RESTRICTED FOR STAFF
 Route::middleware(['auth', 'restrict.staff'])->group(function () {
+    // before the resource: otherwise /payments/export is read as /payments/{payment}
+    Route::get('payments/export', [PaymentController::class, 'export'])->name('payments.export');
     Route::resource('payments', PaymentController::class);
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt'])->name('payments.receipt');
     Route::post('payments/{payment}/approve', [PaymentController::class, 'approve'])->name('payments.approve');
@@ -351,6 +349,8 @@ Route::middleware(['auth'])->group(function () {
     Route::resource('facility-bookings', FacilityBookingController::class);
     Route::get('facility-bookings/{facility_booking}/edit-status', [FacilityBookingController::class, 'editStatus'])->name('facility-bookings.edit-status');
     Route::put('facility-bookings/{facility_booking}/update-status', [FacilityBookingController::class, 'updateStatus'])->name('facility-bookings.update-status');
+    Route::post('facility-bookings/{facility_booking}/payment', [FacilityBookingController::class, 'recordPayment'])->name('facility-bookings.record-payment');
+    Route::post('facility-bookings/{facility_booking}/refund', [FacilityBookingController::class, 'recordRefund'])->name('facility-bookings.record-refund');
 });
 
 // Visitor Management Routes (Admin, Owners, Staff)
@@ -371,6 +371,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('notices-pending', [NoticeController::class, 'pending'])->name('notices.pending');
     Route::get('notices-history', [NoticeController::class, 'history'])->name('notices.history');
     Route::post('notices/{notice}/approve', [NoticeController::class, 'approve'])->name('notices.approve');
+    Route::post('notices/{notice}/resend', [NoticeController::class, 'resend'])->name('notices.resend');
     Route::post('notices/{notice}/reject', [NoticeController::class, 'reject'])->name('notices.reject');
 });
 
@@ -380,6 +381,7 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     // Message Templates: SMS | WhatsApp | Email tabs. SMS templates are created and edited here; WhatsApp ones come from
     // Fast2SMS; email templates keep their own editor (linked from the Email tab).
     Route::get('message-templates', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'index'])->name('admin.message-templates.index');
+    Route::get('message-templates/sms/audience-preview', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'audiencePreview'])->name('admin.message-templates.sms.audience-preview');
     Route::get('message-templates/sms/create', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'createSms'])->name('admin.message-templates.sms.create');
     Route::post('message-templates/sms', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'storeSms'])->name('admin.message-templates.sms.store');
     Route::get('message-templates/sms/{smsTemplate}/edit', [App\Http\Controllers\Admin\MessageTemplatesController::class, 'editSms'])->name('admin.message-templates.sms.edit');
@@ -433,6 +435,7 @@ Route::middleware(['auth', 'role:Super Admin|Admin', 'restrict.staff'])->group(f
     Route::prefix('admin')->name('admin.')->group(function () {
         Route::resource('email-templates', App\Http\Controllers\Admin\EmailTemplateController::class);
         Route::post('email-templates/initialize', [App\Http\Controllers\Admin\EmailTemplateController::class, 'initializeDefaults'])->name('email-templates.initialize');
+        Route::post('email-templates/{emailTemplate}/customise', [App\Http\Controllers\Admin\EmailTemplateController::class, 'customise'])->name('email-templates.customise');
         Route::post('email-templates/{emailTemplate}/test', [App\Http\Controllers\Admin\EmailTemplateController::class, 'test'])->name('email-templates.test');
         
         // Email Logs Management
@@ -609,6 +612,35 @@ Route::middleware(['auth', 'role:Super Admin|Admin|Accountant', 'restrict.staff'
     Route::resource('expenses', App\Http\Controllers\ExpenseController::class);
 });
 
+// Festival & Celebrations: Admin plans and settles, Accountant records money, residents see published festivals and may pledge
+// a voluntary contribution. Staff and Guard have no part in it. Every action re-checks society and role in FestivalController.
+Route::middleware(['auth', 'role:Super Admin|Admin|Accountant|Apartment Owner|Villa Owner|Tenant'])->prefix('festivals')->name('festivals.')->group(function () {
+    $c = App\Http\Controllers\FestivalController::class;
+    Route::get('/', [$c, 'index'])->name('index');
+    Route::get('/create', [$c, 'create'])->name('create');
+    Route::post('/', [$c, 'store'])->name('store');
+    Route::get('/{festival}', [$c, 'show'])->name('show');
+    Route::get('/{festival}/edit', [$c, 'edit'])->name('edit');
+    Route::put('/{festival}', [$c, 'update'])->name('update');
+    Route::post('/{festival}/publish', [$c, 'publish'])->name('publish');
+    Route::post('/{festival}/cancel', [$c, 'cancel'])->name('cancel');
+    Route::post('/{festival}/duplicate', [$c, 'duplicate'])->name('duplicate');
+    Route::post('/{festival}/budget', [$c, 'addBudgetItem'])->name('budget.add');
+    Route::delete('/{festival}/budget/{item}', [$c, 'removeBudgetItem'])->name('budget.remove');
+    Route::post('/{festival}/members', [$c, 'addMember'])->name('members.add');
+    Route::delete('/{festival}/members/{member}', [$c, 'removeMember'])->name('members.remove');
+    Route::post('/{festival}/updates', [$c, 'addUpdate'])->name('updates.add');
+    Route::post('/{festival}/pledge', [$c, 'pledge'])->name('pledge');
+    Route::post('/{festival}/contributions', [$c, 'recordReceipt'])->name('contributions.record');
+    Route::post('/{festival}/contributions/{contribution}/receive', [$c, 'receivePledge'])->name('contributions.receive');
+    Route::post('/{festival}/contributions/{contribution}/cancel', [$c, 'cancelContribution'])->name('contributions.cancel');
+    Route::post('/{festival}/contributions/{contribution}/refund', [$c, 'refundContribution'])->name('contributions.refund');
+    Route::post('/{festival}/expenses', [$c, 'storeExpense'])->name('expenses.store');
+    Route::post('/{festival}/expenses/{expense}/{action}', [$c, 'expenseAction'])->where('action', 'submit|approve|reject|pay|cancel')->name('expenses.action');
+    Route::get('/{festival}/expenses/{expense}/invoice', [$c, 'invoice'])->name('expenses.invoice');
+    Route::post('/{festival}/settle', [$c, 'settle'])->name('settle');
+    Route::get('/{festival}/report/{format?}', [$c, 'report'])->where('format', 'html|pdf|csv')->name('report');
+});
 // Events Routes (All authenticated users)
 Route::middleware(['auth'])->group(function () {
     // Specific routes must come BEFORE resource route to avoid conflicts

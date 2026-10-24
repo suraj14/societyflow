@@ -452,7 +452,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        fetch(`/api/owners/buildings?society_id=${societyId}`)
+        fetch(`{{ url('/') }}/api/owners/buildings?society_id=${societyId}`)
             .then(response => {
                 console.log('Buildings response status:', response.status);
                 return response.json();
@@ -489,7 +489,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        fetch(`/api/owners/floors?building_id=${buildingId}`)
+        fetch(`{{ url('/') }}/api/owners/floors?building_id=${buildingId}`)
             .then(response => {
                 console.log('Floors response status:', response.status);
                 return response.json();
@@ -526,7 +526,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        fetch(`/api/owners/flats?building_id=${buildingId}&floor=${floor}`)
+        fetch(`{{ url('/') }}/api/owners/flats?building_id=${buildingId}&floor=${floor}`)
             .then(response => {
                 console.log('Flats response status:', response.status);
                 return response.json();
@@ -564,7 +564,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        fetch(`/api/owners/villa-areas?society_id=${societyId}`)
+        fetch(`{{ url('/') }}/api/owners/villa-areas?society_id=${societyId}`)
             .then(response => {
                 console.log('Villa areas response status:', response.status);
                 return response.json();
@@ -600,7 +600,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        fetch(`/api/owners/villa-numbers?villa_area_id=${villaAreaId}`)
+        fetch(`{{ url('/') }}/api/owners/villa-numbers?villa_area_id=${villaAreaId}`)
             .then(response => {
                 console.log('Villa numbers response status:', response.status);
                 return response.json();

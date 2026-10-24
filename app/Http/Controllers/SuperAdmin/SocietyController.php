@@ -154,7 +154,9 @@ class SocietyController extends Controller
             'total_flats' => $society->flats()->count(),
             'total_residents' => $society->residents()->count(),
             'total_users' => $society->users()->count(),
-            'monthly_revenue' => $society->payments()->whereMonth('created_at', now()->month)->sum('amount'),
+            // this society's actual collections this month by the day the money arrived (it summed every status, owner rent and
+            // unrecorded payments, by the day the row was typed in)
+            'monthly_revenue' => \App\Services\FinancialReportService::societyCollections($society->id, ...\App\Services\FinancialReportService::currentMonthBounds($society->id))['amount'],
             'pending_complaints' => $society->complaints()->where('status', 'open')->count(),
             'active_facilities' => $society->facilities()->where('status', 'active')->count(),
             'trial_days_left' => $society->isOnTrial() ? $society->trial_ends_at->diffInDays(now()) : 0,
@@ -255,8 +257,8 @@ class SocietyController extends Controller
             // Update slug if name changed
             if ($society->wasChanged('name')) {
                 $society->update([
-                    'slug' => Str::slug($society->name),
-                    'subdomain' => Str::slug($society->name),
+                    'slug' => $slug = Society::uniqueSlug($society->name, $society->id),
+                    'subdomain' => $slug,
                 ]);
             }
 

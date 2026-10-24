@@ -17,6 +17,41 @@ use Illuminate\Http\Request;
 class PaymentController extends Controller
 {
     use HandlesFormSubmissions, AuthorizesSocietyAccess;
+    /**
+     * CSV of the society's payment records (optional ?status= & from= & to= on payment_date). Society-wide roles only (Admin,
+     * Accountant, Super Admin): a resident's own-records scoping lives in index() and is deliberately not duplicated here.
+     * Every row is exported as recorded, including pending / failed / unrecorded ones, with its status, so the file is a record of
+     * the ledger and not a claim about cash received. Cells that a spreadsheet would run as a formula are neutralised.
+     */
+    public function export(Request $request)
+    {
+        $user = auth()->user();
+        abort_unless($user->hasRole(['Super Admin', 'Admin', 'Accountant']), 403);
+        $data = $request->validate(['status' => 'nullable|in:pending,success,failed,cancelled', 'from' => 'nullable|date', 'to' => 'nullable|date|after_or_equal:from']);
+
+        $q = Payment::query()->with(['flat.building', 'flat.villaArea'])
+            ->when(!$user->hasRole('Super Admin'), fn ($q) => $q->where('society_id', $user->society_id))
+            ->when(!empty($data['status']), fn ($q) => $q->where('status', $data['status']))
+            ->when(!empty($data['from']), fn ($q) => $q->whereDate('payment_date', '>=', $data['from']))
+            ->when(!empty($data['to']), fn ($q) => $q->whereDate('payment_date', '<=', $data['to']))
+            ->orderBy('payment_date')->orderBy('id');
+
+        $safe = fn ($v) => is_string($v) && $v !== '' && in_array($v[0], ['=', '+', '-', '@', "\t", "\r"], true) ? "'" . $v : $v;
+
+        return response()->streamDownload(function () use ($q, $safe) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['Payment ID', 'Payment date', 'Unit', 'Bill type', 'Amount', 'Method', 'Status', 'Receipt number', 'Transaction reference', 'Notes']);
+            $q->chunkById(500, function ($rows) use ($out, $safe) {
+                foreach ($rows as $p) {
+                    $unit = $p->flat ? trim(($p->flat->building->name ?? $p->flat->villaArea->name ?? '') . ' ' . ($p->flat->flat_number ?? $p->flat->villa_name ?? '')) : '';
+                    fputcsv($out, array_map($safe, [$p->payment_id, optional($p->payment_date)->toDateString(), $unit, $p->bill_type, number_format((float) $p->amount, 2, '.', ''),
+                        $p->payment_method, $p->status, $p->receipt_number, $p->transaction_id, $p->notes]));
+                }
+            });
+            fclose($out);
+        }, 'payments-' . now()->format('Ymd') . '.csv', ['Content-Type' => 'text/csv']);
+    }
+
     public function index()
     {
         $user = auth()->user();
@@ -203,12 +238,14 @@ class PaymentController extends Controller
             }
         }
 
-        $stats = [
-            'total_amount' => $statsQuery->sum('amount'),
-            'total_count' => $statsQuery->count(),
-            'this_month_amount' => (clone $statsQuery)->where('created_at', '>=', \App\Support\SocietyClock::monthBounds()[0])->sum('amount'),
-            'today_amount' => (clone $statsQuery)->where('created_at', '>=', \App\Support\SocietyClock::dayBounds()[0])->sum('amount'),
-        ];
+        // "Total Collected" used to be SUM(amount) over every row - pending, failed and cancelled ones, owner rent, payments
+        // with no evidence of receipt - and "This Month" / "Today" used the day the row was typed in, not the day the money
+        // arrived. The same classification as the Financial Report now decides (FinancialReportService::paymentSummary):
+        // the society sees what the society actually received; a resident sees what they paid.
+        $residentView = $user->hasAnyRole(['Tenant', 'Villa Owner', 'Apartment Owner', 'Owner'])
+            && !$user->hasAnyRole(['Admin', 'Super Admin', 'Accountant']);
+        $stats = app(\App\Services\FinancialReportService::class)->paymentSummary($statsQuery, !$residentView);
+        $stats['society_view'] = !$residentView;
         
         return view('payments.index', compact('payments', 'stats'));
     }
@@ -597,7 +634,15 @@ class PaymentController extends Controller
     {
         $this->authorizePaymentWrite($payment);
 
-        \App\Models\ActivityLog::recordFor($payment, 'payment.deleted', ['amount' => (float) $payment->amount, 'status' => $payment->status, 'maintenance_bill_id' => $payment->maintenance_bill_id]);
+        // The row is removed, so the audit entry is the only record left of it: keep everything needed to reconstruct it (what
+        // was paid, how, when, against which bill / unit, and its references) - not just the amount. Before this the entry held
+        // three fields, and a deleted receipt could not be told apart from another.
+        \App\Models\ActivityLog::recordFor($payment, 'payment.deleted', [
+            'amount' => (float) $payment->amount, 'status' => $payment->status, 'maintenance_bill_id' => $payment->maintenance_bill_id,
+            'flat_id' => $payment->flat_id, 'bill_type' => $payment->bill_type, 'payment_method' => $payment->payment_method,
+            'payment_date' => $payment->payment_date?->toDateString(), 'receipt_number' => $payment->receipt_number,
+            'transaction_id' => $payment->transaction_id, 'gateway_transaction_id' => $payment->gateway_transaction_id, 'payment_id' => $payment->payment_id,
+        ]);
 
         // The Payment model's deleted hook re-derives the linked bill.
         $payment->delete();
@@ -809,7 +854,8 @@ class PaymentController extends Controller
                 return response()->json([]);
             }
 
-            $floors = \App\Models\Flat::where('building_id', $buildingId)
+            $floors = $this->lookupFlats()
+                ->where('building_id', $buildingId)
                 ->distinct()
                 ->pluck('floor')
                 ->filter()
@@ -836,7 +882,8 @@ class PaymentController extends Controller
                 return response()->json([]);
             }
 
-            $flats = \App\Models\Flat::where('building_id', $buildingId)
+            $flats = $this->lookupFlats()
+                ->where('building_id', $buildingId)
                 ->where('floor', $floor)
                 ->select('id', 'flat_number')
                 ->orderBy('flat_number')
@@ -886,7 +933,8 @@ class PaymentController extends Controller
                 return response()->json([]);
             }
 
-            $villas = \App\Models\Flat::where('villa_area_id', $villaAreaId)
+            $villas = $this->lookupFlats()
+                ->where('villa_area_id', $villaAreaId)
                 ->where('property_type', 'villa')
                 ->select('id', 'flat_number', 'villa_name')
                 ->orderBy('flat_number')
@@ -903,6 +951,21 @@ class PaymentController extends Controller
             \Log::error('Error loading villas: ' . $e->getMessage());
             return response()->json(['error' => 'Failed to load villas'], 500);
         }
+    }
+
+    /**
+     * Flats a dropdown lookup may list: the signed-in user's own society's, every society's for a Super Admin. The
+     * building / villa area id comes from the request, so on its own it would list any society's units.
+     */
+    private function lookupFlats()
+    {
+        $query = \App\Models\Flat::query();
+
+        if (!auth()->user()->hasRole('Super Admin')) {
+            $query->where('society_id', auth()->user()->society_id);
+        }
+
+        return $query;
     }
 
     /**

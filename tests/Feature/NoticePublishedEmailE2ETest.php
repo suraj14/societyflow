@@ -68,6 +68,7 @@ class NoticePublishedEmailE2ETest extends TestCase
             'type'    => 'general',
             'priority' => 'medium',
             'status'  => 'published',
+            'send_email' => 1,   // the box now decides the channel (see NoticeChannelChoiceAndResendTest)
         ])->assertRedirect(route('notices.index'));
 
         $notice = Notice::where('title', 'Water Supply Interruption')->firstOrFail();

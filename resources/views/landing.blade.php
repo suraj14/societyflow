@@ -265,7 +265,7 @@
     </section>
 
 
-    <!-- User Roles & Demo Credentials Section -->
+    <!-- User Roles Section -->
     <section class="py-20 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16">
@@ -332,166 +332,19 @@
                 </div>
             </div>
 
-            <!-- Demo Credentials Section -->
-            <div class="bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl p-8 text-white">
-                <h3 class="text-2xl font-bold mb-8 text-center">Try SocietyFlow Now - Demo Credentials</h3>
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <!-- Super Admin -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-purple-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-crown text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Super Admin</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">superadmin@societyflow.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Manage all societies and global settings</p>
-                        </div>
-                    </div>
-
-                    <!-- Admin 1 -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-blue-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-user-tie text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Admin</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">admin@societyflow.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Manage single society</p>
-                        </div>
-                    </div>
-
-                    <!-- Admin 2 -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-blue-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-user-tie text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Admin 2</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">sahgunvilla@gmail.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Villa community management</p>
-                        </div>
-                    </div>
-
-                    <!-- Admin 3 -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-blue-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-user-tie text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Admin 3</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">mohallal@gmail.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Apartment complex management</p>
-                        </div>
-                    </div>
-
-                    <!-- Tenant -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-yellow-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-key text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Tenant</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">tenant@example.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password123</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Rented property access</p>
-                        </div>
-                    </div>
-
-                    <!-- Villa Owner -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-pink-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-home text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Villa Owner</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">urbanvilla@gmail.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password123</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Villa property management</p>
-                        </div>
-                    </div>
-
-                    <!-- Apartment Owner -->
-                    <div class="bg-white/10 backdrop-blur-sm rounded-xl p-6 border border-white/20">
-                        <div class="flex items-center mb-4">
-                            <div class="w-10 h-10 bg-pink-400 rounded-lg flex items-center justify-center">
-                                <i class="fas fa-building text-white"></i>
-                            </div>
-                            <h4 class="ml-3 font-semibold text-lg">Apt Owner</h4>
-                        </div>
-                        <div class="space-y-3 text-sm">
-                            <div>
-                                <p class="text-white/70">Email:</p>
-                                <p class="font-mono text-white break-all">ubapartment@gmail.com</p>
-                            </div>
-                            <div>
-                                <p class="text-white/70">Password:</p>
-                                <p class="font-mono text-white">password123</p>
-                            </div>
-                            <p class="text-white/60 text-xs pt-2">Apartment property management</p>
-                        </div>
+            <!-- Get started -->
+            <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 px-8 py-14 text-center text-white shadow-xl">
+                <div class="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-white/10 blur-2xl"></div>
+                <div class="pointer-events-none absolute -bottom-28 -left-16 h-72 w-72 rounded-full bg-sky-300/20 blur-2xl"></div>
+                <div class="relative">
+                    <h3 class="text-3xl font-bold tracking-tight md:text-4xl">Ready to bring your society together?</h3>
+                    <p class="mx-auto mt-3 max-w-2xl text-lg text-violet-100">Set up your society in minutes. Residents get one simple app; the committee gets clear records.</p>
+                    <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                        <a href="{{ route('register') }}" class="inline-flex items-center rounded-xl bg-white px-7 py-3 font-semibold text-violet-700 shadow-lg transition hover:bg-violet-50">Create an account <i class="fas fa-arrow-right ml-2 text-sm"></i></a>
+                        <a href="{{ route('login') }}" class="inline-flex items-center rounded-xl border border-white/40 px-7 py-3 font-semibold text-white transition hover:bg-white/10">Sign in</a>
                     </div>
                 </div>
-
-                <div class="mt-8 text-center">
-                    <a href="{{ route('login') }}" class="inline-block px-8 py-3 bg-white text-purple-600 rounded-lg font-semibold hover:bg-gray-100 transition-colors">
-                        Login with Demo Credentials
-                    </a>
-                </div>
-            </div>
-        </div>
+            </div>        </div>
     </section>
     <section id="pricing" class="py-20 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

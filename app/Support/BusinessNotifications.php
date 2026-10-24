@@ -92,6 +92,42 @@ class BusinessNotifications
             // the office's own note when there is one, else what changed - both real data, never invented text
             'complaint_update' => trim((string) ($complaint->resolution_notes ?? '')) !== '' ? trim((string) $complaint->resolution_notes) : "Status changed to {$status}",
         ]);
+        self::sms('complaint', 'ticket_updated', [$creator], $complaint->society_id, fn ($u) => [
+            'complaint_ref' => (string) ($complaint->complaint_number ?? $complaint->id), 'complaint_status' => $status,
+        ], "complaint:{$complaint->id}:{$complaint->status}");
+    }
+
+    /**
+     * SMS for a business event. Goes out ONLY through the society's active SMS template for that purpose, and only if that template
+     * carries a Fast2SMS Message ID: with no approved template there is nothing to send, and a free-text Quick SMS is never
+     * substituted. Each recipient's values must fit the registered DLT slots (type, length) or that one message is skipped and the
+     * reason is logged - a malformed SMS is never sent. Never throws into the business action.
+     *
+     * @param iterable<User> $users
+     */
+    private static function sms(string $purpose, string $rule, iterable $users, ?int $societyId, \Closure $values, string $dedupe): void
+    {
+        self::guard(function () use ($purpose, $rule, $users, $societyId, $values, $dedupe) {
+            if ($societyId === null || !NotificationRules::isEnabled($rule, 'sms', (int) $societyId)) {
+                return;
+            }
+            $template = \App\Models\SmsTemplate::forPurpose((int) $societyId, $purpose);
+            if (!$template || trim((string) $template->dlt_message_id) === '') {
+                return;
+            }
+            foreach ($users as $user) {
+                $phone = \App\Services\SmsService::normalizePhone((string) $user->phone);
+                if ($phone === '' || (int) $user->society_id !== (int) $societyId) {
+                    continue;
+                }
+                $v = $values($user);
+                if ($problems = DltTemplates::valueProblems($purpose, $v)) {
+                    \App\Services\SmsService::recordSkipped('notification', $phone, (int) $societyId, "{$purpose} SMS not sent: " . implode('; ', $problems));
+                    continue;
+                }
+                \App\Services\SmsService::sendDltNotification('notification', $phone, '', (int) $societyId, false, $purpose, $v);
+            }
+        });
     }
 
     /** A complaint was assigned to someone: tell them it is theirs (not when they assigned it to themselves). Never throws. */
@@ -190,6 +226,13 @@ class BusinessNotifications
         $period = $month && ($bill->year ?? null)
             ? (is_numeric($month) ? Carbon::create((int) $bill->year, (int) $month, 1)->format('F Y') : trim("{$month} {$bill->year}"))
             : '';
+        // the registered text names the bill and its month ("Maintenance October 2026") and a whole-rupee amount
+        $whole = (float) ($bill->total_amount ?? $bill->amount ?? 0);
+        self::sms('bill', 'bill_generated', $residents, $bill->society_id, fn ($u) => [
+            'bill_label' => trim(ucfirst((string) ($bill->bill_type ?? 'maintenance')) . ' ' . $period),
+            // a whole-rupee amount, digits only: paise are not sent on a slot that only takes digits (the message is skipped, and says so)
+            'amount_plain' => floor($whole) == $whole ? (string) (int) $whole : '',
+        ], "bill:{$bill->id}");
         self::whatsapp('bill', $residents, $bill->society_id, fn ($u) => [
             'resident_name' => $u->name, 'amount' => $amount, 'due_date' => $due, 'bill_ref' => $bill->bill_number ?? (string) $bill->id,
             'amount_number' => number_format((float) ($bill->total_amount ?? $bill->amount ?? 0), 2),

@@ -19,13 +19,31 @@ class AuthApiController extends Controller
             'password' => 'required|string',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        // Same failed-password lockout as the web login (App\Support\LoginThrottle). 429 + Retry-After; the app shows the message.
+        if ($seconds = \App\Support\LoginThrottle::lockedFor($request)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Too many login attempts. Please try again in {$seconds} seconds.",
+                'retry_after' => $seconds,
+            ], 429)->header('Retry-After', (string) $seconds);
+        }
+
+        $user = User::whereEmail($request->email)->first();
+
+        if (!$user) {
+            // no account to check: spend the same time a wrong password does, so an unknown address does not answer faster
+            \App\Support\LoginThrottle::spendPasswordCheck($request->password);
+        }
 
         if (!$user || !Hash::check($request->password, $user->password)) {
+            \App\Support\LoginThrottle::fail($request);
+
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
+
+        \App\Support\LoginThrottle::clear($request);
 
         if ($user->status !== 'active') {
             return response()->json([
@@ -69,7 +87,7 @@ class AuthApiController extends Controller
 
         // Email AND phone must both match. The old phone-only fallback let
         // anyone enumerate name/email/flat/society from a phone number.
-        $user = User::where('email', $request->email)
+        $user = User::whereEmail($request->email)
             ->where('phone', $request->phone)
             ->first();
 
@@ -140,7 +158,7 @@ class AuthApiController extends Controller
         // Email AND phone must both match the pre-created account.
         // No phone-only fallback: that allowed taking over any account
         // knowing just a phone number.
-        $user = User::where('email', $request->email)
+        $user = User::whereEmail($request->email)
             ->where('phone', $request->phone)
             ->first();
 

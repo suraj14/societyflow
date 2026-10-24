@@ -153,7 +153,7 @@ class RentController extends BaseController
                 $receiptFilePath = null;
                 if ($request->hasFile('payment_proof')) {
                     $file = $request->file('payment_proof');
-                    $fileName = 'rent_payment_' . $rent->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+                    $fileName = \App\Support\SafeUploadName::make($file, 'rent_payment', $rent->id, ['jpg', 'png', 'pdf'], 'payment_proof');
                     $receiptFilePath = $file->storeAs('payment_receipts', $fileName, 'public');
                 }
 
@@ -215,6 +215,13 @@ class RentController extends BaseController
                 $query->where('status', 'active')->with('user');
             }])
             ->get();
+
+        // The unit this rent is ON must always be an option, and the selected one. A unit whose tenant has since moved out
+        // or been moved to another unit has no active tenant, so it was missing from this list: nothing was pre-selected,
+        // the browser forced a different pick, and saving silently re-pointed the rent at that other unit.
+        if ($rent->flat && !$tenantFlats->contains('id', $rent->flat_id)) {
+            $tenantFlats->prepend($rent->flat);
+        }
         
         return view('admin.rents.edit', compact('rent', 'tenantFlats'));
     }
@@ -241,8 +248,10 @@ class RentController extends BaseController
         // ledger row the status is then computed from. The edit form used to
         // accept status=paid and set paid_amount to the total with no payment
         // behind it.
+        // The rent's society is the record's own, never the caller's (Super Admin has none).
         $request->validate([
-            'flat_id' => ['required', Rule::exists('flats', 'id')->where('society_id', $this->getSocietyId())],
+            // Optional: omitted or unchanged means "stay on this unit". Moving a rent to another unit is a deliberate act.
+            'flat_id' => ['nullable', 'integer', Rule::exists('flats', 'id')->where('society_id', $rent->society_id)],
             'rent_amount' => 'required|numeric|min:1',
             'bill_date' => 'required|date',
             'due_date' => 'required|date|after_or_equal:bill_date',
@@ -253,6 +262,28 @@ class RentController extends BaseController
             return back()->withErrors(['rent_amount' => 'Rent amount cannot be less than the ₹' . number_format($rent->paid_amount, 2) . ' already paid against this record.'])->withInput();
         }
 
+        $originalFlatId = (int) $rent->flat_id;
+        $targetFlatId = $request->filled('flat_id') ? (int) $request->flat_id : $originalFlatId;
+        $relocating = $targetFlatId !== $originalFlatId;
+
+        if ($relocating) {
+            // A deliberate move, checked like a new rent: a unit of this society with an active tenant, no rent bill for
+            // that month already, and no payments that would be left pointing at the old unit.
+            $moveError = null;
+            $target = Flat::where('id', $targetFlatId)->where('society_id', $rent->society_id)->first();
+            if (!$target || !$target->tenants()->where('status', 'active')->exists()) {
+                $moveError = 'The selected unit is not available for rent: it needs an active tenant.';
+            } elseif ($rent->payments()->exists()) {
+                $moveError = 'This rent already has payments recorded against ' . ($rent->flat?->flat_number ?? 'its unit') . '. Its unit cannot be changed; the payment history would no longer match.';
+            } elseif (MaintenanceBill::where('flat_id', $targetFlatId)->where('bill_type', 'rent')->where('id', '!=', $rent->id)
+                ->whereMonth('bill_date', Carbon::parse($request->bill_date)->month)->whereYear('bill_date', Carbon::parse($request->bill_date)->year)->exists()) {
+                $moveError = 'A rent bill already exists for the selected unit in that month.';
+            }
+            if ($moveError) {
+                return back()->withErrors(['flat_id' => $moveError])->withInput();
+            }
+        }
+
         DB::beginTransaction();
         try {
             $billDate = Carbon::parse($request->bill_date);
@@ -260,7 +291,7 @@ class RentController extends BaseController
             // paid_amount is untouched; the model recomputes balance and
             // status from it on save.
             $rent->update([
-                'flat_id' => $request->flat_id,
+                'flat_id' => $targetFlatId,
                 'month' => $billDate->format('F'),
                 'year' => $billDate->year,
                 'maintenance_amount' => $request->rent_amount,
@@ -270,6 +301,10 @@ class RentController extends BaseController
                 'notes' => $request->description ?? 'Monthly Rent',
             ]);
             
+            if ($relocating) {
+                \App\Models\ActivityLog::recordFor($rent, 'rent.unit_changed', ['flat_id' => $targetFlatId], ['flat_id' => $originalFlatId]);
+            }
+
             DB::commit();
             
             return redirect()->route('admin.rents.index')
@@ -485,7 +520,7 @@ class RentController extends BaseController
             $receiptFilePath = null;
             if ($request->hasFile('payment_proof')) {
                 $file = $request->file('payment_proof');
-                $fileName = 'rent_payment_' . $rent->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+                $fileName = \App\Support\SafeUploadName::make($file, 'rent_payment', $rent->id, ['jpg', 'png', 'pdf'], 'payment_proof');
                 $receiptFilePath = $file->storeAs('payment_receipts', $fileName, 'public');
             }
 

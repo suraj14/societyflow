@@ -82,10 +82,9 @@ class DispatchEventNotification implements ShouldQueue, ShouldBeUnique, ShouldBe
             return;
         }
 
-        $alreadySent = EmailLog::where('notification_key', $this->notificationKey)
-            ->where('channel', 'email')
-            ->where('status', 'sent')
-            ->exists();
+        // only a send that a mail server really accepted counts: an old log-only "sent" row (see EmailLog::HONEST_STATUS_SINCE) must not
+        // silence the notification forever, which is how a resident of an already-"notified" notice never got its e-mail
+        $alreadySent = EmailLog::deliveredFor($this->notificationKey)->exists();
 
         if ($alreadySent) {
             Log::info('Notification already delivered, skipping', [
@@ -113,7 +112,8 @@ class DispatchEventNotification implements ShouldQueue, ShouldBeUnique, ShouldBe
             ->latest('id')
             ->first();
 
-        if ($logged && $logged->status === 'failed') {
+        // a row that was deliberately skipped (invalid address, inactive account) is final: retrying cannot change it
+        if ($logged && $logged->status === 'failed' && !$logged->isSkipped()) {
             throw new \RuntimeException('Email send failed: ' . ($logged->error_message ?? 'unknown error'));
         }
     }

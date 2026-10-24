@@ -2,8 +2,49 @@
 
 Update this after every major task. Keep it short; link, don't paste.
 
-**Last updated:** 2026-10-11 (complete web audit and repair)
+**Last updated:** 2026-10-23 (security hardening, OTP migration applied locally, CloudPanel deployment tooling)
 
+## 2026-10-23 - security hardening, OTP migration, PHP upgrade prep, CloudPanel deployment tooling (UNCOMMITTED)
+
+Working tree on `production-readiness` (HEAD 3787ceb); nothing committed, deployed or sent; the live server was never contacted. Evidence and verdict: [RELEASE_READINESS_2026-10-23.md](RELEASE_READINESS_2026-10-23.md) (**NO-GO for production**). Items: [TODO.md](TODO.md) P1-132..P1-141.
+- **Security fixed (with tests):** failed-password lockout on the app's login (it had none; now shared with the web login, 429 + `retry_after`); timing difference between unknown and known e-mails; stored XSS in the events calendar and the e-mail template pages; script-in-JSON hardening; rent receipt uploads no longer take the client's file extension; unit dropdown lookups no longer list other societies.
+- **OTP migration `2026_10_22_000001` applied to the local dev SQLite database** after a verified backup (`C:\Users\USER\SocietyFlow-backups\database-pre-migrate-otp-account-20261023-180014.sqlite`) and an up/down/up rehearsal; account-bound reset OTP behaviour proven over real HTTP on a scratch DB (20/20).
+- **PHP 8.2.35: NOT upgraded** - `G:\xampp\php-8.2.35` is empty. Pre-flight script, runbook and config backups are ready ([PHP_UPGRADE_RUNBOOK.md](PHP_UPGRADE_RUNBOOK.md)). Apache serves PHP 8.2.12.
+- **Tests (final code):** SQLite 2,559 tests / 15,151 assertions / 0 failures / 0 errors / 6 skipped, 8/8 exit 0. MariaDB 10.4.32 (temporary instance :3307; the XAMPP MariaDB on :3306 is hung and was left untouched): 2,559 / 15,150 / 0 / 0 / 3 skipped, 8/8 exit 0.
+- **Deployment tooling (CloudPanel):** `scripts/deploy/` + [DEPLOYMENT_CLOUDPANEL.md](DEPLOYMENT_CLOUDPANEL.md): validated local package builder, read-only server inspection, verified DB backup, dry-run-first apply, code rollback. Tested on a scratch copy including a mid-way failure and a rollback; **not run against CloudPanel**.
+- **Next:** answer the questions in DEPLOYMENT_CLOUDPANEL.md section 11; download PHP 8.2.35 (or skip); decide on a release commit / tag; run `inspect-server.sh` on the server.
+
+## 2026-10-22 - owner villa pickers, sign-in after a password change, reset mail, guard web layout (UNCOMMITTED)
+
+Working tree on `production-readiness`; nothing committed, deployed or sent. Full suite on the final code: **SQLite 2537 tests / 14987 assertions / 0 failures / 0 errors / 6 skipped, 8 of 8 shards exit 0; MariaDB 10.4.32 (throwaway, :3307) 2537 / 14986 / 0 / 0 / 3 skipped, 8 of 8 exit 0.** Flutter code unchanged this round (not re-run). The XAMPP MariaDB on :3306 stopped answering during the run (accepts connections, no handshake) - left untouched; the runner's default port 3307 is the throwaway. Items: [TODO.md](TODO.md) P1-124..P1-131, P2-64..P2-67.
+- Owner form's Villa Area / Villa No. pickers were empty on the Apache sub-folder install (root-relative URLs in 15 views) and saving the form wiped owner 19's villa. Fixed; owner 19 restored from the 21 Oct backup (villa area 7, villa 160). Unit lookups (owner form, Payments, Utility Bills) list only the user's own society.
+- Sign-in, forgot / reset password and OTP reset match the e-mail whatever its letter case (an account stored in capitals could not sign in even after an admin set its password).
+- A signed-out user's reset link goes through the account's society mail settings (it used the bare `.env` mailer, which Gmail refused); the kill switch checks the mailer actually used. **Real delivery not tested by the agent.**
+- Guard pages: web layout on laptops (sidebar, top bar, three-column lists), phone layout unchanged.
+- Test harness: switching users inside a test starts a fresh session - the cause of the 134 failures behind the earlier NO-GO. Real HTTP: 4 browsers x 8 rounds, 0 sign-outs.
+- **Dev site blocker:** migration `2026_10_22_000001` (nullable `mobile_otps.user_id` + index, no data change) is not applied to the dev DB, so OTP sign-in / reset fail there (web and phone) until it is. Needs a backup and the owner's OK.
+
+## 2026-10-21 - messaging made diagnosable and safe; public pages no longer publish logins (UNCOMMITTED)
+
+Working tree on `production-readiness`; nothing committed, deployed or sent. Full Laravel suite: **2402 tests / 14266 assertions / 0 failures / 0 errors / 6 skipped, 8 of 8 shards exit 0**. Flutter 265 pass (analysis = the 2 known infos), debug APK builds.
+- `php artisan messaging:status` (read-only, no secrets) explains why delivery is ON/OFF and where that comes from, the allow-list state, and each society's e-mail / SMS / WhatsApp configuration and mappings. See docs/LOCAL_MESSAGING_TESTING.md 2d.
+- Allow-list fails closed and matches exactly, on every route (SMTP, Fast2SMS, WhatsApp, BulkSMSPlans, custom SMS API). Statuses: Blocked (switch off / not allow-listed), Simulated, Sent (accepted, not delivered), Failed.
+- An SMS template carrying another notification's wording (society 6 "document" = bill text) is refused at save and at send.
+- Login page and landing page no longer list demo logins; **the live site may still accept those accounts - rotate them** (`php artisan users:rotate-weak-passwords`, owner decision).
+- Society 6 WhatsApp: every active mapping is a BookMizo template (blocked by design); the SocietyFlow templates are saved but switched off - an owner decision in Message Templates.
+- Real delivery has NOT been tested: needs the owner's test e-mail + phone, then an explicit confirmation of recipient / channel / template / preview.
+## 2026-10-16 - finance unification, rent-unit fix, festival module (UNCOMMITTED, full suite pending at time of writing)
+
+Working tree on `production-readiness`; nothing committed or deployed. **NOT YET RELEASED.** Details: [FINANCE_AND_FESTIVALS.md](FINANCE_AND_FESTIVALS.md).
+- Finance: one calculation layer (`FinancialReportService` + `Money`) now feeds the Financial Report/PDF, Maintenance report, Payments page, Admin + Accountant dashboards, mobile admin collections and Super Admin `monthly_revenue`. Facility income only from a recorded payment; payment/cancel race closed (guarded UPDATE in a transaction). `finance:reconcile` is read-only.
+- Rent: bill 45 (Sept 2026, Rs 10,000) is on flat 123 = **Villa 160**, which has no active tenant; the tenant lives on flat 131 = **Villa 159**. The edit page used to omit a unit with no active tenant, so saving re-pointed the rent. Fixed + 9 tests. **The record itself is NOT changed** - it needs your authorised correction (see the doc).
+- Festival & Celebrations module added (migration `2026_10_16_000001`, not applied to the dev DB).
+- Migrations `2026_10_15_000003` and `2026_10_16_000001` are NOT applied to the dev DB; back up first.
+## 2026-10-16 (later) - migrations applied to the DEV DB; messaging allow-list
+
+- Applied after a verified backup (C:\Users\USER\SocietyFlow-backups\database-pre-migrate-facility-festival-20261016-143412.sqlite, sha256 b438b573...f47a): 2026_10_15_000003 then 2026_10_16_000001. Row counts unchanged except the 6 new empty festival tables; payments, bills, bill 45, expenses and facility bookings identical; integrity ok, 0 FK violations. The 4 unpaid bookings (Rs 6,000) remain a receivable; no payment was created.
+- New: EXTERNAL_MESSAGING_ALLOWLIST (see docs/LOCAL_MESSAGING_TESTING.md 2a). Delivery is still OFF (.env unchanged).
+## 2026-10-16 (messaging) - template "send test" no longer logs a send that the kill switch suppressed.
 ## 2026-10-15 - Gate visitor approval (MyGate-style) + event notifications
 
 Committed on `production-readiness`. **READY FOR STAGING, NOT READY FOR PRODUCTION; REAL DELIVERY NOT TESTED.** Details: [SOCIETYFLOW_STABILIZATION.md](SOCIETYFLOW_STABILIZATION.md) Round 8; behaviour and event x channel table: [VISITOR_APPROVAL.md](VISITOR_APPROVAL.md).
@@ -2665,3 +2706,24 @@ Full record of what was modified, with ids, row counts, backups and rollback val
 
 **Release status: READY FOR STAGING, NOT READY FOR PRODUCTION.** Critical blockers: credential rotation (P1-89/P2-33), real-device Android run, delivery checks with approved recipients, MariaDB on the original XAMPP data dir.
 
+
+## 2026-10-21 evening - notice notification root causes (see docs/NOTIFICATION_MATRIX.md "Notice publication")
+- Verified: full suite 2425 tests / 14382 assertions / 0 failures / 0 errors / 6 skipped, 8/8 shards exit 0; Flutter 265 pass, analyze 2 info.
+- Fixed: stale pre-2026-10-17 "sent" e-mail rows no longer suppress a notice e-mail; SMS/WhatsApp test seams no longer bypass the allow-list. Test: `NoticeOwnerNotificationTest`.
+- Open: notice send-email/send-SMS checkboxes are not read by listeners (product decision); no active SocietyFlow WhatsApp `notice` template; SMS Message IDs 228126/228199 unverified (mobile forgot-password/login OTP depend on 228126).
+- Local `.env` now has EXTERNAL_MESSAGING_ENABLED=true with a 2-recipient allow-list (approved by the user); nothing has been sent.
+
+## 2026-10-21 night - pre-deployment audit round
+- Verified: full suite SQLite 2444 tests / 14478 assertions / 0 failures / 0 errors / 6 skipped (8/8 shards exit 0); MariaDB 10.4 (isolated `societyflow_test_N`) 2444 / 14477 / 0 / 0 / 3 skipped (8/8 exit 0). Flutter 265 pass, analyze 2 info. Android release APK builds (debug-signed, `com.example.societyflow`).
+- Notices: Send Email / Send SMS boxes honoured (default on for new, edit keeps saved, edit of a published notice sends nothing); admin "Send this notice again" (channels, confirm, token, audit log). WhatsApp unchanged (blocked).
+- Found on MariaDB: `email_logs.status` was still an ENUM -> new migration `2026_10_21_000001_widen_email_logs_status_on_mysql.php` (NOT applied to any dev/prod DB - awaiting approval; tested on a scratch MariaDB: rows identical, indexes kept).
+- Route closures replaced (`Api\HealthController`, `Route::view`, `RedirectController`): `route:cache` now succeeds (558 routes cached, cleared again).
+- Accounts on default passwords: docs/DEMO_ACCOUNTS.md (32; nothing changed).
+
+## 2026-10-21 late - dev migration applied, HTTP walkthrough
+- Dev SQLite: migration `2026_10_21_000001` applied (no-op on SQLite; only the `migrations` table gained a row). Verified backup first: `storage/backups/pre-migration-20261021-000001-20261021-204152.sqlite`, SHA-256 3FFA42224B3B73AE8694C6A617F24B0B769E8CE459D3E6FFD3D870DEDA650438, integrity ok, identical to live. Production NOT migrated.
+- Walkthrough (HTTP, on a throwaway copy of the dev DB, messaging off): 8 roles x 124 pages 0 server errors, 190 cross-society record probes 0 leaks, API 5 roles 0 server errors; notice publish/edit/resend verified. No browser DOM, no device.
+- Fast2SMS 228126/228199 still unverified: the app only has read-only lookups for WhatsApp, none for SMS DLT templates - needs the DLT panel text.
+
+## 2026-10-22 - defect-fix round
+- Full suites after all fixes: SQLite 2472/14633/0/0/6, MariaDB 10.4 2472/14632/0/0/3 (8/8 shards exit 0 each). Detail, defect register and blockers: docs/RELEASE_READINESS_2026-10-21.md. Verdict NOT READY (providers, device, MySQL 8, production config unverified).

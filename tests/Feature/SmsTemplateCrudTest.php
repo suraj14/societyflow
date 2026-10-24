@@ -124,7 +124,7 @@ class SmsTemplateCrudTest extends TestCase
             'name is required'                  => [['name' => ''], 'name', 'required'],
             'name is too long'                  => [['name' => str_repeat('x', 121)], 'name', '120'],
             'unknown type'                      => [['purpose' => 'new_bill'], 'purpose', 'invalid'],
-            'unknown recipient'                 => [['audience' => 'everyone'], 'audience', 'invalid'],
+            'unknown recipient'                 => [['audience' => 'everybody'], 'audience', 'invalid'],   // 'everyone' is now a real audience (Everyone in Society), so a different made-up value is used
             'unknown status'                    => [['status' => 'maybe'], 'status', 'invalid'],
             'body is required'                  => [['body' => ''], 'body', 'required'],
             'body is too long'                  => [['body' => str_repeat('a', 321)], 'body', '320'],

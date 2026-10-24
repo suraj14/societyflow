@@ -32,6 +32,12 @@ checked in a browser. Update after each task. Keep entries short.
 
 ## P1 — Important functionality
 
+- [ ] **Decision (owner): bill 45 / Villa 160 vs 159** - code fixed and tested (RentUnitMappingTest); the record itself needs your evidence + approval. See docs/FINANCE_AND_FESTIVALS.md.
+- [ ] **Provider verification (owner):** ZeptoMail sender `info@bookmizo.com` for Royal Eden; each DLT template -> Fast2SMS Message ID (complaint, bill, notice, OTP); WhatsApp SocietyFlow templates. Nothing here is verified against the live accounts.
+- [ ] **New approved templates needed before more notifications can exist:** SMS/WhatsApp for payment received, visitor request/approval, facility booking update/payment/refund, event announcement; e-mail for facility payment/refund and festival payment.
+- [ ] Manual bulk-send action for SMS audiences (not built; audiences + preview exist).
+- [ ] Mobile API / Flutter screens for festivals (not built).
+- [ ] Per-resident SMS/e-mail opt-out does not exist (only society-level channel settings).
 | # | Task | Module | Status | Relevant files | Tests required |
 |---|---|---|---|---|---|
 | P1-51 | 22 bills carried `paid_amount` with no payment row; tenant pending payments counted as paid; rent status dropdowns wrote `paid_amount` by hand. Ledger is now canonical (`MaintenanceBill::syncFromLedger`), approve/reject for pending payments, reconciliation migration + `data:integrity-audit` | Bills/Payments | done (verified: `BillLedgerConsistencyTest` 12, dev DB audited clean) | `MaintenanceBill`, `Payment`, `Admin\RentController`, `Tenant\RentController`, `PaymentController`, `App\Support\DataIntegrityRepair` | as listed |
@@ -293,3 +299,34 @@ Open:
 - P2-61 Push notifications to the apps (FCM client) so a resident is prompted without opening the app - **open** (known limitation).
 - P2-62 Delivery receipts (Fast2SMS) so "queued / accepted" can become "delivered" - **open** (same as P2-57).
 - P2-63 Staff role: web Allow / Deny buttons were removed for Staff (they check in / out only) - confirm that is the intended policy with the society.
+
+## 2026-10-22 owner form, sign-in, reset mail, guard web round (UNCOMMITTED)
+- P1-124 Owner form's Villa Area / Villa No. (and building / floor / flat) pickers empty on the Apache sub-folder install: 15 views built root-relative URLs (`fetch('/api/...')`, `'/payments/' + id`), plus the landing-site form's `/register` default - **done** (`SubfolderInstallUrlsTest` scans every view; Apache: old path 404, new path inside the app).
+- P1-125 Saving the owner form while the pickers were empty wiped the owner's unit (owner 19 lost villa 160) - **done** (blank pickers keep the unit; emptying the property type still clears it; `OwnerUnitPickerTest`). Owner 19 restored from the 21 Oct backup (`villa_area_id` 7, `villa_no` 160); no other owner differed from that backup.
+- P1-126 Unit lookups listed any society's units from a request id (owner form; Payments and Utility Bills pickers, which every signed-in role can call); owner update accepted another society's building / villa area - **done** (`OwnerUnitPickerTest`, `UnitLookupScopeTest`).
+- P1-127 Accounts whose e-mail is stored in capitals could not sign in, even right after an admin set a new password, and got no reset link: SQLite compares `email = ?` case-sensitively - **done** (provider `eloquent-ci`, `User::whereEmail()`; web, API, forgot / reset, OTP reset; `EmailCaseInsensitiveAuthTest`).
+- P1-128 Reset link for a signed-out user went through the bare `.env` mailer (placeholder sender, refused by Gmail) instead of the society's mail settings; the MessageSending kill switch looked only at the default mailer - **done** (`PasswordResetSocietyMailerTest`, fake transport). **Real delivery not tested** - the owner presses "Send reset link" themselves.
+- P1-129 Guard pages looked like the phone app on a laptop - **done**: web shell (sidebar, top bar, wide grid) from 768 px, phone layout below it; My Shift moved into the gate layout (`GuardWebLayoutTest`; screenshots 1440 / 540 px).
+- P1-130 Test harness: a test switching users kept one session, so `AuthenticateSession` signed the next user out (134 failing tests) - **done** (`tests/TestCase.php` `actingAs()` / `call()`; `AuthSessionRevocationTest` keeps its stale session with `be()`). Real-HTTP: 4 browsers x 8 rounds, 0 sign-outs.
+- P1-131 Utility Bills villa picker read `flats.villa_number`, which does not exist (SQLite listed the text "villa_number", MySQL refused the query) - **done** (`UnitLookupScopeTest`).
+- P2-64 CLAUDE.md section 2 says "there is no role named `Owner`"; the code and the dev DB use `Owner` as the canonical owner role (14 accounts, 0 Apartment / Villa Owner) - **owner decision**: correct the guide.
+- P2-65 `users.email` uniqueness is case-sensitive on SQLite: registration lower-cases, but admin-created users / owners keep the typed case, so two accounts can differ only by case - normalise on write or validate case-insensitively.
+- P2-66 Floor 0 (ground floor) is dropped by the Payments / Utility Bills floor and flat pickers (`->filter()`, `!$floor`); no ground-floor apartment exists in the dev data today.
+- P2-67 The repo shard runner (`scripts/run-test-shards.ps1`) points MariaDB at port 3307; the XAMPP MariaDB listens on 3306 (the session used a copy with 3306) - make the port a parameter.
+
+## 2026-10-23 security / deployment round
+- P1-132 API password login had no failed-attempt lockout - **done** (`App\Support\LoginThrottle`, shared with the web login; `LoginLockoutTest` 13, mutation-checked).
+- P1-133 Unknown e-mail answered faster than a wrong password (timing) - **done** (dummy hash check).
+- P1-134 Stored XSS: events calendar, e-mail template picker / preview / log page - **done** (`StoredXssOutputTest`).
+- P1-135 Rent payment proofs stored under the client-supplied extension - **done** (`SafeUploadName`, `UploadedReceiptNameTest`).
+- P1-136 OTP migration `2026_10_22_000001` applied to the LOCAL dev database (backup verified, rehearsed) - **done locally; production state UNKNOWN**, must be in the production run.
+- P1-137 Operator: download PHP 8.2.35 (VS16 x64 Thread Safe) into `G:\xampp\php-8.2.35`, run `scripts\php-upgrade-preflight.ps1`, follow `docs/PHP_UPGRADE_RUNBOOK.md` - **blocked** (folder empty; could not reach php.net to verify the release).
+- P1-138 CloudPanel deployment: run `inspect-server.sh`, answer DEPLOYMENT_CLOUDPANEL.md section 11, then dry run - **open** (live server never contacted).
+- P1-139 Add the Nginx rule that stops script files under `/storage/` executing (DEPLOYMENT_CLOUDPANEL.md section 7) - **open** (production vhost change; operator).
+- P1-140 `composer audit` could not run (packagist unreachable from this PC): run it where there is internet - **open**.
+- P2-68 `ext-gd` / `ext-zip` are disabled in the local `php.ini` (`composer check-platform-reqs` fails, exit 2); enable them in the new PHP's ini - **open**. They are required on the server.
+- P2-69 Laravel 10 is outside Laravel's security-support window and PHP 8.2 security support ends 31 Dec 2026; livewire 2, intervention/image 2, dompdf 2.0.8 are old - plan the framework / PHP upgrade - **open**.
+- P2-70 `maatwebsite/excel` is not used by application code but pulls in `gd`/`zip` - consider removing - **open**.
+- P2-71 The XAMPP MariaDB on :3306 is hung (accepts connections, no handshake); restart needs the owner's approval - **open**.
+- P2-72 A release commit / tag does not exist; the packages are `-dirty` builds of the working tree - needs approval (PRODUCTION_CHECKLIST.md section 6) - **open**.
+- P2-73 The dev `.env` has `EXTERNAL_MESSAGING_ENABLED=true`: the Apache dev site can send real messages to allow-listed addresses - confirm that is intended - **open**.

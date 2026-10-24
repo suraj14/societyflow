@@ -559,7 +559,7 @@ function resetDropdowns() {
 
 // Load buildings/towers
 function loadBuildings() {
-    fetch('/api/payments/buildings')
+    fetch('{{ url('/') }}/api/payments/buildings')
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to load buildings');
@@ -597,7 +597,7 @@ function loadFloors() {
     
     if (!buildingId) return;
     
-    fetch(`/api/payments/floors?building_id=${buildingId}`)
+    fetch(`{{ url('/') }}/api/payments/floors?building_id=${buildingId}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to load floors');
@@ -631,7 +631,7 @@ function loadFlats() {
     
     if (!buildingId || !floor) return;
     
-    fetch(`/api/payments/flats?building_id=${buildingId}&floor=${floor}`)
+    fetch(`{{ url('/') }}/api/payments/flats?building_id=${buildingId}&floor=${floor}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to load flats');
@@ -656,7 +656,7 @@ function loadFlats() {
 
 // Load villa areas
 function loadVillaAreas() {
-    fetch('/api/payments/villa-areas')
+    fetch('{{ url('/') }}/api/payments/villa-areas')
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to load villa areas');
@@ -692,7 +692,7 @@ function loadVillas() {
     
     if (!villaAreaId) return;
     
-    fetch(`/api/payments/villas?villa_area_id=${villaAreaId}`)
+    fetch(`{{ url('/') }}/api/payments/villas?villa_area_id=${villaAreaId}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error('Failed to load villas');

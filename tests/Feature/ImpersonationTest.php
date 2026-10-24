@@ -155,6 +155,9 @@ class ImpersonationTest extends TestCase
         $plain = $this->actingAs($admin)->get('/dashboard')->getContent();
         $this->assertStringNotContainsString('Return to Super Admin', $plain);
 
+        // A browser session belongs to one person. The session now remembers the admin's password hash (AuthenticateSession), so signing in as
+        // the Super Admin starts a fresh session - exactly what a different person on a different browser would have.
+        $this->flushSession();
         $this->actingAs($superAdmin)->post(route('super-admin.societies.login-as', $society));
 
         $borrowed = $this->get('/dashboard')->getContent();

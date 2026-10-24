@@ -23,8 +23,21 @@ class SendNoticePublishedEmail
      */
     public function handle(NoticePublished $event): void
     {
+        // the "Send Email" checkbox on the notice: unticked means no e-mail for this notice (in-app is separate)
+        if (!$event->notice->send_email) {
+            return;
+        }
+
+        $this->send($event->notice);
+    }
+
+    /**
+     * Queue the e-mails of a notice. $generation is null for the first publication and a fresh token for an explicit resend, so a resend
+     * gets its own idempotency keys (a double submit of the same token still sends once).
+     */
+    public function send(\App\Models\Notice $notice, ?string $generation = null): void
+    {
         try {
-            $notice = $event->notice;
             $societyId = $notice->society_id;
 
             // Allowed roles for notice published event
@@ -45,7 +58,7 @@ class SendNoticePublishedEmail
                 // Get users with specific roles that are in allowed list
                 $allowedTargetRoles = array_intersect($notice->target_audience, $allowedRoles);
                 if (!empty($allowedTargetRoles)) {
-                    $users = User::where('society_id', $societyId)
+                    $users = User::active()->where('society_id', $societyId)
                         ->whereHas('roles', function($q) use ($allowedTargetRoles) {
                             $q->whereIn('name', $allowedTargetRoles);
                         })
@@ -53,12 +66,18 @@ class SendNoticePublishedEmail
                 }
             } else {
                 // Get all allowed roles
-                $users = User::where('society_id', $societyId)
+                $users = User::active()->where('society_id', $societyId)
                     ->whereHas('roles', function($q) use ($allowedRoles) {
                         $q->whereIn('name', $allowedRoles);
                     })
                     ->get();
             }
+
+            // Only people who can actually be written to, once each: an inactive account, an account with no e-mail address, or
+            // two accounts sharing one address (a person with several roles) must not produce a send, a failure or a duplicate.
+            $users = $users->filter(fn ($u) => filter_var($u->email, FILTER_VALIDATE_EMAIL))
+                ->unique(fn ($u) => strtolower((string) $u->email))
+                ->values();
 
             // Format recipients
             foreach ($users as $user) {
@@ -94,7 +113,9 @@ class SendNoticePublishedEmail
                     $recipient,
                     $variables,
                     $societyId,
-                    "notice_published:{$notice->id}:{$recipient['email']}",
+                    $generation === null
+                        ? "notice_published:{$notice->id}:{$recipient['email']}"
+                        : "notice_resend:{$notice->id}:{$generation}:{$recipient['email']}",
                 )->afterCommit();
             }
 
@@ -104,7 +125,7 @@ class SendNoticePublishedEmail
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to send notice published email', [
-                'notice_id' => $event->notice->id ?? 'unknown',
+                'notice_id' => $notice->id ?? 'unknown',
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);

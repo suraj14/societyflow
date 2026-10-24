@@ -124,7 +124,10 @@ class ExternalMessagingKillSwitchTest extends TestCase
         DispatchEventNotificationSyncHelper::run($society->id, 'killswitch:1');
 
         $this->assertSame('log', config('mail.default'), 'the society SMTP override did not take over');
-        $this->assertTrue(\App\Models\EmailLog::where('notification_key', 'killswitch:1')->where('status', 'sent')->exists());
+        // The kill switch is off, so the delivery log must say "blocked" - this used to assert 'sent', which pinned the
+        // over-claim (a message that never left this computer reported as sent). See App\Support\MailDelivery.
+        $this->assertTrue(\App\Models\EmailLog::where('notification_key', 'killswitch:1')->where('status', 'blocked')->exists());
+        $this->assertFalse(\App\Models\EmailLog::where('notification_key', 'killswitch:1')->where('status', 'sent')->exists());
     }
 
     public function test_even_a_path_that_sets_its_own_smtp_mailer_cannot_send_while_disabled(): void
@@ -192,11 +195,16 @@ class ExternalMessagingKillSwitchTest extends TestCase
         }
     }
 
-    public function test_the_kill_switch_defaults_to_on_so_existing_environments_are_unchanged(): void
+    /**
+     * REQUIREMENT CHANGED (2026-10-16, owner's instruction): this used to pin the default as ON "so existing environments are
+     * unchanged". The new rule is the opposite - external messaging is OFF unless explicitly enabled, in every new environment
+     * and in production - so the test now pins that. An environment that wants real delivery must say so (EXTERNAL_MESSAGING_ENABLED=true).
+     */
+    public function test_the_kill_switch_defaults_to_off_and_must_be_enabled_explicitly(): void
     {
-        // phpunit.xml turns it OFF for the whole suite (tests must never reach a provider), so
-        // read the shipped default from the config file itself.
-        $this->assertMatchesRegularExpression("/env\('EXTERNAL_MESSAGING_ENABLED', true\)/", file_get_contents(config_path('messaging.php')));
+        $this->assertMatchesRegularExpression("/env\('EXTERNAL_MESSAGING_ENABLED', false\)/", file_get_contents(config_path('messaging.php')));
+        $this->assertMatchesRegularExpression('/^EXTERNAL_MESSAGING_ENABLED=false\s*$/m', file_get_contents(base_path('.env.example')));
         $this->assertFalse((bool) config('messaging.enabled'), 'the test suite itself runs with messaging disabled');
     }
 }
+

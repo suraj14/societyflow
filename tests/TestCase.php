@@ -22,6 +22,10 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
 
+        // A developer's local .env (an allow-list for a real-delivery test, say) must never change what the tests see: every test starts
+        // with no allow-list and with the kill switch as phpunit.xml sets it (OFF), and states any other value itself.
+        config(['messaging.allowlist' => null, 'messaging.enabled' => false]);
+
         // No automated test may reach a real SMS / WhatsApp provider. Tests mock the transport; anything that gets as far
         // as a real request is blocked here, recorded, and fails the test in tearDown() even if the app swallowed the error.
         $this->blockedOutbound = [];
@@ -30,6 +34,43 @@ abstract class TestCase extends BaseTestCase
 
             throw new \RuntimeException("Blocked: a test tried to make a real {$channel} request to {$host}. Mock the transport.");
         };
+    }
+
+    /**
+     * A browser session belongs to ONE person: AuthenticateSession keeps that person's password hash in it and ends the session once the hash no
+     * longer matches. Switching to a different user inside one test is therefore a different browser, not the same one, so it gets a fresh session -
+     * exactly what a second person on a second browser would have.
+     */
+    public function actingAs(\Illuminate\Contracts\Auth\Authenticatable $user, $guard = null)
+    {
+        // Compare with what the SESSION remembers (AuthenticateSession's own record), not with a guard's cached user: a token guard and the web
+        // guard can hold different users, but the session is what gets ended.
+        $remembered = $this->app['session']->get('password_hash_web');
+        if ($remembered !== null && $remembered !== $user->getAuthPassword()) {
+            $this->flushSession();
+        }
+
+        return parent::actingAs($user, $guard);
+    }
+
+    /**
+     * A web page is always served on the web (session) guard. Sanctum::actingAs() leaves the default guard on 'sanctum' for the rest of the test, and
+     * AuthenticateSession (web middleware group) asks the default guard about remember-me state, which a token guard does not have - something that
+     * cannot happen in production, where the default guard is `web`. API requests keep whatever guard the test chose.
+     */
+    public function call($method, $uri, $parameters = [], $cookies = [], $files = [], $server = [], $content = null)
+    {
+        $path = (string) parse_url((string) $uri, PHP_URL_PATH);
+        $auth = $this->app['auth'];
+        if (!str_starts_with(ltrim($path, '/'), 'api/') && $auth->getDefaultDriver() !== 'web') {
+            $user = $auth->guard()->user();
+            $auth->shouldUse('web');
+            if ($user) {
+                $auth->guard('web')->setUser($user);
+            }
+        }
+
+        return parent::call($method, $uri, $parameters, $cookies, $files, $server, $content);
     }
 
     /** For the guard's own test: return the blocked requests so far and forget them. */

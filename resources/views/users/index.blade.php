@@ -269,7 +269,7 @@ function confirmDelete() {
     const userId = document.getElementById('deleteUserId').value;
     const form = document.createElement('form');
     form.method = 'POST';
-    form.action = `/users/${userId}`;
+    form.action = `{{ url('/') }}/users/${userId}`;
     form.innerHTML = `
         <input type="hidden" name="_token" value="{{ csrf_token() }}">
         <input type="hidden" name="_method" value="DELETE">
@@ -292,7 +292,7 @@ function openResetPasswordModal(userId) {
     document.getElementById('resetPasswordUserEmail').textContent = user.email;
 
     const form = document.getElementById('resetPasswordForm');
-    form.action = `/users/${userId}/reset-password`;
+    form.action = `{{ url('/') }}/users/${userId}/reset-password`;
     form.reset();
 
     document.getElementById('resetPasswordModal').classList.remove('hidden');
@@ -313,7 +313,7 @@ const usersData = {!! json_encode($users->map(function($user) {
         'status' => $user->status,
         'avatar' => $user->avatar ? asset('storage/' . $user->avatar) : null,
     ];
-})) !!};
+}), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!};
 
 const currentUserId = {{ auth()->id() }};
 

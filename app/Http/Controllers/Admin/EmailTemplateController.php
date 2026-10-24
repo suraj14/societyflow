@@ -86,6 +86,10 @@ class EmailTemplateController extends BaseController
     public function edit(EmailTemplate $emailTemplate)
     {
         $this->authorizeTemplate($emailTemplate);
+        if ($this->isSharedForCaller($emailTemplate)) {
+            return redirect()->route('admin.email-templates.show', $emailTemplate)
+                ->with('error', 'This is a shared system template, so it cannot be edited here. Use "Customise for my society" to make your own copy, which is then used instead.');
+        }
         return view('admin.email-templates.edit', compact('emailTemplate'));
     }
 
@@ -94,7 +98,7 @@ class EmailTemplateController extends BaseController
      */
     public function update(Request $request, EmailTemplate $emailTemplate)
     {
-        $this->authorizeTemplate($emailTemplate);
+        $this->authorizeTemplate($emailTemplate, true);
 
         return $this->handleFormSubmission(function() use ($request, $emailTemplate) {
             $validated = $request->validate([
@@ -117,7 +121,7 @@ class EmailTemplateController extends BaseController
      */
     public function destroy(EmailTemplate $emailTemplate)
     {
-        $this->authorizeTemplate($emailTemplate);
+        $this->authorizeTemplate($emailTemplate, true);
 
         // Checked before entering handleFormSubmission(), not inside the
         // closure: the closure's returned redirect() was discarded (see
@@ -183,6 +187,14 @@ class EmailTemplateController extends BaseController
             'test_email' => 'required|email'
         ]);
 
+        // Nothing leaves the server while the kill switch is off, so say so instead of logging a "sent" row for it.
+        if (!\App\Support\ExternalMessaging::enabled()) {
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_DISABLED));
+        }
+        if (!\App\Support\ExternalMessaging::allows($request->test_email)) {
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED, \App\Support\ExternalMessaging::allowlistProblem() ? \App\Support\ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE));
+        }
+
         try {
             $testEmail = $request->test_email;
             $societyId = auth()->user()->society_id;
@@ -236,13 +248,13 @@ class EmailTemplateController extends BaseController
                 'recipient_name' => 'Test User',
                 'trigger_action' => 'test_email',
                 'variables' => $variables,
-                'status' => 'sent',
-                'sent_at' => now(),
+                'status' => \App\Support\MailDelivery::statusAfterSend($testEmail),
+                'sent_at' => \App\Support\MailDelivery::statusAfterSend($testEmail) === 'sent' ? now() : null,
             ]);
 
             return response()->json([
-                'success' => true,
-                'message' => 'Test email sent successfully to ' . $testEmail
+                'success' => \App\Support\MailDelivery::statusAfterSend($testEmail) === \App\Support\MailDelivery::SENT,
+                'message' => (\App\Support\MailDelivery::statusAfterSend() !== \App\Support\MailDelivery::SENT ? 'Not sent: the mailer is the local log file, so the test email was only written to the log.' : 'The mail server accepted the test email for ' . $testEmail . '. Check the inbox to confirm delivery.')
             ]);
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::error('Test email failed', [
@@ -274,10 +286,50 @@ class EmailTemplateController extends BaseController
     /**
      * Authorize template access
      */
-    private function authorizeTemplate(EmailTemplate $emailTemplate)
+    /**
+     * Society isolation for templates. A society's Admin may READ (and test-send) the shared system templates (society_id NULL) that
+     * the mapping screen links to - refusing them was a 403 on a template the product itself points at - and may change only
+     * their own society's templates. Changing a shared one would change it for every society, so that stays Super Admin only; an Admin
+     * customises it by making a society copy, which then takes precedence (EmailTemplate::getTemplateForEvent).
+     */
+    private function authorizeTemplate(EmailTemplate $emailTemplate, bool $write = false)
     {
-        if (!auth()->user()->hasRole('Super Admin') && $emailTemplate->society_id !== auth()->user()->society_id) {
-            abort(403, 'Unauthorized access to email template.');
+        $user = auth()->user();
+        if ($user->hasRole('Super Admin')) {
+            return;
         }
+        $own = $emailTemplate->society_id !== null && (int) $emailTemplate->society_id === (int) $user->society_id;
+        $shared = $emailTemplate->society_id === null;
+        if ($own || ($shared && !$write)) {
+            return;
+        }
+        abort(403, $shared ? 'A shared system template can only be changed by a Super Admin. Customise a copy for your society instead.' : 'Unauthorized access to email template.');
+    }
+
+    private function isSharedForCaller(EmailTemplate $t): bool
+    {
+        return $t->society_id === null && !auth()->user()->hasRole('Super Admin');
+    }
+
+    /** Make this society its own copy of a shared template. The copy wins over the shared one for this society only. */
+    public function customise(EmailTemplate $emailTemplate)
+    {
+        $this->authorizeTemplate($emailTemplate);
+        $user = auth()->user();
+        if ($emailTemplate->society_id !== null || !$user->society_id) {
+            return back()->with('error', 'Only a shared system template can be customised, and only for a society.');
+        }
+        $existing = $emailTemplate->trigger_event
+            ? EmailTemplate::where('society_id', $user->society_id)->where('trigger_event', $emailTemplate->trigger_event)->first() : null;
+        if ($existing) {
+            return redirect()->route('admin.email-templates.show', $existing)->with('success', 'Your society already has its own template for this event.');
+        }
+        $copy = EmailTemplate::create([
+            'society_id' => $user->society_id, 'name' => $emailTemplate->name, 'slug' => $emailTemplate->slug . '-society-' . $user->society_id,
+            'subject' => $emailTemplate->subject, 'body' => $emailTemplate->body, 'variables' => $emailTemplate->variables, 'type' => 'custom',
+            'status' => $emailTemplate->status, 'trigger_event' => $emailTemplate->trigger_event,
+        ]);
+
+        return redirect()->route('admin.email-templates.edit', $copy)->with('success', 'Your own copy was created. Edit it here; the shared template is unchanged.');
     }
 }

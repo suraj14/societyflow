@@ -526,7 +526,7 @@ function resetDropdowns() {
 
 // Load buildings/towers
 function loadBuildings() {
-    fetch('/api/buildings')
+    fetch('{{ url('/') }}/api/buildings')
         .then(response => response.json())
         .then(data => {
             const buildingSelect = document.getElementById('drawer_building_id');
@@ -557,7 +557,7 @@ function loadFloors() {
     
     if (!buildingId) return;
     
-    fetch(`/api/floors?building_id=${buildingId}`)
+    fetch(`{{ url('/') }}/api/floors?building_id=${buildingId}`)
         .then(response => response.json())
         .then(data => {
             data.forEach(floor => {
@@ -584,7 +584,7 @@ function loadFlats() {
     
     if (!buildingId || !floor) return;
     
-    fetch(`/api/flats?building_id=${buildingId}&floor=${floor}`)
+    fetch(`{{ url('/') }}/api/flats?building_id=${buildingId}&floor=${floor}`)
         .then(response => response.json())
         .then(data => {
             data.forEach(flat => {
@@ -602,7 +602,7 @@ function loadFlats() {
 
 // Load villa areas
 function loadVillaAreas() {
-    fetch('/api/villa-areas')
+    fetch('{{ url('/') }}/api/villa-areas')
         .then(response => response.json())
         .then(data => {
             const villaAreaSelect = document.getElementById('drawer_villa_area_id');
@@ -631,7 +631,7 @@ function loadVillas() {
     
     if (!villaAreaId) return;
     
-    fetch(`/api/villas?villa_area_id=${villaAreaId}`)
+    fetch(`{{ url('/') }}/api/villas?villa_area_id=${villaAreaId}`)
         .then(response => response.json())
         .then(data => {
             data.forEach(villa => {
@@ -705,7 +705,7 @@ function editBill(billId) {
     document.getElementById('submit-text').textContent = 'Update Bill';
     
     // Set form action
-    document.getElementById('bill-form').action = `/utility-bills/${billId}`;
+    document.getElementById('bill-form').action = `{{ url('/') }}/utility-bills/${billId}`;
     
     // Load bill data (you would fetch this via AJAX in a real app)
     // For now, we'll show the drawer
@@ -799,7 +799,7 @@ function submitBillForm() {
 // View Bill
 function viewBill(billId) {
     // Redirect to the show page instead of trying to show a modal
-    window.location.href = `/utility-bills/${billId}`;
+    window.location.href = `{{ url('/') }}/utility-bills/${billId}`;
 }
 
 // Open Payment Modal
@@ -813,7 +813,7 @@ function openPaymentModal(billId, flatNumber, billType, amount) {
     `;
     
     document.getElementById('payment-bill-info').innerHTML = billInfo;
-    document.getElementById('payment-form').action = `/utility-bills/${billId}/payment`;
+    document.getElementById('payment-form').action = `{{ url('/') }}/utility-bills/${billId}/payment`;
     document.getElementById('payment-modal').classList.remove('hidden');
     
     // Close action menu
@@ -840,7 +840,7 @@ function deleteBill(billId) {
         // Create form and submit
         const form = document.createElement('form');
         form.method = 'POST';
-        form.action = `/utility-bills/${billId}`;
+        form.action = `{{ url('/') }}/utility-bills/${billId}`;
         
         const csrfToken = document.createElement('input');
         csrfToken.type = 'hidden';

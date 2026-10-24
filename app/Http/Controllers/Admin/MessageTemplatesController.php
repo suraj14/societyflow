@@ -173,6 +173,16 @@ class MessageTemplatesController extends Controller
         return ['emailTemplates' => $templates, 'eventLabels' => EmailEvent::labels(), 'filters' => ['q' => $q]];
     }
 
+    /** How many real people an audience is, before anything is sent. Resolved on the server from this society's own accounts. */
+    public function audiencePreview(Request $request)
+    {
+        $data = $request->validate(['audience' => ['required', Rule::in(array_keys(SmsTemplate::AUDIENCES))]]);
+        $societyId = $this->societyId();
+        abort_if($societyId === null, 422, 'Choose a society first: an audience only exists inside one society.');
+
+        return response()->json(\App\Support\SmsAudience::preview($data['audience'], (int) $societyId) + ['bulk' => \App\Support\SmsAudience::isBulk($data['audience'])]);
+    }
+
     // ── SMS templates: create / edit / on-off / delete ──────────────────────
 
     public function createSms()
@@ -453,7 +463,8 @@ class MessageTemplatesController extends Controller
     {
         $message = "\"{$template->name}\" saved." . ($replaced ? " \"{$replaced}\" was switched off - one template at a time is used for {$template->purposeLabel()}." : '');
 
-        return redirect()->route('admin.message-templates.index', ['channel' => 'sms'])->with('success', $message);
+        return redirect()->route('admin.message-templates.index', ['channel' => 'sms'])->with('success', $message)
+            ->with('warning', session('dlt_warning'));
     }
 
     private function attributes(array $data): array
@@ -481,6 +492,19 @@ class MessageTemplatesController extends Controller
         ]);
 
         $problems = TemplateVariables::problems($data['purpose'], (string) $data['body']);
+        // Wording that belongs to a different notification is refused outright (not a warning): it would send the wrong message
+        if ($conflict = \App\Support\DltTemplates::purposeConflict($data['purpose'], (string) $data['body'])) {
+            $problems[] = $conflict;
+        }
+        // A template with a Message ID is sent as the provider's registered text, so a body that differs from SocietyFlow's own
+        // registered wording is flagged - as a WARNING, not an error: the reference text is copied from a telecom screen and is not
+        // verified against this society's account, and a society may legitimately hold its own approved wording.
+        if (($data['dlt_message_id'] ?? '') !== '') {
+            $warnings = \App\Support\DltTemplates::bodyProblems($data['purpose'], (string) $data['body']);
+            if ($warnings) {
+                session()->flash('dlt_warning', implode(' ', $warnings) . ' Saved anyway - check that this Message ID is the template you mean.');
+            }
+        }
         if ($problems) {
             throw ValidationException::withMessages(['body' => $problems]);
         }
@@ -494,6 +518,8 @@ class MessageTemplatesController extends Controller
             'template' => $template,
             'purposes' => collect(TemplateVariables::sms())->map(fn ($p, $key) => [
                 'key' => $key, 'label' => $p['label'], 'help' => $p['help'],
+                // the registered telecom text, when there is one (reference copied from the DLT screen; not verified against the account)
+                'dlt_text' => ($e = \App\Support\DltTemplates::forPurpose($key)) ? \App\Support\DltTemplates::asPlaceholders($e) : null,
                 'variables' => collect($p['variables'])->map(fn ($description, $name) => ['name' => $name, 'description' => $description, 'sample' => TemplateVariables::sample($name)])->values()->all(),
             ])->values()->all(),
             'routing' => SmsService::routing($this->societyId()),

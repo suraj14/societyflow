@@ -19,7 +19,8 @@ class EventAudience
     public static function users(object $event): Collection
     {
         $societyId = $event->society_id;
-        $base = fn () => User::where('society_id', $societyId)
+        // only ACTIVE accounts of this society: a deactivated owner is not told about an event
+        $base = fn () => User::where('society_id', $societyId)->where('status', 'active')
             ->whereHas('roles', fn ($q) => $q->whereIn('name', self::OWNER_ROLES));
 
         if (!empty($event->is_role_based) && !empty($event->visible_roles)) {
@@ -27,7 +28,7 @@ class EventAudience
 
             return $roles === []
                 ? collect()
-                : User::where('society_id', $societyId)->whereHas('roles', fn ($q) => $q->whereIn('name', $roles))->get();
+                : User::where('society_id', $societyId)->where('status', 'active')->whereHas('roles', fn ($q) => $q->whereIn('name', $roles))->get();
         }
 
         if (!empty($event->visible_users)) {

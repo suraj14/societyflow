@@ -33,7 +33,11 @@ class Fast2SmsService
     public static function send(string $method, string $url, string $apiKey, ?array $json = null, int $timeout = 20): array
     {
         if (!ExternalMessaging::enabled()) {
-            return [['transport_error' => ExternalMessaging::SUPPRESSED_MESSAGE, 'skipped' => true], 0];
+            return [['transport_error' => ExternalMessaging::SUPPRESSED_MESSAGE, 'skipped' => true, 'blocked_reason' => ExternalMessaging::BLOCKED_DISABLED], 0];
+        }
+
+        if (!ExternalMessaging::requestAllowed($url, $json)) {
+            return [['transport_error' => ExternalMessaging::allowlistProblem() ? ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : ExternalMessaging::NOT_ALLOWED_MESSAGE, 'skipped' => true, 'blocked_reason' => ExternalMessaging::BLOCKED_NOT_ALLOWLISTED], 0];
         }
 
         ExternalMessaging::beforeOutbound('Fast2SMS', 'www.fast2sms.com');

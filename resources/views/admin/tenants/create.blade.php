@@ -448,7 +448,7 @@ const unitsData = {!! json_encode($availableUnits->map(function($unit) {
         'building_name' => $unit->building->name ?? null,
         'villa_area_name' => $unit->villaArea->name ?? null,
     ];
-})->toArray()) !!};
+})->toArray(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!};
 
 function updatePropertyTypeSelection() {
     const propertyType = document.getElementById('property_type').value;

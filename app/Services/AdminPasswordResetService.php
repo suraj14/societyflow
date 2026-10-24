@@ -21,9 +21,11 @@ class AdminPasswordResetService
 {
     public function reset(User $user, string $newPassword): void
     {
+        // the remember token changes with the password, so a remember-me cookie issued before it stops working too
         $user->forceFill([
             'password' => Hash::make($newPassword),
-        ])->save();
+        ])->setRememberToken(\Illuminate\Support\Str::random(60));
+        $user->save();
 
         // A password only the account holder now knows must invalidate any
         // API tokens issued under the old one.

@@ -1,9 +1,10 @@
-@extends('layouts.app')
+@extends('layouts.guard')
+
+@section('title', 'My Shift')
+@section('page-title', 'My Shift')
 
 @section('content')
-<div class="container mx-auto px-4 py-8 max-w-xl">
-    <h1 class="text-2xl font-bold text-gray-900 mb-6">My Shift</h1>
-
+<div class="p-4 md:p-6 max-w-xl">
 
     @if (!$assignment)
         <div class="bg-white rounded-lg shadow p-6 text-center text-gray-500">

@@ -189,58 +189,22 @@ class ReportController extends Controller
     // ------------------------------------------------------------------
 
     /**
-     * Successful maintenance payments in the period. Residents (owner or
-     * tenant) see only their own units, resolved server-side.
+     * Maintenance billing and cash for the period, from the one calculation layer (FinancialReportService::maintenanceReport):
+     * what was billed, what is owed on those bills, the cash that arrived (with evidence) and which bills it settled.
+     * Residents (owner or tenant) see only their own units, resolved server-side.
      */
     private function getMaintenanceData(?int $societyId, ReportPeriod $period, $user): array
     {
         if (!$societyId) {
-            return ['total_maintenance' => 0.0, 'count' => 0, 'payments' => collect(), 'billed' => 0.0, 'outstanding' => 0.0];
+            return [
+                'billed' => 0.0, 'outstanding' => 0.0, 'collected_on_these_bills' => 0.0, 'no_evidence_on_these_bills' => 0.0, 'total_maintenance' => 0.0, 'count' => 0,
+                'payments' => collect(), 'no_evidence' => ['amount' => 0.0, 'count' => 0, 'rows' => collect()], 'cash_against_this_period_bills' => 0.0,
+                'cash_against_earlier_bills' => 0.0, 'cash_against_later_bills' => 0.0, 'cash_unallocated' => 0.0, 'outstanding_all_time' => 0.0,
+            ];
         }
 
-        [$start, $end] = FinancialReportService::bounds($period);
+        $flatIds = $user->hasAnyRole(self::SOCIETY_WIDE_ROLES) ? null : (UserFlatResolver::flatIdsFor($user) ?: [0]);
 
-        // A maintenance payment is one recorded against a maintenance bill
-        // OR an ad-hoc payment whose own bill_type says maintenance (the
-        // payment form allows both). Rent shares the bills table and is
-        // never maintenance; the old report counted it - and counted
-        // pending payments - which is where "₹36,800 / 3 transactions" for a
-        // year with no maintenance collected at all came from.
-        $query = Payment::query()
-            ->leftJoin('maintenance_bills', 'payments.maintenance_bill_id', '=', 'maintenance_bills.id')
-            ->where('payments.society_id', $societyId)
-            ->where('payments.status', 'success')
-            ->whereBetween('payments.payment_date', [$start, $end])
-            ->where(function ($q) {
-                $q->where('maintenance_bills.bill_type', 'maintenance')
-                  ->orWhere(function ($q2) {
-                      $q2->whereNull('payments.maintenance_bill_id')
-                         ->whereRaw('LOWER(payments.bill_type) LIKE ?', ['%maint%']);
-                  });
-            });
-
-        $bills = MaintenanceBill::query()
-            ->where('society_id', $societyId)
-            ->where('bill_type', 'maintenance')
-            ->whereBetween('bill_date', [$start, $end]);
-
-        if (!$user->hasAnyRole(self::SOCIETY_WIDE_ROLES)) {
-            $flatIds = UserFlatResolver::flatIdsFor($user) ?: [0];
-            $query->where(function ($q) use ($flatIds) {
-                $q->whereIn('maintenance_bills.flat_id', $flatIds)
-                  ->orWhereIn('payments.flat_id', $flatIds);
-            });
-            $bills->whereIn('flat_id', $flatIds);
-        }
-
-        $payments = $query->select('payments.*')->with('flat')->orderBy('payments.payment_date')->get();
-
-        return [
-            'total_maintenance' => (float) $payments->sum('amount'),
-            'count'             => $payments->count(),
-            'payments'          => $payments,
-            'billed'            => (float) $bills->sum('total_amount'),
-            'outstanding'       => (float) (clone $bills)->sum('balance_amount'),
-        ];
+        return app(FinancialReportService::class)->maintenanceReport($societyId, $period, $flatIds);
     }
 }

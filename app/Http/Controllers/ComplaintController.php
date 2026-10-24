@@ -60,6 +60,7 @@ class ComplaintController extends BaseController
         $complaints = $query->latest()->paginate(15);
         
         // Get categories for the current user's society
+        ComplaintCategory::ensureDefaults((int) $societyId);
         $categories = ComplaintCategory::where('society_id', $societyId)
                                       ->where('status', 'active')
                                       ->orderBy('name')
@@ -90,6 +91,7 @@ class ComplaintController extends BaseController
         $societyId = $user->society_id;
         
         // Get categories for the current user's society
+        ComplaintCategory::ensureDefaults((int) $societyId);
         $categories = ComplaintCategory::where('society_id', $societyId)
                                       ->where('status', 'active')
                                       ->orderBy('name')
@@ -260,6 +262,7 @@ class ComplaintController extends BaseController
         $societyId = $user->society_id;
 
         // Get categories for the current user's society
+        ComplaintCategory::ensureDefaults((int) $societyId);
         $categories = ComplaintCategory::where('society_id', $societyId)
                                       ->where('status', 'active')
                                       ->orderBy('name')
@@ -306,6 +309,8 @@ class ComplaintController extends BaseController
 
             // Dispatch event if status changed
             if ($oldStatus !== $complaint->status) {
+                // the same history row the API writes, so the timeline reads alike whichever client changed the status (reopening included)
+                $complaint->addUpdate(Auth::user(), 'Status changed to ' . ucwords(str_replace('_', ' ', $complaint->status)) . '.', 'status_change');
                 \App\Events\TicketUpdated::dispatch($complaint);
             }
 

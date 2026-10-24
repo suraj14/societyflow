@@ -24,7 +24,8 @@
 @endphp
 
 @section('content')
-<div class="p-4 space-y-2">
+<div class="p-4 space-y-2 md:p-6">
+    <div class="space-y-2 md:space-y-0 md:grid md:grid-cols-2 xl:grid-cols-3 md:gap-3">
     @forelse($visitors as $visitor)
         @php [$sfLabel, $sfClass] = $sfBadge[$visitor->entry_status] ?? ['Unknown', 'bg-gray-100 text-gray-700']; @endphp
         <div class="bg-white rounded-xl p-4 shadow-sm">
@@ -44,8 +45,9 @@
             </p>
         </div>
     @empty
-        <p class="text-sm text-gray-500 bg-white rounded-xl p-6 text-center">No gate activity recorded yet.</p>
+        <p class="text-sm text-gray-500 bg-white rounded-xl p-6 text-center md:col-span-2 xl:col-span-3">No gate activity recorded yet.</p>
     @endforelse
+    </div>
 
     <div class="pt-2">
         {{ $visitors->links() }}

@@ -39,8 +39,11 @@ class OtpAmbiguousPhoneTest extends TestCase
     private function sharedNumber(): array
     {
         $society = $this->makeSociety('Royal Eden');
-        $admin = $this->makeUserWithRole($society, 'Admin', ['phone' => $this->phone, 'name' => 'Office Admin']);
-        $guard = $this->makeUserWithRole($society, 'Guard', ['phone' => $this->phone, 'name' => 'Gate Guard']);
+        // Two non-privileged accounts on one number (a household's owner and its tenant). Before 2026-10-22 this fixture was an Admin and a Guard;
+        // an Admin/Super Admin is no longer offered by the phone-only chooser (see OtpPrivilegedAccountPhoneTest), so the chooser behaviour these
+        // tests pin is unchanged but is now exercised with accounts that may use it.
+        $admin = $this->makeUserWithRole($society, 'Owner', ['phone' => $this->phone, 'name' => 'Office Admin']);
+        $guard = $this->makeUserWithRole($society, 'Tenant', ['phone' => $this->phone, 'name' => 'Gate Guard']);
 
         return [$admin, $guard];
     }
@@ -81,13 +84,14 @@ class OtpAmbiguousPhoneTest extends TestCase
     public function test_verify_otp_refuses_a_number_that_became_ambiguous_after_send(): void
     {
         $society = $this->makeSociety();
-        $this->makeUserWithRole($society, 'Admin', ['phone' => $this->phone]);
+        // Owner + Tenant, not Admin + Guard: a privileged account on a shared number is no longer a phone-only candidate (OtpPrivilegedAccountPhoneTest)
+        $this->makeUserWithRole($society, 'Owner', ['phone' => $this->phone]);
 
         $send = $this->postJson('/api/v1/auth/send-otp', ['phone' => $this->phone])->assertOk();
 
         // A second account picks up the same number before the code is
         // verified (e.g. an office data-entry change mid-flow).
-        $this->makeUserWithRole($society, 'Guard', ['phone' => $this->phone]);
+        $this->makeUserWithRole($society, 'Tenant', ['phone' => $this->phone]);
 
         $r = $this->postJson('/api/v1/auth/verify-otp', ['phone' => $this->phone, 'otp' => $send->json('otp')]);
 
@@ -117,7 +121,7 @@ class OtpAmbiguousPhoneTest extends TestCase
         $this->assertNull($r->json('token'), 'no account is signed in until the user picks one');
         $this->assertSame(0, PersonalAccessToken::count());
         $this->assertEqualsCanonicalizing([$admin->id, $guard->id], array_column($r->json('accounts'), 'id'));
-        $this->assertEqualsCanonicalizing(['Admin', 'Guard'], array_column($r->json('accounts'), 'role'));
+        $this->assertEqualsCanonicalizing(['Owner', 'Tenant'], array_column($r->json('accounts'), 'role'));   // was Admin + Guard: see sharedNumber()
         $this->assertSame(['Royal Eden', 'Royal Eden'], array_column($r->json('accounts'), 'society_name'));
     }
 
@@ -128,7 +132,7 @@ class OtpAmbiguousPhoneTest extends TestCase
 
         $r = $this->postJson('/api/v1/auth/select-account', ['selection_token' => $selection, 'user_id' => $guard->id]);
 
-        $r->assertOk()->assertJson(['success' => true])->assertJsonPath('user.id', $guard->id)->assertJsonPath('user.role', 'Guard');
+        $r->assertOk()->assertJson(['success' => true])->assertJsonPath('user.id', $guard->id)->assertJsonPath('user.role', 'Tenant');   // was Guard: see sharedNumber()
         $this->assertNotEmpty($r->json('token'));
         $this->assertArrayHasKey('society', $r->json('user'), 'same full payload as password login');
         $this->assertSame(1, $guard->tokens()->count());

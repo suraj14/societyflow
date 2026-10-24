@@ -28,7 +28,7 @@ class MobileOtp extends Model
      */
     public const TTL_MINUTES = 5;
 
-    protected $fillable = ['phone', 'purpose', 'otp', 'attempts', 'is_used', 'expires_at'];
+    protected $fillable = ['phone', 'purpose', 'user_id', 'otp', 'attempts', 'is_used', 'expires_at'];
 
     protected $hidden = ['otp'];
 
@@ -45,9 +45,10 @@ class MobileOtp extends Model
             && app()->environment(['local', 'development', 'testing']);
     }
 
-    public static function hashCode(string $phone, string $purpose, string $code): string
+    /** $userId binds the code to one account (password reset); null keeps the login-code hash exactly as it was. */
+    public static function hashCode(string $phone, string $purpose, string $code, ?int $userId = null): string
     {
-        return hash_hmac('sha256', $phone . '|' . $purpose . '|' . $code, (string) config('app.key'));
+        return hash_hmac('sha256', $phone . '|' . $purpose . '|' . $code . ($userId === null ? '' : '|user:' . $userId), (string) config('app.key'));
     }
 
     /**
@@ -55,17 +56,23 @@ class MobileOtp extends Model
      *
      * @return array{0: self, 1: string} the stored row and the PLAIN code (to be sent by SMS - never stored, never logged)
      */
-    public static function issue(string $phone, string $purpose): array
+    public static function issue(string $phone, string $purpose, ?int $userId = null): array
     {
         $code = (string) random_int(1000, 9999);
 
-        $row = DB::transaction(function () use ($phone, $purpose, $code) {
-            static::where('phone', $phone)->where('is_used', false)->update(['is_used' => true]);
+        $row = DB::transaction(function () use ($phone, $purpose, $code, $userId) {
+            // a login code retires every older unused code for the number (as before); an account-bound reset code retires only that account's own
+            $old = static::where('phone', $phone)->where('is_used', false);
+            if ($userId !== null) {
+                $old->where('purpose', $purpose)->where('user_id', $userId);
+            }
+            $old->update(['is_used' => true]);
 
             return static::create([
                 'phone'      => $phone,
                 'purpose'    => $purpose,
-                'otp'        => static::hashCode($phone, $purpose, $code),
+                'user_id'    => $userId,
+                'otp'        => static::hashCode($phone, $purpose, $code, $userId),
                 'attempts'   => 0,
                 'is_used'    => false,
                 'expires_at' => now()->addMinutes((int) config('otp.ttl_minutes', self::TTL_MINUTES)),
@@ -85,18 +92,21 @@ class MobileOtp extends Model
      * Try a code. Returns true exactly once per issued code; false for a wrong, expired, already-used, superseded or
      * exhausted code (the caller says one generic thing for all of them).
      */
-    public static function check(string $phone, string $purpose, string $code): bool
+    public static function check(string $phone, string $purpose, string $code, ?int $userId = null): bool
     {
         $max = (int) config('otp.max_attempts', 5);
 
-        return DB::transaction(function () use ($phone, $purpose, $code, $max) {
-            $row = static::where('phone', $phone)->where('purpose', $purpose)->where('is_used', false)->latest('id')->lockForUpdate()->first();
+        return DB::transaction(function () use ($phone, $purpose, $code, $max, $userId) {
+            // a code made for an account only ever matches that account; a user-less (login) check never matches an account-bound row
+            $row = static::where('phone', $phone)->where('purpose', $purpose)->where('is_used', false)
+                ->when($userId === null, fn ($q) => $q->whereNull('user_id'), fn ($q) => $q->where('user_id', $userId))
+                ->latest('id')->lockForUpdate()->first();
 
             if (!$row || $row->expires_at->isPast() || $row->attempts >= $max) {
                 return false;
             }
 
-            if (!hash_equals($row->otp, static::hashCode($phone, $purpose, $code))) {
+            if (!hash_equals($row->otp, static::hashCode($phone, $purpose, $code, $userId))) {
                 static::whereKey($row->getKey())->increment('attempts');
 
                 return false;

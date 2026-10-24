@@ -135,6 +135,27 @@ class SystemSetting extends Model
     }
 
     /**
+     * A group's settings as they apply to one society - the platform's values overridden by the society's own - whoever
+     * is signed in (getGroup() above changes with the current user, and reads a cache) and read fresh. For work done
+     * outside a society's own request: a guest's password-reset mail, a queued job.
+     */
+    public static function effectiveGroup(string $group, ?int $societyId): array
+    {
+        $result = [];
+
+        $rows = self::where('group', $group)
+            ->where(fn ($q) => $societyId ? $q->whereNull('society_id')->orWhere('society_id', $societyId) : $q->whereNull('society_id'))
+            ->orderByRaw('society_id IS NULL DESC')   // platform rows first, so the society's own win
+            ->get();
+
+        foreach ($rows as $setting) {
+            $result[$setting->key] = self::castValue($setting->value, $setting->type);
+        }
+
+        return $result;
+    }
+
+    /**
      * Set multiple settings for a group
      */
     public static function setGroup(string $group, array $settings, array $types = [], ?int $societyId = null): void

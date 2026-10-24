@@ -4,7 +4,7 @@
 @section('page-title', 'Register Visitor')
 
 @section('content')
-<div class="p-4">
+<div class="p-4 md:p-6 md:max-w-3xl">
     @if($errors->any())
         <div class="mb-4 p-3 rounded-lg bg-red-100 border border-red-300 text-red-800 text-sm">
             <ul class="list-disc list-inside space-y-1">

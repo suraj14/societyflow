@@ -55,6 +55,22 @@ class EmailLog extends Model
         return in_array(self::HIDDEN, (array) $this->variables, true);
     }
 
+    /**
+     * A message that was deliberately NOT sent, with the reason, so the delivery log shows "Skipped - not sent" and offers no Retry
+     * (retrying cannot make an invalid address valid). Stored as `failed` + the SKIPPED marker, the same shape SMS/WhatsApp skips use.
+     */
+    public static function recordSkipped(?int $templateId, ?int $societyId, ?string $email, ?string $name, string $trigger, string $reason, ?string $notificationKey = null): void
+    {
+        try {
+            static::create([
+                'email_template_id' => $templateId, 'society_id' => $societyId, 'recipient_email' => (string) $email, 'recipient_name' => $name, 'trigger_action' => $trigger,
+                'channel' => 'email', 'notification_key' => $notificationKey, 'status' => 'failed', 'error_message' => self::SKIPPED_PREFIX . $reason, 'retry_count' => 3,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Could not record a skipped e-mail', ['error' => $e->getMessage()]);
+        }
+    }
+
     public function isSkipped(): bool
     {
         return $this->status === 'failed' && str_starts_with((string) $this->error_message, self::SKIPPED_PREFIX);
@@ -122,6 +138,21 @@ class EmailLog extends Model
     public function scopeSent($query)
     {
         return $query->where('status', 'sent');
+    }
+
+    /**
+     * Before this moment a "sent" row only meant "handed to the mailer": with the safety switch off or a log-only mailer nothing left the
+     * server, yet the row said sent. Such a row proves nothing, so it must not stop the same notification from being sent for real later.
+     */
+    public const HONEST_STATUS_SINCE = '2026-10-17 00:00:00';
+
+    /** An e-mail with this notification key that really was accepted by a mail server (not a log-only or pre-honesty "sent"). */
+    public function scopeDeliveredFor($query, string $notificationKey)
+    {
+        return $query->where('notification_key', $notificationKey)
+            ->where('channel', 'email')
+            ->where('status', 'sent')
+            ->where('created_at', '>=', self::HONEST_STATUS_SINCE);
     }
 
     /**

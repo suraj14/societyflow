@@ -82,6 +82,15 @@ class ComplaintApiController extends Controller
             'attachments'            => $imagePath ? [$imagePath] : [],
         ]);
 
+        // The same notifications the web form sends (ComplaintController::store): the office is told a resident raised a complaint. The mobile
+        // app used to skip this entirely, so a complaint filed from the phone reached nobody. A notification problem never fails the request.
+        try {
+            \App\Services\EmailNotificationService::sendComplaintNotification($complaint, 'created');
+            \App\Support\BusinessNotifications::complaintCreated($complaint);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Complaint notifications failed after a mobile submission', ['complaint_id' => $complaint->id, 'error' => $e->getMessage()]);
+        }
+
         $complaint->load(['category', 'updates.user']);
 
         return response()->json([
@@ -124,6 +133,7 @@ class ComplaintApiController extends Controller
 
     public function categories(Request $request): JsonResponse
     {
+        ComplaintCategory::ensureDefaults((int) $request->user()->society_id);
         $categories = ComplaintCategory::where('society_id', $request->user()->society_id)
             ->orderBy('name')
             ->pluck('name');

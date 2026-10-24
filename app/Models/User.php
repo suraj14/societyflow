@@ -47,6 +47,32 @@ class User extends Authenticatable
             'last_login_at' => 'datetime',
         ];
 
+    /** Statuses that may not authenticate anywhere (web, API, OTP) and whose open sessions and tokens end. */
+    public const BLOCKED_STATUSES = ['inactive', 'suspended'];
+
+    /** Roles whose accounts control a whole society: never reachable through a phone number alone. */
+    public const PRIVILEGED_ROLES = ['Super Admin', 'Admin', 'Society Admin'];
+
+    protected static function booted(): void
+    {
+        // Deactivating or suspending an account ends its mobile sessions at once; web sessions end on their next request (EnsureAccountActive).
+        static::updated(function (self $user) {
+            if ($user->wasChanged('status') && $user->isBlocked()) {
+                $user->tokens()->delete();
+            }
+        });
+    }
+
+    public function isBlocked(): bool
+    {
+        return in_array($this->status, self::BLOCKED_STATUSES, true);
+    }
+
+    public function isPrivileged(): bool
+    {
+        return $this->hasAnyRole(self::PRIVILEGED_ROLES);
+    }
+
     // Relationships
     public function society(): BelongsTo
     {
@@ -129,6 +155,16 @@ class User extends Authenticatable
     public function scopeBySociety($query, $societyId)
     {
         return $query->where('society_id', $societyId);
+    }
+
+    /**
+     * The account with this e-mail address, whatever its letter case. SQLite compares `email = ?` case-sensitively
+     * (MySQL's default collation does not), and older rows hold addresses in capitals - so a lookup by a typed
+     * address goes through here, never a bare where('email', ...).
+     */
+    public function scopeWhereEmail($query, $email)
+    {
+        return $query->whereRaw('LOWER(email) = ?', [mb_strtolower(trim((string) $email))]);
     }
 
     // Helper methods

@@ -96,6 +96,13 @@ class DynamicEmailService
         ?int $societyId,
         ?string $notificationKey = null,
     ): void {
+        // An invalid address, an inactive account or a Super Admin (for a society notice) is never written to: skipped, with the reason logged.
+        if ($why = \App\Support\RecipientEligibility::emailSkipReason($recipient['email'] ?? null, $societyId, $triggerEvent)) {
+            \App\Models\EmailLog::recordSkipped($template->id, $societyId, $recipient['email'] ?? null, $recipient['name'] ?? null, $triggerEvent, "not sent: {$why}", $notificationKey);
+
+            return;
+        }
+
         try {
             // Load email configuration
             if ($societyId) {
@@ -112,7 +119,9 @@ class DynamicEmailService
                         ->subject($subject);
             });
 
-            // Log successful send
+            // "sent" only when a real mail server took it; a log-only / kill-switch run is "simulated" (see MailDelivery)
+            $delivery = \App\Support\MailDelivery::outcome($recipient['email'] ?? null);
+            $outcome = $delivery['status'];
             EmailLog::create([
                 'email_template_id' => $template->id,
                 'society_id' => $societyId,
@@ -122,11 +131,12 @@ class DynamicEmailService
                 'channel' => 'email',
                 'notification_key' => $notificationKey,
                 'variables' => $variables,
-                'status' => 'sent',
-                'sent_at' => now(),
+                'status' => $outcome,
+                'error_message' => $delivery['reason'],
+                'sent_at' => $outcome === 'sent' ? now() : null,
             ]);
 
-            Log::info('Email sent successfully', [
+            Log::info($outcome === 'sent' ? 'Email handed to the mail server' : 'Email simulated only (not sent)', [
                 'recipient' => $recipient['email'],
                 'event' => $triggerEvent,
                 'template_id' => $template->id,

@@ -294,6 +294,8 @@
 <script>
 let currentDate = new Date();
 const events = @json($events);
+// event text is typed by people: escape it before it goes into markup
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function renderCalendar() {
     const year = currentDate.getFullYear();
@@ -368,7 +370,7 @@ function createDayElement(day, isOtherMonth, year, month) {
         
         // Add event badges
         dayEvents.slice(0, 2).forEach(event => {
-            html += `<div class="event-badge ${event.status}">${event.event_name}</div>`;
+            html += `<div class="event-badge ${esc(event.status)}">${esc(event.event_name)}</div>`;
         });
 
         if (dayEvents.length > 2) {
@@ -416,11 +418,11 @@ function updateEventsList() {
         `;
     } else {
         eventsList.innerHTML = dayEvents.map(event => `
-            <div class="event-item ${event.status}">
+            <div class="event-item ${esc(event.status)}">
                 <div class="flex items-start justify-between">
                     <div class="flex-1">
                         <div class="flex items-center gap-2 mb-2">
-                            <h4 class="font-bold text-gray-900 text-lg">${event.event_name}</h4>
+                            <h4 class="font-bold text-gray-900 text-lg">${esc(event.event_name)}</h4>
                             <span class="inline-block px-2 py-1 rounded-full text-xs font-semibold
                                 ${event.status === 'completed' ? 'bg-green-100 text-green-800' : 
                                   event.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
@@ -430,17 +432,17 @@ function updateEventsList() {
                         </div>
                         <p class="text-sm text-gray-600 mb-2">
                             <i class="fas fa-map-marker-alt text-purple-600 mr-2"></i>
-                            <strong>Location:</strong> ${event.location}
+                            <strong>Location:</strong> ${esc(event.location)}
                         </p>
                         <p class="text-sm text-gray-600 mb-2">
                             <i class="fas fa-clock text-purple-600 mr-2"></i>
                             <strong>Time:</strong> ${new Date(event.start_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} - ${new Date(event.end_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                         <p class="text-sm text-gray-700 mt-3 p-3 bg-white rounded border-l-2 border-purple-400">
-                            <strong>Description:</strong> ${event.description}
+                            <strong>Description:</strong> ${esc(event.description)}
                         </p>
                     </div>
-                    <a href="/events/${event.id}" class="ml-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium whitespace-nowrap">
+                    <a href="{{ url('/') }}/events/${encodeURIComponent(event.id)}" class="ml-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium whitespace-nowrap">
                         <i class="fas fa-arrow-right mr-1"></i>View
                     </a>
                 </div>

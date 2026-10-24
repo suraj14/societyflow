@@ -236,11 +236,16 @@ class AdminListApiController extends Controller
         }
         $now = SocietyClock::now($sid);
 
-        // Verified money only: Payment::success() is the one status that counts (a resident's claim is `pending`).
-        $base = fn () => Payment::where('society_id', $sid)->success()
-            ->whereMonth('payment_date', $now->month)->whereYear('payment_date', $now->year);
+        // Verified society money only, by the day it arrived (FinancialReportService::applyCollectionRules): a successful
+        // payment with a recorded method that is not owner rent. A resident's pending claim, a failed payment, owner rent and
+        // a payment recorded with no evidence of receipt are not "collected".
+        [$start, $end] = \App\Services\FinancialReportService::currentMonthBounds($sid);
+        $base = fn () => \App\Services\FinancialReportService::applyCollectionRules(Payment::where('society_id', $sid))
+            ->whereBetween('payment_date', [$start, $end]);
 
-        $sum = (float) $base()->sum('amount');
+        // the headline is the Financial Report's "Actual Collections": these payments plus facility money recorded as received
+        $totals = \App\Services\FinancialReportService::societyCollections($sid, $start, $end);
+        $sum = $totals['amount'];
         $page = $base()->with(['flat.building:id,name', 'flat.villaArea:id,name', 'user:id,name'])->orderByDesc('payment_date')->orderByDesc('id')->paginate(self::PER_PAGE);
 
         $rows = $page->getCollection()->map(fn (Payment $p) => [
@@ -252,7 +257,7 @@ class AdminListApiController extends Controller
             'amount'   => (float) $p->amount,
         ]);
 
-        return $this->respond($rows, $page, $page->currentPage(), ['amount' => $sum, 'month' => $now->format('F Y')], $page->lastPage());
+        return $this->respond($rows, $page, $page->currentPage(), ['amount' => $sum, 'payments_amount' => $totals['payments'], 'facility_amount' => $totals['facility'], 'month' => $now->format('F Y')], $page->lastPage());
     }
 
     // ── Guards: who is on duty, and where ───────────────────────────────────

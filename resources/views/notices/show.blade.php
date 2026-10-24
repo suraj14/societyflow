@@ -232,7 +232,19 @@
                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center justify-center">
                         <i class="fas fa-edit mr-2"></i>Edit Notice
                     </a>
-                    <form action="{{ route('notices.destroy', $notice) }}" method="POST" class="w-full"
+                    @if($notice->status === 'published' && auth()->user()->hasRole(['Admin', 'Super Admin']))
+                    <form action="{{ route('notices.resend', $notice) }}" method="POST" class="w-full border border-gray-200 rounded-lg p-3 space-y-2">
+                        @csrf
+                        <input type="hidden" name="token" value="{{ \Illuminate\Support\Str::uuid() }}">
+                        <p class="text-sm font-medium text-gray-900">Send this notice again</p>
+                        <label class="flex items-center text-sm text-gray-700"><input type="checkbox" name="channels[]" value="email" class="rounded border-gray-300 mr-2">E-mail</label>
+                        <label class="flex items-center text-sm text-gray-700"><input type="checkbox" name="channels[]" value="sms" class="rounded border-gray-300 mr-2">SMS</label>
+                        <label class="flex items-center text-sm text-gray-700"><input type="checkbox" name="confirm" value="1" class="rounded border-gray-300 mr-2">I confirm residents will receive this notice again</label>
+                        <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center justify-center">
+                            <i class="fas fa-paper-plane mr-2"></i>Send again
+                        </button>
+                    </form>
+                    @endif                    <form action="{{ route('notices.destroy', $notice) }}" method="POST" class="w-full"
                           onsubmit="return confirm('Are you sure you want to delete this notice?');">
                         @csrf
                         @method('DELETE')

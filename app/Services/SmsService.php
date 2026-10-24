@@ -17,6 +17,8 @@ class SmsService
     public const STATUS_SENT = 'sent';
     public const STATUS_SKIPPED_DISABLED = 'skipped_disabled';
     public const STATUS_SKIPPED_NOT_CONFIGURED = 'skipped_not_configured';
+    /** Real delivery is on for a test, but this recipient is not on the allow-list (EXTERNAL_MESSAGING_ALLOWLIST). */
+    public const STATUS_SKIPPED_NOT_ALLOWLISTED = 'skipped_not_allowlisted';
     /** The same notification already went to this number a moment ago (see App\Support\SendOnce). */
     public const STATUS_SKIPPED_DUPLICATE = 'skipped_duplicate';
     public const STATUS_FAILED = 'failed';
@@ -362,6 +364,11 @@ class SmsService
         }
 
         $template = \App\Models\SmsTemplate::forPurpose($societyId, $purpose);
+        // A template saved before this check existed can still hold another notification's wording (a society's "document" template
+        // that is really the bill text). Refuse to send it, with the reason in the log, instead of texting residents the wrong thing.
+        if ($template && ($conflict = \App\Support\DltTemplates::purposeConflict($purpose, (string) $template->body))) {
+            return self::failedSend('Not sent: the active template for "' . $purpose . '" holds another notification\'s wording. ' . $conflict, 'template_purpose_mismatch');
+        }
         // The template's own Message ID wins; the default from SMS settings is only the fallback for a template without one.
         $messageId = (string) ($template?->dlt_message_id ?: self::getSetting('fast2sms_template_id', '', $societyId));
         $senderId = (string) self::getSetting('fast2sms_sender_id', '', $societyId);
@@ -461,15 +468,22 @@ class SmsService
     private static function fast2smsGet(string $url, string $apiKey, callable $handler): array
     {
         // The same handling for the real transport and a test's mock: status 0 means nothing came back.
-        [$body, $httpCode] = self::$transportOverride !== null
-            ? (self::$transportOverride)($url, [], ['authorization: ' . $apiKey])
-            : Fast2SmsService::get($url, $apiKey);
+        if (self::$transportOverride !== null && \App\Support\ExternalMessaging::enabled() && !\App\Support\ExternalMessaging::requestAllowed($url)) {
+            // The test seam stands in for the network, not for the allow-list: an unlisted number is refused before it.
+            [$body, $httpCode] = [['skipped' => true, 'blocked_reason' => \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED], 0];
+        } else {
+            [$body, $httpCode] = self::$transportOverride !== null
+                ? (self::$transportOverride)($url, [], ['authorization: ' . $apiKey])
+                : Fast2SmsService::get($url, $apiKey);
+        }
 
         if ($httpCode === 0) {
             if (!empty($body['skipped'])) {
-                Log::notice('SMS suppressed', ['host' => 'www.fast2sms.com']);
+                $allowlisted = ($body['blocked_reason'] ?? null) === \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED;
+                Log::notice($allowlisted ? 'SMS blocked: recipient not on the test allow-list' : 'SMS suppressed', ['host' => 'www.fast2sms.com']);
 
-                return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
+                return ['success' => false, 'message' => $allowlisted ? (string) ($body['transport_error'] ?? \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE) : \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE,
+                    'status' => $allowlisted ? self::STATUS_SKIPPED_NOT_ALLOWLISTED : self::STATUS_SKIPPED_DISABLED, 'sent' => false];
             }
 
             return ['success' => false, 'message' => 'SMS service unavailable: ' . ($body['transport_error'] ?? 'no response')];
@@ -619,6 +633,11 @@ class SmsService
             return self::skipped(self::STATUS_SKIPPED_NOT_CONFIGURED, ['otp' => $otp]);
         }
 
+        // this provider names the recipient `number` and has no shared choke point: check the allow-list on the number itself
+        if (\App\Support\ExternalMessaging::enabled() && !\App\Support\ExternalMessaging::allows($phone)) {
+            return ['success' => false, 'message' => \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE, 'status' => self::STATUS_SKIPPED_NOT_ALLOWLISTED, 'sent' => false];
+        }
+
         $message = "Your OTP is {$otp}. Valid for 5 minutes. Do not share with anyone.";
 
         // BulkSMSPlans API — POST to /api/send_sms
@@ -652,6 +671,11 @@ class SmsService
 
         if (empty($apiUrl)) {
             return ['success' => false, 'message' => 'Custom SMS API URL not configured.'];
+        }
+
+        // the number sits inside an operator-written URL (any parameter name): check the number itself, not the URL
+        if (\App\Support\ExternalMessaging::enabled() && !\App\Support\ExternalMessaging::allows($phone)) {
+            return ['success' => false, 'message' => \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE, 'status' => self::STATUS_SKIPPED_NOT_ALLOWLISTED, 'sent' => false];
         }
 
         // Replace placeholders in URL (for GET-style APIs)
@@ -696,6 +720,10 @@ class SmsService
     private static function curlPost(string $url, array $data, array $headers, callable $handler): array
     {
         if (self::$transportOverride !== null) {
+            // The test seam stands in for the network, not for the allow-list: when delivery is on, an unlisted number is refused before it.
+            if (\App\Support\ExternalMessaging::enabled() && !\App\Support\ExternalMessaging::requestAllowed($url, $data)) {
+                return ['success' => false, 'message' => \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE, 'status' => self::STATUS_SKIPPED_NOT_ALLOWLISTED, 'sent' => false];
+            }
             [$body, $httpCode] = (self::$transportOverride)($url, $data, $headers);
 
             return $handler($body, $httpCode);
@@ -705,6 +733,10 @@ class SmsService
             Log::notice('SMS suppressed', ['host' => parse_url($url, PHP_URL_HOST)]);
 
             return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
+        }
+
+        if (!\App\Support\ExternalMessaging::requestAllowed($url, $data)) {
+            return ['success' => false, 'message' => \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE, 'status' => self::STATUS_SKIPPED_NOT_ALLOWLISTED, 'sent' => false];
         }
 
         \App\Support\ExternalMessaging::beforeOutbound('SMS', (string) parse_url($url, PHP_URL_HOST));
@@ -744,6 +776,9 @@ class SmsService
             Log::notice('SMS lookup suppressed', ['host' => parse_url($url, PHP_URL_HOST)]);
 
             return ['success' => false, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE, 'status' => self::STATUS_SKIPPED_DISABLED, 'sent' => false];
+        }
+        if (!\App\Support\ExternalMessaging::requestAllowed($url)) {
+            return ['success' => false, 'message' => \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE, 'status' => self::STATUS_SKIPPED_NOT_ALLOWLISTED, 'sent' => false];
         }
 
         \App\Support\ExternalMessaging::beforeOutbound('SMS', (string) parse_url($url, PHP_URL_HOST));

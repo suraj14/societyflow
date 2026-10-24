@@ -224,6 +224,14 @@ class FacilityBookingController extends Controller
             'approved' => (clone $statsQuery)->where('status', 'approved')->count(),
             'rejected' => (clone $statsQuery)->where('status', 'rejected')->count(),
             'completed' => (clone $statsQuery)->where('status', 'completed')->count(),
+            // the cards used to add up to less than the total: cancelled bookings had no card
+            'cancelled' => (clone $statsQuery)->where('status', 'cancelled')->count(),
+            // money, kept apart: an approved booking is owed, not received
+            'received_amount' => \App\Support\Money::sum((clone $statsQuery)->whereIn('payment_status', ['paid', 'refunded'])->get(['paid_amount', 'booking_amount'])->map(fn ($b) => $b->paid_amount ?? $b->booking_amount)),
+            'refunded_amount' => \App\Support\Money::sum((clone $statsQuery)->where('payment_status', 'refunded')->pluck('refunded_amount')),
+            // "Payment Pending" is about money, not approval: the same scope the Financial Report's receivable uses
+            'awaiting_amount' => \App\Support\Money::sum((clone $statsQuery)->awaitingPayment()->pluck('booking_amount')),
+            'awaiting_count' => (clone $statsQuery)->awaitingPayment()->count(),
         ];
 
         return view('facility-bookings.index', compact('bookings', 'facilities', 'stats', 'defaultStatus'));
@@ -829,9 +837,95 @@ class FacilityBookingController extends Controller
             ->with('success', 'Booking status updated successfully.');
     }
 
+    /**
+     * Record that a booking's charge was actually received (cash in hand, a cheque, a transfer, a UPI / card / online payment
+     * with its reference). Until this runs an approved booking is a receivable, not income. Idempotent: recording it again -
+     * a double click, a repeated callback - changes nothing and says so.
+     */
+    public function recordPayment(Request $request, FacilityBooking $facilityBooking)
+    {
+        if (!auth()->user()->can('manage_facilities')) {
+            abort(403, 'Only the society office can record a payment.');
+        }
+        $this->authorizeSocietyAccess($facilityBooking);
+
+        $data = $request->validate([
+            'payment_method'    => ['required', \Illuminate\Validation\Rule::in(FacilityBooking::PAYMENT_METHODS)],
+            // anything other than cash must carry the reference that proves it (cheque number, UTR, gateway id)
+            'payment_reference' => ['nullable', 'string', 'max:80', 'required_unless:payment_method,cash'],
+            'paid_on'           => ['nullable', 'date', 'before_or_equal:today'],
+        ], ['payment_reference.required_unless' => 'Enter the cheque number or transaction reference - a payment with no reference is not evidence.']);
+
+        if (!in_array($facilityBooking->status, ['approved', 'completed'], true)) {
+            return back()->with('error', 'Only an approved or completed booking can take a payment.');
+        }
+        if ((float) $facilityBooking->booking_amount <= 0) {
+            return back()->with('error', 'This booking has no charge to pay.');
+        }
+        if ($facilityBooking->payment_status !== 'pending') {
+            return back()->with('error', 'A payment is already recorded for this booking (' . $facilityBooking->payment_status . '). Nothing was changed.');
+        }
+
+        // the date money actually changed hands, at the current time of day on the society's calendar; never in the future
+        $when = !empty($data['paid_on'])
+            ? \App\Support\SocietyClock::now($facilityBooking->society_id)->setDateFrom(Carbon::parse($data['paid_on']))
+            : null;
+
+        try {
+            $recorded = $facilityBooking->recordPayment(auth()->user(), $data['payment_method'], $data['payment_reference'] ?? null, $when);
+        } catch (\Illuminate\Database\QueryException $e) {
+            if (str_contains($e->getMessage(), 'payment_reference')) {
+                return back()->withInput()->with('error', 'That transaction reference is already recorded against another booking.');
+            }
+            throw $e;
+        }
+
+        // false = the guarded write matched nothing: the booking was cancelled / already paid between the checks above and
+        // the write. Say which, from the stored row.
+        return back()->with($recorded ? 'success' : 'error', $recorded
+            ? 'Payment of ₹' . number_format((float) $facilityBooking->paid_amount, 2) . ' recorded for ' . $facilityBooking->booking_number . '.'
+            : ($facilityBooking->paymentBlockReason() ?? 'The payment could not be recorded. Nothing was changed.'));
+    }
+
+    /** Record money paid back for a paid booking. The payment record is kept; the refund is a second, dated record. */
+    public function recordRefund(Request $request, FacilityBooking $facilityBooking)
+    {
+        if (!auth()->user()->can('manage_facilities')) {
+            abort(403, 'Only the society office can record a refund.');
+        }
+        $this->authorizeSocietyAccess($facilityBooking);
+
+        $data = $request->validate([
+            'refund_amount' => ['required', 'numeric', 'gt:0'],
+            'refund_reason' => ['required', 'string', 'min:3', 'max:255'],
+        ]);
+
+        if ($facilityBooking->payment_status !== 'paid') {
+            return back()->with('error', $facilityBooking->payment_status === 'refunded'
+                ? 'This booking was already refunded. Nothing was changed.'
+                : 'There is no recorded payment to refund.');
+        }
+        if (\App\Support\Money::paise($data['refund_amount']) > \App\Support\Money::paise($facilityBooking->paid_amount ?? $facilityBooking->booking_amount)) {
+            return back()->withInput()->with('error', 'A refund cannot be more than the ₹' . number_format((float) ($facilityBooking->paid_amount ?? $facilityBooking->booking_amount), 2) . ' that was received.');
+        }
+
+        $done = $facilityBooking->recordRefund(auth()->user(), (float) $data['refund_amount'], $data['refund_reason']);
+
+        return back()->with($done ? 'success' : 'error', $done
+            ? 'Refund of ₹' . number_format((float) $facilityBooking->refunded_amount, 2) . ' recorded for ' . $facilityBooking->booking_number . '.'
+            : 'This booking was already refunded. Nothing was changed.');
+    }
+
     public function destroy(FacilityBooking $facilityBooking)
     {
         $this->authorizeSocietyAccess($facilityBooking);
+
+        // A booking that took money keeps its record: deleting it would erase income (or a refund) from the books. It is
+        // cancelled instead, and a refund is recorded if the money goes back.
+        if (in_array($facilityBooking->payment_status, ['paid', 'refunded'], true)) {
+            return redirect()->route('facility-bookings.index')
+                ->with('error', 'This booking has a recorded payment, so it cannot be deleted. Cancel it, and record a refund if the money is returned.');
+        }
 
         // Users can delete their own bookings, admin can delete any booking
         if (!auth()->user()->can('manage_facilities') && $facilityBooking->user_id !== auth()->id()) {

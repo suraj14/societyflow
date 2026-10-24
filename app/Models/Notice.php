@@ -12,6 +12,12 @@ class Notice extends Model
 {
     use HasFactory;
 
+    /** A notice made without an explicit choice notifies by e-mail and SMS; the form always states its choice, and an edit keeps what was saved. */
+    protected $attributes = [
+        'send_email' => true,
+        'send_sms' => true,
+    ];
+
     protected $fillable = [
         'society_id',
         'created_by',

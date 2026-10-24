@@ -27,14 +27,29 @@ class SendNoticePublishedSms
 
     public function handle(NoticePublished $event): void
     {
+        // the "Send SMS" checkbox on the notice: unticked means no SMS for this notice
+        if (!$event->notice->send_sms) {
+            return;
+        }
+
+        $this->send($event->notice);
+    }
+
+    /** SMS to the notice's audience (also used by an explicit resend; SendOnce still stops a copy inside the duplicate window). */
+    public function send(\App\Models\Notice $notice): void
+    {
         try {
-            $notice = $event->notice;
             $societyId = $notice->society_id;
 
+            // Active accounts of THIS society with a valid mobile number, once per number (two accounts on one phone get one SMS).
             $users = User::where('society_id', $societyId)
+                ->where('status', 'active')
                 ->whereNotNull('phone')
                 ->whereHas('roles', fn ($q) => $q->whereIn('name', self::ALLOWED_ROLES))
-                ->get();
+                ->get()
+                ->filter(fn ($u) => preg_match('/^[0-9]{10}$/', SmsService::normalizePhone((string) $u->phone)) === 1)
+                ->unique(fn ($u) => SmsService::normalizePhone((string) $u->phone))
+                ->values();
 
             if ($users->isEmpty()) {
                 return;
@@ -55,7 +70,7 @@ class SendNoticePublishedSms
             }
         } catch (\Throwable $e) {
             Log::error('Failed to send notice published SMS', [
-                'notice_id' => $event->notice->id ?? 'unknown',
+                'notice_id' => $notice->id ?? 'unknown',
                 'error' => $e->getMessage(),
             ]);
         }

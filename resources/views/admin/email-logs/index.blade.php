@@ -8,14 +8,22 @@
     </div>
 
     <!-- Statistics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-4 mb-8">
         <div class="bg-white rounded-lg shadow p-6">
             <div class="text-gray-600 text-sm font-medium">Total Emails</div>
             <div class="text-3xl font-bold text-gray-900 mt-2">{{ $stats['total'] }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-6">
-            <div class="text-green-600 text-sm font-medium">Sent</div>
+            <div class="text-green-600 text-sm font-medium" title="Handed to the mail server. This is not proof the recipient received it.">Sent to mail server</div>
             <div class="text-3xl font-bold text-green-600 mt-2">{{ $stats['sent'] }}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="text-amber-700 text-sm font-medium" title="Deliberately not sent: external messaging is switched off, or the recipient is outside the test allow-list.">Blocked (not sent)</div>
+            <div class="text-3xl font-bold text-amber-700 mt-2">{{ $stats['blocked'] }}</div>
+        </div>
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="text-gray-600 text-sm font-medium" title="Rendered only. External messaging is off or the mailer is the log file, so nothing left this server.">Simulated (not sent)</div>
+            <div class="text-3xl font-bold text-gray-600 mt-2">{{ $stats['simulated'] }}</div>
         </div>
         <div class="bg-white rounded-lg shadow p-6">
             <div class="text-yellow-600 text-sm font-medium">Pending</div>
@@ -34,7 +42,9 @@
                 <label class="block text-sm font-medium text-gray-700 mb-2">Status</label>
                 <select name="status" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">All Statuses</option>
-                    <option value="sent" {{ request('status') === 'sent' ? 'selected' : '' }}>Sent</option>
+                    <option value="sent" {{ request('status') === 'sent' ? 'selected' : '' }}>Sent to mail server</option>
+                    <option value="blocked" {{ request('status') === 'blocked' ? 'selected' : '' }}>Blocked (not sent)</option>
+                    <option value="simulated" {{ request('status') === 'simulated' ? 'selected' : '' }}>Simulated (not sent)</option>
                     <option value="pending" {{ request('status') === 'pending' ? 'selected' : '' }}>Pending</option>
                     <option value="failed" {{ request('status') === 'failed' ? 'selected' : '' }}>Failed</option>
                     <option value="bounced" {{ request('status') === 'bounced' ? 'selected' : '' }}>Bounced</option>
@@ -100,7 +110,11 @@
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             @if($log->status === 'sent')
-                                <span class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Sent</span>
+                                <span class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800" title="Handed to the mail server; not proof the recipient received it">Sent</span>
+                            @elseif($log->status === 'blocked')
+                                <span class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800" title="{{ $log->error_message }}">Blocked - not sent</span>
+                            @elseif($log->status === 'simulated')
+                                <span class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-700" title="Nothing left this server: external messaging is off or the mailer is the log file.">Simulated - not sent</span>
                             @elseif($log->status === 'pending')
                                 <span class="px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Pending</span>
                             @elseif($log->isSkipped())

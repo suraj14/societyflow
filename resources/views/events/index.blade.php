@@ -18,6 +18,12 @@
                     Add Event
                 </a>
             @endif
+            @if(auth()->user()->hasRole(['Super Admin', 'Admin', 'Accountant', 'Apartment Owner', 'Villa Owner', 'Tenant']))
+            <a href="{{ route('festivals.index') }}" class="inline-flex items-center px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors">
+                <i class="fas fa-hands-praying mr-2"></i>
+                Festivals
+            </a>
+            @endif
             <a href="{{ route('events.calendar') }}" class="inline-flex items-center px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors">
                 <i class="fas fa-calendar-alt mr-2"></i>
                 Calendar View

@@ -4,7 +4,7 @@
 @section('page-title', 'Scan QR')
 
 @section('content')
-<div class="p-4 space-y-5">
+<div class="p-4 space-y-5 md:p-6 md:max-w-xl">
 
     {{--
         Camera scan when the browser supports it, with a manual-entry field

@@ -316,14 +316,9 @@ class DashboardController extends Controller
             'pending_dues' => MaintenanceBill::when($societyId, fn($q) => $q->where('society_id', $societyId))
                 ->whereIn('status', ['pending', 'partial', 'overdue'])
                 ->sum('balance_amount'),
-            'monthly_collection' => Payment::when($societyId, fn($q) => $q->where('society_id', $societyId))
-                ->success()
-                ->whereMonth('payment_date', \App\Support\SocietyClock::now()->month)
-                ->whereYear('payment_date', \App\Support\SocietyClock::now()->year)
-                ->sum('amount'),
-            'total_collected' => Payment::when($societyId, fn($q) => $q->where('society_id', $societyId))
-                ->success()
-                ->sum('amount'),
+            // the same definition as the Financial Report: verified society collections, not owner rent, not "unrecorded"
+            'monthly_collection' => \App\Services\FinancialReportService::societyCollections($societyId, ...\App\Services\FinancialReportService::currentMonthBounds($societyId))['amount'],
+            'total_collected' => \App\Services\FinancialReportService::societyCollections($societyId)['amount'],
             'rent_tenants' => \App\Models\Tenant::when($societyId, fn($q) => $q->where('society_id', $societyId))
                 ->where('status', 'active')
                 ->count(),

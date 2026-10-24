@@ -76,6 +76,7 @@ class MoneyPrecisionTest extends TestCase
             $this->markTestSkipped('Declared scale only matters on MariaDB; SQLite stores what it is given.');
         }
 
+        // (*_by columns - paid_by, approved_by - are user references, not amounts, hence excluded below.)
         // Names that hold money. (Not "total": total_floors / total_slots are counters.)
         $money = 'amount|rent|deposit|charge|price|fee|salary|fine|penalty|balance|paid|cost';
 
@@ -84,7 +85,7 @@ class MoneyPrecisionTest extends TestCase
              WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME REGEXP ?
                AND ((DATA_TYPE = 'decimal' AND NUMERIC_SCALE < 2)
                  OR DATA_TYPE IN ('int', 'bigint', 'smallint', 'mediumint'))
-               AND COLUMN_NAME NOT REGEXP '_id$|^id$|count|number|days|months|years|minutes|hours|cycle|feedback'",
+               AND COLUMN_NAME NOT REGEXP '_id$|_by$|^id$|count|number|days|months|years|minutes|hours|cycle|feedback'",
             [$money]
         );
 

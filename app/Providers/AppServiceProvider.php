@@ -45,12 +45,27 @@ class AppServiceProvider extends ServiceProvider
         // settings, a future code path), a message is cancelled at the last
         // moment while the switch is off unless the active transport is a
         // local one. Returning false from MessageSending stops the send.
-        \Illuminate\Support\Facades\Event::listen(\Illuminate\Mail\Events\MessageSending::class, function () {
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Mail\Events\MessageSending::class, function (\Illuminate\Mail\Events\MessageSending $event) {
+            // The transport of the mailer this message is actually going through (Laravel names it in the event data):
+            // a named per-society mailer, or one cached before mail.default changed, is not the default mailer.
+            $transport = config('mail.mailers.' . ($event->data['mailer'] ?? config('mail.default')) . '.transport');
+
             if (\App\Support\ExternalMessaging::enabled()) {
+                // enabled for testing with an allow-list: a real transport may carry only mail addressed to listed people
+                if (\App\Support\ExternalMessaging::restricted() && !in_array($transport, ['log', 'array'], true)) {
+                    $to = array_merge($event->message->getTo(), $event->message->getCc(), $event->message->getBcc());
+                    foreach ($to as $address) {
+                        if (!\App\Support\ExternalMessaging::allows($address->getAddress())) {
+                            \Illuminate\Support\Facades\Log::notice('Outgoing mail cancelled: recipient is not on the test allow-list');
+
+                            return false;
+                        }
+                    }
+                }
+
                 return null;
             }
 
-            $transport = config('mail.mailers.' . config('mail.default') . '.transport');
             if (in_array($transport, ['log', 'array'], true)) {
                 return null;
             }

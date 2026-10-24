@@ -385,15 +385,22 @@ class WhatsAppService
         };
 
         // The same handling for the real transport and a test's mock: status 0 means nothing came back.
-        [$body, $httpCode] = self::$transportOverride !== null
-            ? (self::$transportOverride)($url, [], ['authorization: ' . $apiKey])
-            : Fast2SmsService::get($url, (string) $apiKey);
+        if (self::$transportOverride !== null && \App\Support\ExternalMessaging::enabled() && !\App\Support\ExternalMessaging::requestAllowed($url)) {
+            // The test seam stands in for the network, not for the allow-list: an unlisted number is refused before it.
+            [$body, $httpCode] = [['skipped' => true, 'blocked_reason' => \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED], 0];
+        } else {
+            [$body, $httpCode] = self::$transportOverride !== null
+                ? (self::$transportOverride)($url, [], ['authorization: ' . $apiKey])
+                : Fast2SmsService::get($url, (string) $apiKey);
+        }
 
         if ($httpCode === 0) {
             if (!empty($body['skipped'])) {
-                Log::notice('WhatsApp suppressed', ['host' => 'www.fast2sms.com']);
+                $allowlisted = ($body['blocked_reason'] ?? null) === \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED;
+                Log::notice($allowlisted ? 'WhatsApp blocked: recipient not on the test allow-list' : 'WhatsApp suppressed', ['host' => 'www.fast2sms.com']);
 
-                return ['success' => false, 'skipped' => true, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+                return ['success' => false, 'skipped' => true, 'blocked_reason' => $allowlisted ? \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED : \App\Support\ExternalMessaging::BLOCKED_DISABLED,
+                    'message' => $allowlisted ? (string) ($body['transport_error'] ?? \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE) : \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
             }
 
             // no answer at all (timeout, connection reset, DNS): worth trying again shortly
@@ -612,6 +619,11 @@ class WhatsAppService
     private static function curlPost(string $url, array $data, array $headers, callable $handler, bool $get = false): array
     {
         if (self::$transportOverride !== null) {
+            // The test seam stands in for the network, not for the allow-list: when delivery is on, an unlisted number is refused before it.
+            if (\App\Support\ExternalMessaging::enabled() && !\App\Support\ExternalMessaging::requestAllowed($url, $data)) {
+                return ['success' => false, 'skipped' => true, 'blocked_reason' => \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED,
+                    'message' => \App\Support\ExternalMessaging::allowlistProblem() ? \App\Support\ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE];
+            }
             [$body, $httpCode] = (self::$transportOverride)($url, $data, $headers);
 
             return $handler($body, $httpCode);
@@ -620,7 +632,12 @@ class WhatsAppService
         if (!\App\Support\ExternalMessaging::enabled()) {
             Log::notice('WhatsApp suppressed', ['host' => parse_url($url, PHP_URL_HOST)]);
 
-            return ['success' => false, 'skipped' => true, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+            return ['success' => false, 'skipped' => true, 'blocked_reason' => \App\Support\ExternalMessaging::BLOCKED_DISABLED, 'message' => \App\Support\ExternalMessaging::SUPPRESSED_MESSAGE];
+        }
+
+        if (!\App\Support\ExternalMessaging::requestAllowed($url, $data)) {
+            return ['success' => false, 'skipped' => true, 'blocked_reason' => \App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED,
+                'message' => \App\Support\ExternalMessaging::allowlistProblem() ? \App\Support\ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE];
         }
 
         \App\Support\ExternalMessaging::beforeOutbound('WhatsApp', (string) parse_url($url, PHP_URL_HOST));

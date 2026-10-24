@@ -13,10 +13,12 @@
                 <p class="text-sm text-gray-600 mt-1">Manage all payment transactions</p>
             </div>
             <div class="flex gap-3">
-                <button onclick="exportPayments()" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md font-medium hover:bg-gray-50 transition-colors inline-flex items-center">
+                @if(auth()->user()->hasRole(['Super Admin', 'Admin', 'Accountant']))
+                <a href="{{ route('payments.export') }}" class="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md font-medium hover:bg-gray-50 transition-colors inline-flex items-center" title="Download every payment record as a CSV file">
                     <i class="fas fa-download mr-2"></i>
-                    Export
-                </button>
+                    Export CSV
+                </a>
+                @endif
                 <a href="{{ route('payments.create') }}" 
                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors inline-flex items-center">
                     <i class="fas fa-plus mr-2"></i>
@@ -42,7 +44,7 @@
                         </div>
                         <div class="ml-5 w-0 flex-1">
                             <dl>
-                                <dt class="text-sm font-medium text-gray-500 truncate">Total Collected</dt>
+                                <dt class="text-sm font-medium text-gray-500 truncate">{{ $stats['society_view'] ? 'Total Collected' : 'Total Paid' }}</dt>
                                 <dd class="text-2xl font-bold text-gray-900">₹{{ number_format($stats['total_amount'], 2) }}</dd>
                             </dl>
                         </div>
@@ -60,7 +62,7 @@
                         </div>
                         <div class="ml-5 w-0 flex-1">
                             <dl>
-                                <dt class="text-sm font-medium text-gray-500 truncate">Total Payments</dt>
+                                <dt class="text-sm font-medium text-gray-500 truncate">{{ $stats['society_view'] ? 'Collections Counted' : 'Payments Made' }}</dt>
                                 <dd class="text-2xl font-bold text-gray-900">{{ $stats['total_count'] }}</dd>
                             </dl>
                         </div>
@@ -104,6 +106,16 @@
                 </div>
             </div>
         </div>
+        {{-- Why this total can be lower than the sum of the rows below --}}
+        @if($stats['society_view'] && ($stats['rent_amount'] > 0 || $stats['no_evidence_amount'] > 0 || $stats['pending_amount'] > 0 || $stats['not_received_amount'] > 0))
+            <div class="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 mb-6 text-sm text-gray-700" role="note">
+                <strong>Total Collected is the money the society actually received</strong> (successful, with a recorded method, not owner rent). Not counted in it:
+                @if($stats['rent_amount'] > 0)owner rent ₹{{ number_format($stats['rent_amount'], 2) }} ({{ $stats['rent_count'] }}) - it belongs to the owners; @endif
+                @if($stats['no_evidence_amount'] > 0)<span class="text-amber-800">₹{{ number_format($stats['no_evidence_amount'], 2) }} ({{ $stats['no_evidence_count'] }}) recorded as paid with <strong>no evidence of receipt</strong> (method "Unrecorded");</span> @endif
+                @if($stats['pending_amount'] > 0)pending ₹{{ number_format($stats['pending_amount'], 2) }} ({{ $stats['pending_count'] }}) awaiting verification; @endif
+                @if($stats['not_received_amount'] > 0)failed or cancelled ₹{{ number_format($stats['not_received_amount'], 2) }} ({{ $stats['not_received_count'] }}).@endif
+            </div>
+        @endif
 
         <!-- Search and Filters -->
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
@@ -371,7 +383,7 @@ function toggleActionMenu(paymentId) {
 // View Payment
 function viewPayment(paymentId) {
     // Redirect to payment show page
-    window.location.href = `/payments/${paymentId}`;
+    window.location.href = `{{ url('/') }}/payments/${paymentId}`;
 }
 
 // Close View Payment Modal
@@ -382,13 +394,13 @@ function closeViewPaymentModal() {
 // Edit Payment
 function editPayment(paymentId) {
     // Redirect to edit page
-    window.location.href = `/payments/${paymentId}/edit`;
+    window.location.href = `{{ url('/') }}/payments/${paymentId}/edit`;
 }
 
 // Print Receipt
 function printReceipt(paymentId) {
     // Open receipt in new window for printing
-    window.open(`/payments/${paymentId}/receipt`, '_blank');
+    window.open(`{{ url('/') }}/payments/${paymentId}/receipt`, '_blank');
     
     // Close action menu
     document.getElementById(`action-menu-${paymentId}`).classList.add('hidden');
@@ -405,7 +417,7 @@ function deletePayment(paymentId) {
         // Create form and submit
         const form = document.createElement('form');
         form.method = 'POST';
-        form.action = `/payments/${paymentId}`;
+        form.action = `{{ url('/') }}/payments/${paymentId}`;
         
         const csrfToken = document.createElement('input');
         csrfToken.type = 'hidden';
@@ -430,7 +442,7 @@ function deletePayment(paymentId) {
 // Edit Payment
 function editPayment(paymentId) {
     // Redirect to edit page
-    window.location.href = `/payments/${paymentId}/edit`;
+    window.location.href = `{{ url('/') }}/payments/${paymentId}/edit`;
 }
 
 // Delete Payment
@@ -439,7 +451,7 @@ function deletePayment(paymentId) {
         // Create form and submit
         const form = document.createElement('form');
         form.method = 'POST';
-        form.action = `/payments/${paymentId}`;
+        form.action = `{{ url('/') }}/payments/${paymentId}`;
         
         const csrfToken = document.createElement('input');
         csrfToken.type = 'hidden';
@@ -461,11 +473,7 @@ function deletePayment(paymentId) {
     document.getElementById(`action-menu-${paymentId}`).classList.add('hidden');
 }
 
-// Export Payments
-function exportPayments() {
-    // Implement export functionality
-    alert('Export functionality will be implemented');
-}
+
 
 // Close action menus when clicking outside
 document.addEventListener('click', function(event) {

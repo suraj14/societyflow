@@ -65,6 +65,10 @@ class EmailLogController extends BaseController
         $stats = [
             'total' => EmailLog::when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
             'sent' => EmailLog::sent()->when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
+            // rendered but never handed to a mail server (external messaging off, or the log-file mailer)
+            // deliberately not sent: external messaging off, or a recipient outside the test allow-list
+            'blocked' => EmailLog::where('status', 'blocked')->when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
+            'simulated' => EmailLog::where('status', 'simulated')->when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
             // "Skipped" rows (never attempted) are stored as failed + a marker; they are not failures.
             'failed' => EmailLog::failed()->where(fn ($q) => $q->whereNull('error_message')->orWhere('error_message', 'not like', EmailLog::SKIPPED_PREFIX . '%'))->when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),
             'skipped' => EmailLog::failed()->where('error_message', 'like', EmailLog::SKIPPED_PREFIX . '%')->when($societyId, fn($q) => $q->where('society_id', $societyId))->count(),

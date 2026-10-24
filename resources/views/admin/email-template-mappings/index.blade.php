@@ -141,7 +141,7 @@ function openTemplateSelector(eventValue, eventLabel) {
     document.getElementById('modalTitle').textContent = `Select Template for: ${eventLabel}`;
     
     // Fetch available templates
-    fetch(`/admin/email-template-mappings/templates/${eventValue}`)
+    fetch(`{{ url('/') }}/admin/email-template-mappings/templates/${eventValue}`)
         .then(response => response.json())
         .then(data => {
             const templateList = document.getElementById('templateList');
@@ -153,21 +153,24 @@ function openTemplateSelector(eventValue, eventLabel) {
                 data.templates.forEach(template => {
                     const div = document.createElement('div');
                     div.className = 'p-3 border border-gray-200 rounded-lg hover:bg-blue-50 cursor-pointer transition';
+                    // template names / subjects are typed by people: built as text, never as markup
                     div.innerHTML = `
                         <div class="flex justify-between items-start">
                             <div class="flex-1">
-                                <p class="font-medium text-gray-900">${template.name}</p>
-                                <p class="text-sm text-gray-600 mt-1">Subject: ${template.subject}</p>
+                                <p class="font-medium text-gray-900" data-role="name"></p>
+                                <p class="text-sm text-gray-600 mt-1" data-role="subject"></p>
                             </div>
-                            <button 
+                            <button
                                 type="button"
                                 class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                                onclick="selectTemplate(${template.id}, '${template.name}')"
                             >
                                 Select
                             </button>
                         </div>
                     `;
+                    div.querySelector('[data-role="name"]').textContent = template.name;
+                    div.querySelector('[data-role="subject"]').textContent = 'Subject: ' + template.subject;
+                    div.querySelector('button').addEventListener('click', () => selectTemplate(template.id, template.name));
                     templateList.appendChild(div);
                 });
             }
@@ -183,7 +186,7 @@ function openTemplateSelector(eventValue, eventLabel) {
 function selectTemplate(templateId, templateName) {
     if (!currentEvent) return;
 
-    fetch(`/admin/email-template-mappings/${currentEvent}`, {
+    fetch(`{{ url('/') }}/admin/email-template-mappings/${currentEvent}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
@@ -228,7 +231,7 @@ function submitTestEmail(event) {
 
     const email = document.getElementById('testEmailInput').value;
 
-    fetch(`/admin/email-template-mappings/${currentEvent}/test`, {
+    fetch(`{{ url('/') }}/admin/email-template-mappings/${currentEvent}/test`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -254,7 +257,7 @@ function submitTestEmail(event) {
 function removeMapping(eventValue) {
     if (!confirm('Are you sure you want to remove this template mapping?')) return;
 
-    fetch(`/admin/email-template-mappings/${eventValue}`, {
+    fetch(`{{ url('/') }}/admin/email-template-mappings/${eventValue}`, {
         method: 'DELETE',
         headers: {
             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,

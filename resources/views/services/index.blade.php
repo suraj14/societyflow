@@ -329,7 +329,7 @@ function filterByService(serviceName) {
 }
 
 function openUpdateModal(providerId, providerName, availability, price, priceType) {
-    document.getElementById('updateForm').action = `/service-providers/${providerId}/quick-update`;
+    document.getElementById('updateForm').action = `{{ url('/') }}/service-providers/${providerId}/quick-update`;
     document.getElementById('updateProviderName').textContent = providerName;
     document.getElementById('updateAvailability').value = availability;
     document.getElementById('updatePrice').value = price || '';
@@ -345,7 +345,7 @@ function closeUpdateModal() {
 function toggleAvailability(providerId, currentAvailability) {
     const newAvailability = currentAvailability === 'available' ? 'not_available' : 'available';
     
-    fetch(`/service-providers/${providerId}/toggle-availability`, {
+    fetch(`{{ url('/') }}/service-providers/${providerId}/toggle-availability`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

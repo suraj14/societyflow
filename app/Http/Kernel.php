@@ -61,6 +61,11 @@ class Kernel extends HttpKernel
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+            // A password change ends every OTHER web session of that user (and their remember-me cookie): the session keeps a hash of the
+            // password and is refused once it no longer matches. Needs the session started and the user resolvable, hence here.
+            \Illuminate\Session\Middleware\AuthenticateSession::class,
+            // inactive / suspended accounts lose their open web session on the next request
+            \App\Http\Middleware\EnsureAccountActive::class,
             \App\Http\Middleware\VerifyCsrfToken::class,
             // REMOVED: RefreshCsrfToken - causes token mismatch issues
             // Laravel's built-in CSRF protection is sufficient
@@ -76,12 +81,16 @@ class Kernel extends HttpKernel
             // later cannot quietly become guard-accessible - which is how
             // /payments and /utility-bills became reachable.
             \App\Http\Middleware\RestrictGuardAccess::class,
+            // A module switched off in Settings -> Features is refused here, not just hidden from the menu.
+            \App\Http\Middleware\EnsureModuleEnabled::class,
         ],
 
         'api' => [
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
             \Illuminate\Routing\Middleware\ThrottleRequests::class.':api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\EnsureAccountActive::class,
+            \App\Http\Middleware\EnsureModuleEnabled::class,
         ],
     ];
 

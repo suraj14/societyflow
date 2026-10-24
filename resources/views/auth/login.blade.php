@@ -4,368 +4,162 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Login - SocietyFlow</title>
+    <meta name="robots" content="noindex">
+    <title>Sign in - SocietyFlow</title>
     <!-- Tailwind CSS Direct from CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        .gradient-bg {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .brand-panel {
+            background:
+                radial-gradient(60rem 40rem at -10% -10%, rgba(167, 139, 250, .55), transparent 60%),
+                radial-gradient(50rem 40rem at 110% 110%, rgba(56, 189, 248, .35), transparent 55%),
+                linear-gradient(135deg, #4338ca 0%, #6d28d9 55%, #7c3aed 100%);
         }
-        .card-shadow {
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-        }
-        .demo-card {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
-        }
-        .copy-btn:hover {
-            transform: scale(1.1);
-        }
-        .copy-btn.copied {
-            color: #10b981;
-        }
+        .soft-card { box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 24px 48px -16px rgba(15, 23, 42, .18); }
+        .field:focus { outline: none; }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
     </style>
 </head>
-<body class="gradient-bg min-h-screen">
-    <div class="min-h-screen flex flex-col items-center justify-center p-4">
-        <!-- Main Container -->
-        <div class="w-full max-w-md">
-            <!-- Logo & Brand -->
-            <div class="text-center mb-8">
-                <div class="inline-flex items-center justify-center w-20 h-20 bg-white rounded-2xl shadow-lg mb-4 p-2">
-                    <svg viewBox="0 0 100 100" class="w-full h-full">
-                        <defs>
-                            <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style="stop-color:#667eea"/>
-                                <stop offset="100%" style="stop-color:#764ba2"/>
-                            </linearGradient>
-                        </defs>
-                        <rect x="5" y="5" width="90" height="90" rx="15" fill="url(#logoGradient)"/>
-                        <!-- Building -->
-                        <rect x="15" y="25" width="25" height="55" fill="white" opacity="0.9"/>
-                        <rect x="18" y="30" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="25" y="30" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="32" y="30" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="18" y="38" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="25" y="38" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="32" y="38" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="18" y="46" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="25" y="46" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="32" y="46" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="18" y="54" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="25" y="54" width="5" height="5" fill="url(#logoGradient)"/>
-                        <rect x="32" y="54" width="5" height="5" fill="url(#logoGradient)"/>
-                        <!-- House -->
-                        <polygon points="70,45 50,30 50,45 45,45 45,80 70,80 70,45" fill="white" opacity="0.9"/>
-                        <polygon points="70,45 50,30 90,30 90,45" fill="white" opacity="0.7"/>
-                        <rect x="55" y="55" width="8" height="8" fill="url(#logoGradient)"/>
-                        <rect x="55" y="67" width="8" height="13" fill="url(#logoGradient)"/>
-                        <!-- Wave -->
-                        <path d="M10,75 Q30,65 50,75 T90,75 L90,85 Q70,75 50,85 T10,85 Z" fill="white" opacity="0.3"/>
-                    </svg>
-                </div>
-                <h1 class="text-3xl font-bold text-white">
-                    <span class="text-white">Society</span><span class="text-purple-200">Flow</span>
-                </h1>
-                <p class="text-purple-200 mt-1">Society & Apartment Management System</p>
+<body class="min-h-screen bg-slate-50 text-slate-800 antialiased">
+    <div class="min-h-screen lg:grid lg:grid-cols-2">
+
+        <!-- Brand panel (desktop) -->
+        <aside class="brand-panel hidden lg:flex flex-col justify-between p-12 text-white">
+            <a href="/" class="inline-flex items-center gap-3 w-fit">
+                <span class="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-white/15 ring-1 ring-white/30 backdrop-blur">
+                    <i class="fas fa-building text-lg"></i>
+                </span>
+                <span class="text-2xl font-bold tracking-tight">Society<span class="text-violet-200">Flow</span></span>
+            </a>
+
+            <div class="max-w-md">
+                <h2 class="text-4xl font-bold leading-tight tracking-tight">One calm place to run your whole community.</h2>
+                <p class="mt-4 text-violet-100 text-lg">Bills and payments, visitors at the gate, notices, bookings and complaints - clear for residents, simple for the committee.</p>
+                <ul class="mt-8 space-y-4 text-violet-50">
+                    <li class="flex items-start gap-3"><span class="mt-0.5 inline-flex w-7 h-7 shrink-0 items-center justify-center rounded-lg bg-white/15"><i class="fas fa-user-check text-sm"></i></span><span><strong class="font-semibold text-white">Visitor approval</strong><br><span class="text-violet-100 text-sm">The gate asks, residents decide, everything is recorded.</span></span></li>
+                    <li class="flex items-start gap-3"><span class="mt-0.5 inline-flex w-7 h-7 shrink-0 items-center justify-center rounded-lg bg-white/15"><i class="fas fa-indian-rupee-sign text-sm"></i></span><span><strong class="font-semibold text-white">Honest finances</strong><br><span class="text-violet-100 text-sm">What is billed, what is received and what is owed - never mixed up.</span></span></li>
+                    <li class="flex items-start gap-3"><span class="mt-0.5 inline-flex w-7 h-7 shrink-0 items-center justify-center rounded-lg bg-white/15"><i class="fas fa-shield-halved text-sm"></i></span><span><strong class="font-semibold text-white">Your society's data stays yours</strong><br><span class="text-violet-100 text-sm">Every society is fully separated from every other.</span></span></li>
+                </ul>
             </div>
 
-            <!-- Login Card -->
-            <div class="bg-white rounded-2xl card-shadow p-8">
-                <div class="text-center mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800">Welcome Back</h2>
-                    <p class="text-gray-500 mt-1">Sign in to your account</p>
-                </div>
+            <p class="text-sm text-violet-200">&copy; {{ date('Y') }} SocietyFlow. All rights reserved.</p>
+        </aside>
 
-                <!-- Success/Error Messages -->
+        <!-- Sign-in -->
+        <main class="flex items-center justify-center px-5 py-10 sm:px-8">
+            <div class="w-full max-w-md">
 
+                <!-- Brand (mobile) -->
+                <a href="/" class="lg:hidden flex items-center justify-center gap-3 mb-8">
+                    <span class="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg">
+                        <i class="fas fa-building text-lg"></i>
+                    </span>
+                    <span class="text-2xl font-bold tracking-tight text-slate-900">Society<span class="text-violet-600">Flow</span></span>
+                </a>
 
-                <!-- Login Form -->
-                @if(session('success'))
-                    <div class="mb-5 p-3 rounded-xl bg-green-50 border border-green-200 text-sm text-green-800 flex items-start" role="status">
-                        <i class="fas fa-check-circle mr-2 mt-0.5"></i> <span>{{ session('success') }}</span>
+                <div class="soft-card rounded-3xl bg-white p-7 sm:p-9 ring-1 ring-slate-200/70">
+                    <div class="mb-7">
+                        <h1 class="text-2xl font-bold tracking-tight text-slate-900">Welcome back</h1>
+                        <p class="mt-1 text-slate-500">Sign in to your account to continue.</p>
                     </div>
-                @endif
 
-                <form method="POST" action="{{ route('login') }}" class="space-y-5">
-                    @csrf
-                    
-                    <!-- Email Field -->
-                    <div>
-                        <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-envelope text-gray-400 mr-1"></i> Email Address
+                    @if(session('success') || session('status'))
+                        <div class="mb-5 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800" role="status">
+                            <i class="fas fa-circle-check mt-0.5"></i><span>{{ session('success') ?? session('status') }}</span>
+                        </div>
+                    @endif
+                    @if(session('error'))
+                        <div class="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+                            <i class="fas fa-triangle-exclamation mt-0.5"></i><span>{{ session('error') }}</span>
+                        </div>
+                    @endif
+
+                    <form method="POST" action="{{ route('login') }}" class="space-y-5" novalidate>
+                        @csrf
+
+                        <div>
+                            <label for="email" class="mb-1.5 block text-sm font-medium text-slate-700">Email address</label>
+                            <div class="relative">
+                                <span class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400"><i class="far fa-envelope"></i></span>
+                                <input type="email" name="email" id="email" required autofocus autocomplete="username" inputmode="email"
+                                       value="{{ old('email') }}" placeholder="you@example.com"
+                                       aria-invalid="{{ $errors->has('email') ? 'true' : 'false' }}"
+                                       class="field w-full rounded-xl border bg-white py-3 pl-11 pr-4 text-slate-900 placeholder-slate-400 transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100 {{ $errors->has('email') ? 'border-red-400' : 'border-slate-300' }}">
+                            </div>
+                            @error('email')
+                                <p class="mt-2 flex items-center gap-1.5 text-sm text-red-600" role="alert"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        <div>
+                            <div class="mb-1.5 flex items-center justify-between">
+                                <label for="password" class="block text-sm font-medium text-slate-700">Password</label>
+                                <a href="{{ route('password.request') }}" class="text-sm font-medium text-violet-600 hover:text-violet-800">Forgot password?</a>
+                            </div>
+                            <div class="relative">
+                                <span class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400"><i class="fas fa-lock"></i></span>
+                                <input type="password" name="password" id="password" required autocomplete="current-password" placeholder="Enter your password"
+                                       aria-invalid="{{ $errors->has('password') ? 'true' : 'false' }}"
+                                       class="field w-full rounded-xl border bg-white py-3 pl-11 pr-12 text-slate-900 placeholder-slate-400 transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100 {{ $errors->has('password') ? 'border-red-400' : 'border-slate-300' }}">
+                                <button type="button" onclick="togglePassword()" aria-label="Show or hide password" aria-pressed="false" id="toggleBtn"
+                                        class="absolute inset-y-0 right-0 flex items-center px-4 text-slate-400 hover:text-slate-600">
+                                    <i class="fas fa-eye" id="toggleIcon"></i>
+                                </button>
+                            </div>
+                            @error('password')
+                                <p class="mt-2 flex items-center gap-1.5 text-sm text-red-600" role="alert"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        <label class="flex cursor-pointer items-center gap-2.5">
+                            <input type="checkbox" name="remember" id="remember" class="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500">
+                            <span class="text-sm text-slate-600">Keep me signed in on this device</span>
                         </label>
-                        <input type="email" 
-                               name="email" 
-                               id="email" 
-                               required 
-                               autofocus
-                               value="{{ old('email') }}"
-                               class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all @error('email') border-red-500 @enderror"
-                               placeholder="Enter your email">
-                        @error('email')
-                            <p class="mt-2 text-sm text-red-600 flex items-center">
-                                <i class="fas fa-exclamation-triangle mr-1"></i> {{ $message }}
-                            </p>
-                        @enderror
-                    </div>
 
-                    <!-- Password Field -->
-                    <div>
-                        <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
-                            <i class="fas fa-lock text-gray-400 mr-1"></i> Password
-                        </label>
-                        <div class="relative">
-                            <input type="password" 
-                                   name="password" 
-                                   id="password" 
-                                   required
-                                   class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all pr-12 @error('password') border-red-500 @enderror"
-                                   placeholder="Enter your password">
-                            <button type="button" 
-                                    onclick="togglePassword()" 
-                                    class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                <i class="fas fa-eye" id="toggleIcon"></i>
-                            </button>
-                        </div>
-                        @error('password')
-                            <p class="mt-2 text-sm text-red-600 flex items-center">
-                                <i class="fas fa-exclamation-triangle mr-1"></i> {{ $message }}
-                            </p>
-                        @enderror
-                    </div>
+                        <button type="submit"
+                                class="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-3 font-semibold text-white shadow-lg shadow-violet-500/25 transition hover:from-indigo-700 hover:to-violet-700 focus:outline-none focus:ring-4 focus:ring-violet-200 active:scale-[.99]">
+                            Sign in <i class="fas fa-arrow-right ml-1.5 text-sm"></i>
+                        </button>
+                    </form>
 
-                    <!-- Remember Me & Forgot Password -->
-                    <div class="flex items-center justify-between">
-                        <label class="flex items-center cursor-pointer">
-                            <input type="checkbox" 
-                                   name="remember" 
-                                   id="remember"
-                                   class="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500">
-                            <span class="ml-2 text-sm text-gray-600">Remember me</span>
-                        </label>
-                        <a href="{{ route('password.request') }}" class="text-sm text-purple-600 hover:text-purple-800 font-medium">
-                            Forgot password?
-                        </a>
-                    </div>
-
-                    <!-- Login Button -->
-                    <button type="submit" 
-                            class="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 px-4 rounded-xl font-semibold hover:from-purple-700 hover:to-indigo-700 focus:ring-4 focus:ring-purple-200 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
-                        <i class="fas fa-sign-in-alt mr-2"></i> Sign In
-                    </button>
-                </form>
-
-                <!-- Divider -->
-                <div class="relative my-6">
-                    <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-gray-200"></div>
-                    </div>
-                    <div class="relative flex justify-center text-sm">
-                        <span class="px-4 bg-white text-gray-500">or</span>
+                    <div class="mt-7 border-t border-slate-100 pt-6 text-center text-sm text-slate-600">
+                        New to SocietyFlow?
+                        <a href="{{ route('register') }}" class="font-semibold text-violet-600 hover:text-violet-800">Create an account</a>
                     </div>
                 </div>
 
-                <!-- Register & Home Links -->
-                <div class="text-center space-y-3">
-                    <p class="text-gray-600">
-                        Don't have an account? 
-                        <a href="{{ route('register') }}" class="text-purple-600 hover:text-purple-800 font-semibold">
-                            Create Account
-                        </a>
-                    </p>
-                    <a href="/" class="inline-flex items-center text-gray-500 hover:text-gray-700 text-sm">
-                        <i class="fas fa-home mr-1"></i> Go to Home
-                    </a>
-                </div>
-            </div>
-
-            <!-- Demo Credentials Card -->
-            <div class="mt-6 bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
-                <div class="flex items-center justify-center mb-4">
-                    <i class="fas fa-key text-yellow-300 mr-2"></i>
-                    <h3 class="text-white font-semibold">Demo Credentials</h3>
-                </div>
-                
-                <div class="space-y-2">
-                    <!-- Super Admin -->
-                    <div class="demo-credential flex items-center justify-between bg-white/90 rounded-lg px-4 py-2 cursor-pointer hover:bg-white transition-all" 
-                         onclick="fillCredentials('superadmin@societyflow.com', 'password')">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 bg-red-100 text-red-600 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-crown text-sm"></i>
-                            </span>
-                            <div>
-                                <p class="text-sm font-medium text-gray-800">Super Admin</p>
-                                <p class="text-xs text-gray-500">superadmin@societyflow.com</p>
-                            </div>
-                        </div>
-                        <button type="button" class="copy-btn text-gray-400 hover:text-purple-600 transition-all" onclick="event.stopPropagation(); copyCredentials('superadmin@societyflow.com', 'password', this)">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-
-                    <!-- Society Admin -->
-                    <div class="demo-credential flex items-center justify-between bg-white/90 rounded-lg px-4 py-2 cursor-pointer hover:bg-white transition-all" 
-                         onclick="fillCredentials('admin@societyflow.com', 'password')">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-user-shield text-sm"></i>
-                            </span>
-                            <div>
-                                <p class="text-sm font-medium text-gray-800">Society Admin</p>
-                                <p class="text-xs text-gray-500">admin@societyflow.com</p>
-                            </div>
-                        </div>
-                        <button type="button" class="copy-btn text-gray-400 hover:text-purple-600 transition-all" onclick="event.stopPropagation(); copyCredentials('admin@societyflow.com', 'password', this)">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-
-                    <!-- Owner (Multi-Property) -->
-                    <div class="demo-credential flex items-center justify-between bg-white/90 rounded-lg px-4 py-2 cursor-pointer hover:bg-white transition-all" 
-                         onclick="fillCredentials('villaowner@societyflow.com', 'password')">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-home text-sm"></i>
-                            </span>
-                            <div>
-                                <p class="text-sm font-medium text-gray-800">Owner</p>
-                                <p class="text-xs text-gray-500">villaowner@societyflow.com</p>
-                            </div>
-                        </div>
-                        <button type="button" class="copy-btn text-gray-400 hover:text-purple-600 transition-all" onclick="event.stopPropagation(); copyCredentials('villaowner@societyflow.com', 'password', this)">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-
-                    <!-- Tenant -->
-                    <div class="demo-credential flex items-center justify-between bg-white/90 rounded-lg px-4 py-2 cursor-pointer hover:bg-white transition-all" 
-                         onclick="fillCredentials('tenant@societyflow.com', 'password')">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-user text-sm"></i>
-                            </span>
-                            <div>
-                                <p class="text-sm font-medium text-gray-800">Tenant</p>
-                                <p class="text-xs text-gray-500">tenant@societyflow.com</p>
-                            </div>
-                        </div>
-                        <button type="button" class="copy-btn text-gray-400 hover:text-purple-600 transition-all" onclick="event.stopPropagation(); copyCredentials('tenant@societyflow.com', 'password', this)">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-
-                    <!-- Staff -->
-                    <div class="demo-credential flex items-center justify-between bg-white/90 rounded-lg px-4 py-2 cursor-pointer hover:bg-white transition-all" 
-                         onclick="fillCredentials('staff@societyflow.com', 'password')">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 bg-teal-100 text-teal-600 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-hard-hat text-sm"></i>
-                            </span>
-                            <div>
-                                <p class="text-sm font-medium text-gray-800">Staff</p>
-                                <p class="text-xs text-gray-500">staff@societyflow.com</p>
-                            </div>
-                        </div>
-                        <button type="button" class="copy-btn text-gray-400 hover:text-purple-600 transition-all" onclick="event.stopPropagation(); copyCredentials('staff@societyflow.com', 'password', this)">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-
-                    <!-- Accountant -->
-                    <div class="demo-credential flex items-center justify-between bg-white/90 rounded-lg px-4 py-2 cursor-pointer hover:bg-white transition-all" 
-                         onclick="fillCredentials('accountant@societyflow.com', 'password')">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-calculator text-sm"></i>
-                            </span>
-                            <div>
-                                <p class="text-sm font-medium text-gray-800">Accountant</p>
-                                <p class="text-xs text-gray-500">accountant@societyflow.com</p>
-                            </div>
-                        </div>
-                        <button type="button" class="copy-btn text-gray-400 hover:text-purple-600 transition-all" onclick="event.stopPropagation(); copyCredentials('accountant@societyflow.com', 'password', this)">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <p class="text-center text-purple-200 text-xs mt-4">
-                    <i class="fas fa-info-circle mr-1"></i> Click to auto-fill credentials
+                <p class="mt-6 text-center text-sm text-slate-500">
+                    <a href="/" class="inline-flex items-center gap-1.5 hover:text-slate-700"><i class="fas fa-arrow-left text-xs"></i> Back to home</a>
                 </p>
+                <p class="mt-6 text-center text-xs text-slate-400 lg:hidden">&copy; {{ date('Y') }} SocietyFlow. All rights reserved.</p>
             </div>
-
-            <!-- Footer -->
-            <div class="text-center mt-6 text-purple-200 text-sm">
-                <p>&copy; {{ date('Y') }} SocietyFlow. All rights reserved.</p>
-            </div>
-        </div>
+        </main>
     </div>
 
     <script>
         // Prevent back button from showing cached page
-        window.addEventListener('pageshow', function(event) {
+        window.addEventListener('pageshow', function (event) {
             if (event.persisted) {
                 location.reload(true);
             }
         });
-    </script>
 
-    <script>
         // Toggle password visibility
         function togglePassword() {
-            const passwordInput = document.getElementById('password');
-            const toggleIcon = document.getElementById('toggleIcon');
-            
-            if (passwordInput.type === 'password') {
-                passwordInput.type = 'text';
-                toggleIcon.classList.remove('fa-eye');
-                toggleIcon.classList.add('fa-eye-slash');
-            } else {
-                passwordInput.type = 'password';
-                toggleIcon.classList.remove('fa-eye-slash');
-                toggleIcon.classList.add('fa-eye');
-            }
-        }
-
-        // Fill credentials in form
-        function fillCredentials(email, password) {
-            document.getElementById('email').value = email;
-            document.getElementById('password').value = password;
-            
-            // Visual feedback
-            const emailInput = document.getElementById('email');
-            const passwordInput = document.getElementById('password');
-            
-            emailInput.classList.add('ring-2', 'ring-green-500');
-            passwordInput.classList.add('ring-2', 'ring-green-500');
-            
-            setTimeout(() => {
-                emailInput.classList.remove('ring-2', 'ring-green-500');
-                passwordInput.classList.remove('ring-2', 'ring-green-500');
-            }, 1000);
-        }
-
-        // Copy credentials to clipboard
-        function copyCredentials(email, password, button) {
-            const text = `Email: ${email}\nPassword: ${password}`;
-            navigator.clipboard.writeText(text).then(() => {
-                const icon = button.querySelector('i');
-                icon.classList.remove('fa-copy');
-                icon.classList.add('fa-check');
-                button.classList.add('copied');
-                
-                setTimeout(() => {
-                    icon.classList.remove('fa-check');
-                    icon.classList.add('fa-copy');
-                    button.classList.remove('copied');
-                }, 2000);
-            });
+            var input = document.getElementById('password');
+            var icon = document.getElementById('toggleIcon');
+            var btn = document.getElementById('toggleBtn');
+            var show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            icon.classList.toggle('fa-eye', !show);
+            icon.classList.toggle('fa-eye-slash', show);
+            btn.setAttribute('aria-pressed', show ? 'true' : 'false');
         }
     </script>
-</body>
-</html>
 
     <!-- CRITICAL: Auth Cache Clearing - Prevents login issues after logout -->
     <script src="{{ asset('js/auth-cache-clear.js') }}"></script>
+</body>
+</html>

@@ -427,9 +427,9 @@ function testTemplate() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showToast('Test email sent successfully!', 'success');
+            showToast(data.message || 'The mail server accepted the test email.', 'success');
         } else {
-            showToast('Failed to send test email: ' + data.message, 'error');
+            showToast(data.message || 'The test email was not sent.', 'error');
         }
     })
     .catch(error => {

@@ -493,11 +493,11 @@ class SettingsController extends Controller
 
         // Never report "sent" for a message that was only written to the log.
         if (!\App\Support\ExternalMessaging::enabled()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Not sent: external messaging is disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).',
-                'details' => null,
-            ]);
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_DISABLED));
+        }
+
+        if (!\App\Support\ExternalMessaging::allows($request->test_email)) {
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED, \App\Support\ExternalMessaging::allowlistProblem() ? \App\Support\ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE));
         }
 
         if (empty($emailSettings['mail_host']) || empty($emailSettings['mail_from_address'])) {
@@ -534,7 +534,7 @@ class SettingsController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => "Test email sent successfully to {$request->test_email}. Check the inbox (and spam folder).",
+            'message' => "The mail server accepted the test email for {$request->test_email}. That confirms the connection and login, not delivery: check the inbox (and spam folder).",
             'details' => null,
         ]);
     }

@@ -69,6 +69,7 @@ class NoticeMultiChannelTest extends TestCase
             'type'     => 'general',
             'priority' => 'medium',
             'status'   => 'published',
+            'send_email' => 1, 'send_sms' => 1,   // the boxes now decide the channels (see NoticeChannelChoiceAndResendTest)
         ])->assertRedirect();
 
         $this->assertNotNull($sent, 'the SMS channel must fire independently of the queued email job');
@@ -141,6 +142,7 @@ class NoticeMultiChannelTest extends TestCase
             'type'     => 'general',
             'priority' => 'low',
             'status'   => 'published',
+            'send_sms' => 1,   // the box now decides the channel (see NoticeChannelChoiceAndResendTest)
         ])->assertRedirect();
 
         $this->assertTrue($sent);

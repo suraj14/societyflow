@@ -54,6 +54,13 @@ class SendEmailJob implements ShouldQueue
                         ->html($body);
             });
 
+            // A log-only / kill-switch run is not a send (see MailDelivery): say so instead of marking it sent
+            $delivery = \App\Support\MailDelivery::outcome($this->emailLog->recipient_email);
+            if (\App\Support\MailDelivery::isNotSent($delivery['status'])) {
+                $this->emailLog->update(['status' => $delivery['status'], 'error_message' => $delivery['reason']]);
+                return;
+            }
+
             // Mark as sent
             $this->emailLog->markAsSent();
 

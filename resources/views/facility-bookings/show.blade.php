@@ -179,7 +179,41 @@
                                 </span>
                             </dd>
                         </div>
+                        @if($facilityBooking->payment_status === 'pending' && in_array($facilityBooking->status, ['approved', 'completed'], true) && $facilityBooking->booking_amount > 0)
+                            <p class="text-xs text-gray-500">Approved, but no payment has been recorded. This amount is still owed to the society - it is not counted as income until a payment is recorded.</p>
+                        @endif
+                        @if($facilityBooking->paid_at)
+                            <div class="flex justify-between"><dt class="text-sm font-medium text-gray-500">Received</dt><dd class="text-sm text-gray-900">₹{{ number_format($facilityBooking->paid_amount, 2) }} on {{ $facilityBooking->paid_at->format('d M Y') }}</dd></div>
+                            <div class="flex justify-between"><dt class="text-sm font-medium text-gray-500">Method</dt><dd class="text-sm text-gray-900">{{ ucfirst(str_replace('_', ' ', $facilityBooking->payment_method)) }}{{ $facilityBooking->payment_reference ? ' · ' . $facilityBooking->payment_reference : '' }}</dd></div>
+                        @endif
+                        @if($facilityBooking->refunded_at)
+                            <div class="flex justify-between"><dt class="text-sm font-medium text-gray-500">Refunded</dt><dd class="text-sm text-gray-900">₹{{ number_format($facilityBooking->refunded_amount, 2) }} on {{ $facilityBooking->refunded_at->format('d M Y') }} — {{ $facilityBooking->refund_reason }}</dd></div>
+                        @endif
                     </dl>
+
+                    {{-- The office records the money that actually arrived (and any refund). An approved booking is not a payment. --}}
+                    @can('manage_facilities')
+                        @if($facilityBooking->payment_status === 'pending' && in_array($facilityBooking->status, ['approved', 'completed'], true) && $facilityBooking->booking_amount > 0)
+                            <form action="{{ route('facility-bookings.record-payment', $facilityBooking) }}" method="POST" class="mt-5 pt-4 border-t border-gray-200 space-y-3">
+                                @csrf
+                                <p class="text-sm font-semibold text-gray-900">Record payment received · ₹{{ number_format($facilityBooking->booking_amount, 2) }}</p>
+                                <select name="payment_method" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                    @foreach(\App\Models\FacilityBooking::PAYMENT_METHODS as $m)<option value="{{ $m }}" @selected(old('payment_method') === $m)>{{ ucfirst(str_replace('_', ' ', $m)) }}</option>@endforeach
+                                </select>
+                                <input type="text" name="payment_reference" maxlength="80" value="{{ old('payment_reference') }}" placeholder="Cheque no. / transaction reference (required unless cash)" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <input type="date" name="paid_on" max="{{ now()->toDateString() }}" value="{{ old('paid_on') }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <button type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Record payment</button>
+                            </form>
+                        @elseif($facilityBooking->payment_status === 'paid')
+                            <form action="{{ route('facility-bookings.record-refund', $facilityBooking) }}" method="POST" class="mt-5 pt-4 border-t border-gray-200 space-y-3" onsubmit="return confirm('Record this refund? The payment record is kept.')">
+                                @csrf
+                                <p class="text-sm font-semibold text-gray-900">Record a refund</p>
+                                <input type="number" name="refund_amount" step="0.01" min="0.01" max="{{ $facilityBooking->paid_amount }}" value="{{ old('refund_amount', $facilityBooking->paid_amount) }}" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <input type="text" name="refund_reason" maxlength="255" required value="{{ old('refund_reason') }}" placeholder="Reason (e.g. booking cancelled)" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Record refund</button>
+                            </form>
+                        @endif
+                    @endcan
                 </div>
             </div>
 
@@ -261,7 +295,7 @@
 function openRejectModal(bookingId, facilityName, userName) {
     document.getElementById('reject_facility_name').textContent = facilityName;
     document.getElementById('reject_user_name').textContent = 'Requested by: ' + userName;
-    document.getElementById('rejectForm').action = '/facility-bookings/' + bookingId + '/update-status';
+    document.getElementById('rejectForm').action = '{{ url('/') }}/facility-bookings/' + bookingId + '/update-status';
     document.getElementById('rejectModal').classList.remove('hidden');
 }
 

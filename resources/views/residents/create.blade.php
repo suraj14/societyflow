@@ -302,7 +302,7 @@ const flatsData = {!! json_encode($flats->map(function($flat) {
         'building_name' => $flat->building->name ?? null,
         'villa_area_name' => $flat->villaArea->name ?? null,
     ];
-})->toArray()) !!};
+})->toArray(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!};
 
 console.log('Total flats loaded:', flatsData.length);
 console.log('Flats data:', flatsData);

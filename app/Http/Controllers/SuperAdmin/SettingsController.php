@@ -202,7 +202,10 @@ class SettingsController extends Controller
         $request->validate(['test_email' => 'required|email']);
 
         if (!\App\Support\ExternalMessaging::enabled()) {
-            return response()->json(['success' => false, 'message' => 'Not sent: external messaging is disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).']);
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_DISABLED));
+        }
+        if (!\App\Support\ExternalMessaging::allows($request->test_email)) {
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED, \App\Support\ExternalMessaging::allowlistProblem() ? \App\Support\ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE));
         }
 
         try {

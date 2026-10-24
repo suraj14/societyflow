@@ -13,7 +13,11 @@ use Illuminate\Database\Eloquent\Model;
  */
 class SmsTemplate extends Model
 {
-    public const AUDIENCES = ['resident' => 'Resident', 'guard' => 'Guard', 'admin' => 'Admin'];
+    /** Who a template is for. The labels live with the resolver (App\Support\SmsAudience) that turns each one into real people. */
+    public const AUDIENCES = [
+        'resident' => 'Resident', 'guard' => 'Guard', 'admin' => 'Admin', 'committee' => 'Committee', 'staff' => 'Staff',
+        'all_residents' => 'All Residents', 'all_team' => 'All Team Members', 'everyone' => 'Everyone in Society',
+    ];
 
     /** Characters allowed in one template body (the limit the editor's counter shows). */
     public const MAX_BODY = 320;

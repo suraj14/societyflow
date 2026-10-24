@@ -69,7 +69,7 @@ class SmsTemplateNotificationTest extends TestCase
 
     private function publishNotice(string $title = 'Water Supply Interruption'): void
     {
-        $this->actingAs($this->admin())->post('/notices', ['title' => $title, 'content' => 'Water will be shut off 10am-2pm.', 'type' => 'general', 'priority' => 'medium', 'status' => 'published'])->assertRedirect();
+        $this->actingAs($this->admin())->post('/notices', ['title' => $title, 'content' => 'Water will be shut off 10am-2pm.', 'type' => 'general', 'priority' => 'medium', 'status' => 'published', 'send_email' => 1, 'send_sms' => 1])->assertRedirect();   // the boxes now decide the channels (NoticeChannelChoiceAndResendTest)
     }
 
     private function sentTo(string $phone): array

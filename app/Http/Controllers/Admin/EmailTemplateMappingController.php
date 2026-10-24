@@ -185,7 +185,10 @@ class EmailTemplateMappingController extends Controller
 
         // Never report a send that was only logged.
         if (!\App\Support\ExternalMessaging::enabled()) {
-            return response()->json(['success' => false, 'message' => 'Not sent: external messaging is disabled in this environment (EXTERNAL_MESSAGING_ENABLED=false).']);
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_DISABLED));
+        }
+        if (!\App\Support\ExternalMessaging::allows($validated['recipient_email'])) {
+            return response()->json(\App\Support\ExternalMessaging::blockedResponse(\App\Support\ExternalMessaging::BLOCKED_NOT_ALLOWLISTED, \App\Support\ExternalMessaging::allowlistProblem() ? \App\Support\ExternalMessaging::ALLOWLIST_INVALID_MESSAGE : \App\Support\ExternalMessaging::NOT_ALLOWED_MESSAGE));
         }
 
         // Get template for this event
@@ -213,7 +216,7 @@ class EmailTemplateMappingController extends Controller
         if ($success) {
             return response()->json([
                 'success' => true,
-                'message' => 'Test email sent successfully to ' . $validated['recipient_email'],
+                'message' => 'The mail server accepted the test email for ' . $validated['recipient_email'] . '. Check the inbox to confirm delivery.',
             ]);
         } else {
             return response()->json([

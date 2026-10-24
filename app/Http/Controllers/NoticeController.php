@@ -329,6 +329,48 @@ class NoticeController extends BaseController
             ->with('success', 'Notice approved and published successfully.');
     }
 
+    /**
+     * Send a published notice's e-mail and/or SMS again, on purpose. Never automatic: editing a published notice sends nothing.
+     * One submitted form (its token) acts once; the e-mail gets keys of its own so the first publication's "already delivered" rows
+     * do not swallow it; every kill-switch / allow-list / eligibility / template check applies exactly as for the first send.
+     */
+    public function resend(Request $request, Notice $notice)
+    {
+        $this->authorize('manage_notices');
+        $this->authorizeSocietyAccess($notice);
+        if (!auth()->user()->hasRole(['Admin', 'Super Admin'])) {
+            abort(403, 'Only administrators can resend notices.');
+        }
+
+        $data = $request->validate([
+            'channels'   => 'required|array|min:1',
+            'channels.*' => 'in:email,sms',
+            'confirm'    => 'accepted',
+            'token'      => 'required|string|max:64|regex:/^[A-Za-z0-9-]+$/',
+        ]);
+
+        if ($notice->status !== 'published') {
+            return back()->with('error', 'Only a published notice can be sent again.');
+        }
+
+        // one form submission acts once (double click, browser retry)
+        if (!\Illuminate\Support\Facades\Cache::add("notice-resend:{$notice->id}:{$data['token']}", 1, 86400)) {
+            return back()->with('error', 'This resend was already submitted.');
+        }
+
+        $channels = array_values(array_unique($data['channels']));
+        if (in_array('email', $channels, true)) {
+            app(\App\Listeners\SendNoticePublishedEmail::class)->send($notice, $data['token']);
+        }
+        if (in_array('sms', $channels, true)) {
+            app(\App\Listeners\SendNoticePublishedSms::class)->send($notice);
+        }
+
+        \App\Models\ActivityLog::recordFor($notice, 'notice.resend', ['channels' => $channels]);
+
+        return back()->with('success', 'Notice sent again by ' . implode(' and ', $channels) . '. Results are in the delivery log (blocked or skipped recipients are listed there with the reason).');
+    }
+
     public function reject(Request $request, Notice $notice)
     {
         // Only admin and super admin can reject notices

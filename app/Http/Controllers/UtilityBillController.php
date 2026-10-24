@@ -401,7 +401,8 @@ class UtilityBillController extends BaseController
             return response()->json([]);
         }
 
-        $floors = \App\Models\Flat::where('building_id', $buildingId)
+        $floors = $this->lookupFlats()
+            ->where('building_id', $buildingId)
             ->distinct()
             ->pluck('floor')
             ->filter()
@@ -423,7 +424,8 @@ class UtilityBillController extends BaseController
             return response()->json([]);
         }
 
-        $flats = \App\Models\Flat::where('building_id', $buildingId)
+        $flats = $this->lookupFlats()
+            ->where('building_id', $buildingId)
             ->where('floor', $floor)
             ->select('id', 'flat_number')
             ->orderBy('flat_number')
@@ -462,12 +464,30 @@ class UtilityBillController extends BaseController
             return response()->json([]);
         }
 
-        $villas = \App\Models\Flat::where('villa_area_id', $villaAreaId)
+        // A villa's number is its flat_number (flats has no villa_number column: SQLite answered the literal text
+        // "villa_number" for every villa and MySQL refused the query); the page reads it as villa_number.
+        $villas = $this->lookupFlats()
+            ->where('villa_area_id', $villaAreaId)
             ->where('property_type', 'villa')
-            ->select('id', 'villa_number')
-            ->orderBy('villa_number')
+            ->select('id', 'flat_number as villa_number')
+            ->orderBy('flat_number')
             ->get();
 
         return response()->json($villas);
+    }
+
+    /**
+     * Flats a dropdown lookup may list: the signed-in user's own society's, every society's for a Super Admin. The
+     * building / villa area id comes from the request, so on its own it would list any society's units.
+     */
+    private function lookupFlats()
+    {
+        $query = \App\Models\Flat::query();
+
+        if (!auth()->user()->hasRole('Super Admin')) {
+            $query->where('society_id', $this->getSocietyId());
+        }
+
+        return $query;
     }
 }

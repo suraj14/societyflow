@@ -76,7 +76,8 @@
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Body Preview</label>
                         <div class="text-gray-900 mt-1 bg-gray-50 p-3 rounded max-h-64 overflow-y-auto">
-                            {!! substr($emailLog->emailTemplate->body, 0, 500) !!}...
+                            {{-- plain text: a template body is HTML somebody typed, and must never run in an admin's browser --}}
+                            {{ \Illuminate\Support\Str::limit(trim(preg_replace('/\s+/', ' ', strip_tags($emailLog->emailTemplate->body))), 500) }}
                         </div>
                     </div>
                 </div>

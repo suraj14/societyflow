@@ -65,14 +65,32 @@
                     @endforeach
                 </select>
                 <p class="text-xs text-gray-500 mt-1" x-text="current().help"></p>
+                <p class="text-xs text-indigo-700 mt-1" x-show="current().dlt_text" x-cloak>Registered text for this type: <span class="font-mono" x-text="current().dlt_text"></span></p>
             </div>
             <div>
                 <label for="t-audience" class="block text-sm font-medium text-gray-700 mb-1.5">Recipient</label>
                 <select id="t-audience" name="audience" class="{{ $sfInput }}">
                     @foreach (\App\Models\SmsTemplate::AUDIENCES as $key => $label)
-                        <option value="{{ $key }}" @selected(old('audience', $template->audience ?: 'resident') === $key)>{{ $label }}</option>
+                        <option value="{{ $key }}" @selected(old('audience', $template->audience ?: 'resident') === $key) title="{{ \App\Support\SmsAudience::OPTIONS[$key][1] ?? '' }}">{{ $label }}</option>
                     @endforeach
                 </select>
+                <p id="t-audience-preview" class="text-xs text-gray-500 mt-1" aria-live="polite"></p>
+                <script>
+                    (function () {
+                        var sel = document.getElementById('t-audience'), out = document.getElementById('t-audience-preview');
+                        function show() {
+                            fetch('{{ route('admin.message-templates.sms.audience-preview') }}?audience=' + encodeURIComponent(sel.value), {headers: {'Accept': 'application/json'}})
+                                .then(function (r) { return r.ok ? r.json() : null; })
+                                .then(function (d) {
+                                    if (!d) { out.textContent = ''; return; }
+                                    out.textContent = d.can_send
+                                        ? d.label + ': ' + d.count + ' eligible recipient(s)' + (d.bulk ? ' - a bulk audience, so any send is confirmed first.' : '.')
+                                        : d.reason;
+                                }).catch(function () { out.textContent = ''; });
+                        }
+                        sel.addEventListener('change', show); show();
+                    })();
+                </script>
             </div>
         </div>
 

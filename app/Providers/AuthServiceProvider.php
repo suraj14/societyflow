@@ -41,5 +41,10 @@ class AuthServiceProvider extends ServiceProvider
         \Illuminate\Support\Facades\Gate::before(function ($user, $ability) {
             return $user->hasRole('Super Admin') ? true : null;
         });
+
+        // config/auth.php points the 'users' provider here: login and the password broker match e-mail case-insensitively.
+        \Illuminate\Support\Facades\Auth::provider('eloquent-ci', function ($app, array $config) {
+            return new \App\Support\CaseInsensitiveUserProvider($app['hash'], $config['model']);
+        });
     }
 }

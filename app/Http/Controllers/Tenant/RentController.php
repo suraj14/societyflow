@@ -108,7 +108,7 @@ class RentController extends Controller
             $receiptFilePath = null;
             if ($request->hasFile('payment_proof')) {
                 $file = $request->file('payment_proof');
-                $fileName = 'tenant_payment_' . $rent->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+                $fileName = \App\Support\SafeUploadName::make($file, 'tenant_payment', $rent->id, ['jpg', 'png', 'pdf'], 'payment_proof');
                 $receiptFilePath = $file->storeAs('payment_receipts', $fileName, 'public');
             }
 

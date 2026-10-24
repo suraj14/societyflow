@@ -49,10 +49,10 @@
     <h2>Overview</h2>
     <table class="overview">
         <tr>
-            <td><div class="lbl">Total Income</div><div class="val green">₹{{ number_format($o['total_income'], 2) }}</div><div class="lbl">Maintenance ₹{{ number_format($o['maintenance_collected'], 2) }} &middot; Other ₹{{ number_format($o['other_income'], 2) }}</div></td>
-            <td><div class="lbl">Total Society Expenses</div><div class="val red">₹{{ number_format($o['total_society_expenses'], 2) }}</div><div class="lbl">Common expenses only</div></td>
-            <td><div class="lbl">Net Position</div><div class="val {{ $o['net_position'] < 0 ? 'red' : '' }}">{{ $o['net_position'] < 0 ? '−' : '' }}₹{{ number_format(abs($o['net_position']), 2) }}</div><div class="lbl">Income − society expenses</div></td>
-            <td><div class="lbl">Outstanding Dues</div><div class="val orange">₹{{ number_format($o['outstanding_dues'], 2) }}</div><div class="lbl">Unpaid maintenance, all bills to date</div></td>
+            <td><div class="lbl">Actual Collections</div><div class="val green">₹{{ number_format($o['total_income'], 2) }}</div><div class="lbl">Maintenance ₹{{ number_format($o['maintenance_collected'], 2) }} &middot; Facility ₹{{ number_format($o['facility_collected'], 2) }} &middot; Other ₹{{ number_format($o['other_income'] - $o['facility_collected'], 2) }}</div></td>
+            <td><div class="lbl">Society Expenses Paid</div><div class="val red">₹{{ number_format($o['total_society_expenses'], 2) }}</div><div class="lbl">Common expenses only</div></td>
+            <td><div class="lbl">Net Cash Movement</div><div class="val {{ $o['net_position'] < 0 ? 'red' : '' }}">{{ $o['net_position'] < 0 ? '−' : '' }}₹{{ number_format(abs($o['net_position']), 2) }}</div><div class="lbl">Collections − society expenses</div></td>
+            <td><div class="lbl">Outstanding Maintenance</div><div class="val orange">₹{{ number_format($o['outstanding_dues'], 2) }}</div><div class="lbl">Unpaid maintenance, all bills to date</div></td>
         </tr>
     </table>
 
@@ -60,7 +60,7 @@
         <p class="empty"><strong>No financial data available for {{ $periodLabel }}.</strong><br>No transactions recorded for this period.</p>
     @else
 
-    <h2>Income <span class="note">&middot; {{ $periodLabel }} &middot; payments received</span></h2>
+    <h2>Collections received <span class="note">&middot; {{ $periodLabel }} &middot; cash that arrived, with evidence of receipt</span></h2>
     <table class="data">
         <thead><tr><th>Source</th><th class="r">Transactions</th><th class="r">Amount</th></tr></thead>
         <tbody>
@@ -69,7 +69,7 @@
             @empty
                 <tr><td colspan="3" class="empty">No income recorded for {{ $periodLabel }}.</td></tr>
             @endforelse
-            <tr class="total"><td>Total Income</td><td class="r">{{ $report['income']['count'] }}</td><td class="r">₹{{ number_format($report['income']['total'], 2) }}</td></tr>
+            <tr class="total"><td>Total collections</td><td class="r">{{ $report['income']['count'] }}</td><td class="r">₹{{ number_format($report['income']['total'], 2) }}</td></tr>
             @if($o['rent_collected'] > 0)
                 <tr class="memo"><td colspan="2">Rent collected on owners' behalf (not society income)</td><td class="r">₹{{ number_format($o['rent_collected'], 2) }}</td></tr>
             @endif
@@ -93,7 +93,7 @@
     <table class="data">
         <tbody>
             <tr><td>Total Billed</td><td class="r">₹{{ number_format($report['billing']['billed'], 2) }}</td></tr>
-            <tr><td>Collected against these bills</td><td class="r green">₹{{ number_format($report['billing']['collected'], 2) }}</td></tr>
+            <tr><td>Paid against these bills (any date)</td><td class="r green">₹{{ number_format($report['billing']['collected'], 2) }}</td></tr>
             <tr><td>Outstanding on these bills</td><td class="r red">₹{{ number_format($report['billing']['outstanding'], 2) }}</td></tr>
             @foreach($report['billing']['charges'] as $charge)
                 <tr class="memo"><td>&nbsp;&nbsp;&nbsp;{{ $charge['label'] }}</td><td class="r">₹{{ number_format($charge['amount'], 2) }}</td></tr>
@@ -101,6 +101,62 @@
         </tbody>
     </table>
 
+    <h2>Maintenance cash received <span class="note">&middot; {{ $periodLabel }} &middot; which bills it settled</span></h2>
+    <table class="data">
+        <tbody>
+            <tr><td>Against bills dated {{ $periodLabel }}</td><td class="r">₹{{ number_format($report['billing']['cash_in_period']['this_period'], 2) }}</td></tr>
+            <tr><td>Against earlier bills (arrears)</td><td class="r">₹{{ number_format($report['billing']['cash_in_period']['earlier'], 2) }}</td></tr>
+            @if($report['billing']['cash_in_period']['later'] > 0)<tr><td>Against later bills (paid in advance)</td><td class="r">₹{{ number_format($report['billing']['cash_in_period']['later'], 2) }}</td></tr>@endif
+            @if($report['billing']['cash_in_period']['unallocated'] > 0)<tr><td>Not linked to any bill</td><td class="r">₹{{ number_format($report['billing']['cash_in_period']['unallocated'], 2) }}</td></tr>@endif
+            <tr class="total"><td>Maintenance cash received</td><td class="r">₹{{ number_format($report['billing']['cash_in_period']['total'], 2) }}</td></tr>
+        </tbody>
+    </table>
+
+    @php $fac = $report['facility']; $ex = $report['excluded']; @endphp
+    @if($fac['collected']['count'] + $fac['refunded']['count'] + $fac['receivable']['count'] > 0)
+    <h2>Facility Bookings <span class="note">&middot; income only when a payment is recorded</span></h2>
+    <table class="data">
+        <tbody>
+            <tr><td>Payments received ({{ $fac['collected']['count'] }})</td><td class="r green">₹{{ number_format($fac['collected']['amount'], 2) }}</td></tr>
+            <tr><td>Refunds paid back ({{ $fac['refunded']['count'] }})</td><td class="r red">−₹{{ number_format($fac['refunded']['amount'], 2) }}</td></tr>
+            <tr class="total"><td>Facility income, net</td><td class="r">₹{{ number_format($o['facility_collected'], 2) }}</td></tr>
+            <tr class="memo"><td>Approved / completed bookings with no payment recorded ({{ $fac['receivable']['count'] }}) - receivable, not income</td><td class="r">₹{{ number_format($fac['receivable']['amount'], 2) }}</td></tr>
+        </tbody>
+    </table>
+    @endif
+
+    @if($ex['rent_verified'] + $ex['rent_unverified'] + $ex['other_unverified'] + collect($ex['not_received'])->sum('amount') > 0)
+    <h2>Excluded from society income <span class="note">&middot; listed so nothing is hidden</span></h2>
+    <table class="data">
+        <tbody>
+            <tr><td>Owner rent received through the society (belongs to the owners)</td><td class="r">₹{{ number_format($ex['rent_verified'], 2) }}</td></tr>
+            <tr><td>Rent recorded as paid with no evidence of receipt</td><td class="r">₹{{ number_format($ex['rent_unverified'], 2) }}</td></tr>
+            <tr><td>Other payments recorded as paid with no evidence of receipt</td><td class="r">₹{{ number_format($ex['other_unverified'], 2) }}</td></tr>
+            @foreach(['pending' => 'Pending', 'failed' => 'Failed', 'cancelled' => 'Cancelled'] as $st => $lbl)
+                @if($ex['not_received'][$st]['count'] > 0)<tr><td>{{ $lbl }} payments ({{ $ex['not_received'][$st]['count'] }})</td><td class="r">₹{{ number_format($ex['not_received'][$st]['amount'], 2) }}</td></tr>@endif
+            @endforeach
+        </tbody>
+    </table>
+    @endif
+
+    @php $fd = $report['future_dated']; @endphp
+    @if($fd['payments']['count'] || $fd['expenses']['count'])
+    <p class="note"><strong>Dated after today ({{ \Carbon\Carbon::parse($report['as_of'])->format('d M Y') }}):</strong>
+        {{ $fd['payments']['count'] }} receipt(s) totalling ₹{{ number_format($fd['payments']['amount'], 2) }} and {{ $fd['expenses']['count'] }} expense(s) totalling ₹{{ number_format($fd['expenses']['amount'], 2) }}
+        carry a date that has not arrived. They are counted in the period of their own date, not moved.</p>
+    @endif
+
+    @if($report['months'])
+    <h2>{{ $periodLabel }} month by month <span class="note">&middot; adds up to the annual figures &middot; months after {{ \Carbon\Carbon::parse($report['as_of'])->format('d M Y') }} have not happened yet</span></h2>
+    <table class="data">
+        <thead><tr><th>Month</th><th class="r">Billed</th><th class="r">Collections</th><th class="r">Expenses</th><th class="r">Net</th></tr></thead>
+        <tbody>
+            @foreach($report['months'] as $mo)
+                <tr><td>{{ $mo['label'] }}@if($mo['future']) <span class="note">(future{{ $mo['has_data'] ? ' - has dated records' : ' - no data yet' }})</span>@elseif($mo['current']) <span class="note">(in progress)</span>@endif</td><td class="r">₹{{ number_format($mo['billed'], 2) }}</td><td class="r">₹{{ number_format($mo['income'], 2) }}</td><td class="r">₹{{ number_format($mo['expenses'], 2) }}</td><td class="r">₹{{ number_format($mo['net'], 2) }}</td></tr>
+            @endforeach
+        </tbody>
+    </table>
+    @endif
     <h2>Collections &amp; Dues</h2>
     <table class="data">
         <tbody>

@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class OwnerController extends BaseController
 {
@@ -338,14 +339,31 @@ class OwnerController extends BaseController
             $validated['family_members'] = $familyMembers;
         }
 
-        // Clear property information if property_type is empty
+        // The building / villa area has to belong to the owner's own society: `exists:` above only proves the row exists.
+        if (!empty($validated['building_id']) && !Building::where('id', $validated['building_id'])->where('society_id', $owner->society_id)->exists()) {
+            throw ValidationException::withMessages(['building_id' => 'The selected building does not belong to this owner\'s society.']);
+        }
+        if (!empty($validated['villa_area_id']) && !VillaArea::where('id', $validated['villa_area_id'])->where('society_id', $owner->society_id)->exists()) {
+            throw ValidationException::withMessages(['villa_area_id' => 'The selected villa area does not belong to this owner\'s society.']);
+        }
+
         if (empty($validated['property_type'])) {
+            // Clear property information if property_type is empty
             $validated['property_type'] = null;
             $validated['building_id'] = null;
             $validated['floor'] = null;
             $validated['flat_no'] = null;
             $validated['villa_area_id'] = null;
             $validated['villa_no'] = null;
+        } elseif ($validated['property_type'] === $owner->property_type) {
+            // The unit pickers are filled in by script. When they have not loaded (or the form was saved before they
+            // did) the browser posts blanks, and a blank must not wipe the unit the owner already holds - that is how
+            // a villa owner lost their villa. To remove a unit, change or empty the property type.
+            foreach (['building_id', 'floor', 'flat_no', 'villa_area_id', 'villa_no'] as $field) {
+                if (($validated[$field] ?? null) === null || $validated[$field] === '') {
+                    $validated[$field] = $owner->{$field};
+                }
+            }
         }
 
         // Execute update with transaction and verification
@@ -455,8 +473,7 @@ class OwnerController extends BaseController
      */
     public function getBuildings(Request $request)
     {
-        $societyId = $request->query('society_id') ?? auth()->user()->society_id;
-        $buildings = Building::where('society_id', $societyId)->get(['id', 'name']);
+        $buildings = Building::where('society_id', $this->lookupSocietyId($request))->get(['id', 'name']);
         return response()->json($buildings);
     }
 
@@ -469,13 +486,14 @@ class OwnerController extends BaseController
         if (!$buildingId) {
             return response()->json([]);
         }
-        
-        $floors = Flat::where('building_id', $buildingId)
+
+        $floors = $this->lookupFlats()
+            ->where('building_id', $buildingId)
             ->distinct()
             ->pluck('floor')
             ->sort()
             ->values();
-        
+
         return response()->json($floors);
     }
 
@@ -486,17 +504,18 @@ class OwnerController extends BaseController
     {
         $buildingId = $request->query('building_id');
         $floor = $request->query('floor');
-        
+
         if (!$buildingId || $floor === null) {
             return response()->json([]);
         }
-        
-        $flats = Flat::where('building_id', $buildingId)
+
+        $flats = $this->lookupFlats()
+            ->where('building_id', $buildingId)
             ->where('floor', $floor)
             ->pluck('flat_number')
             ->sort()
             ->values();
-        
+
         return response()->json($flats);
     }
 
@@ -505,8 +524,7 @@ class OwnerController extends BaseController
      */
     public function getVillaAreas(Request $request)
     {
-        $societyId = $request->query('society_id') ?? auth()->user()->society_id;
-        $villaAreas = VillaArea::where('society_id', $societyId)->get(['id', 'name']);
+        $villaAreas = VillaArea::where('society_id', $this->lookupSocietyId($request))->get(['id', 'name']);
         return response()->json($villaAreas);
     }
 
@@ -519,14 +537,43 @@ class OwnerController extends BaseController
         if (!$villaAreaId) {
             return response()->json([]);
         }
-        
-        $villaNumbers = Flat::where('villa_area_id', $villaAreaId)
+
+        $villaNumbers = $this->lookupFlats()
+            ->where('villa_area_id', $villaAreaId)
             ->where('property_type', 'villa')
             ->pluck('flat_number')
             ->sort()
             ->values();
-        
+
         return response()->json($villaNumbers);
+    }
+
+    /**
+     * The society a dropdown lookup may read. Only a Super Admin may name another society; everyone else gets their
+     * own whatever `society_id` the request carries (the owner form sends it, but it is not to be trusted).
+     */
+    private function lookupSocietyId(Request $request): ?int
+    {
+        $user = auth()->user();
+
+        if ($user->hasRole('Super Admin')) {
+            $requested = $request->query('society_id');
+            return is_numeric($requested) ? (int) $requested : $user->society_id;
+        }
+
+        return $user->society_id;
+    }
+
+    /** Flats the signed-in user may list: every society for a Super Admin, otherwise their own. */
+    private function lookupFlats()
+    {
+        $query = Flat::query();
+
+        if (!auth()->user()->hasRole('Super Admin')) {
+            $query->where('society_id', auth()->user()->society_id);
+        }
+
+        return $query;
     }
 
     /**

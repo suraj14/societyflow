@@ -40,6 +40,11 @@ class EmailNotificationService
 
             foreach ($recipients as $recipient) {
                 if (self::shouldReceiveEmail($recipient, $triggerAction)) {
+                    if ($why = \App\Support\RecipientEligibility::emailSkipReason($recipient['email'] ?? null, $societyId, $triggerAction)) {
+                        \App\Models\EmailLog::recordSkipped($template->id, $societyId, $recipient['email'] ?? null, $recipient['name'] ?? null, $triggerAction, "not sent: {$why}");
+
+                        continue;
+                    }
                     try {
                         if ($societyId) {
                             EmailConfigurationService::loadAndApplySettings($societyId);
@@ -54,6 +59,9 @@ class EmailNotificationService
                                     ->subject($subject);
                         });
 
+                        // "sent" only when a real mail server took it; a log-only / kill-switch run is "simulated" (see MailDelivery)
+                        $delivery = \App\Support\MailDelivery::outcome($recipient['email'] ?? null);
+                        $outcome = $delivery['status'];
                         EmailLog::create([
                             'email_template_id' => $template->id,
                             'society_id' => $societyId,
@@ -61,10 +69,12 @@ class EmailNotificationService
                             'recipient_name' => $recipient['name'] ?? null,
                             'trigger_action' => $triggerAction,
                             'variables' => $variables,
-                            'status' => 'sent',
+                            'status' => $outcome,
+                            'error_message' => $delivery['reason'],
+                            'sent_at' => $outcome === 'sent' ? now() : null,
                         ]);
 
-                        Log::info('Email sent', ['recipient' => $recipient['email'], 'trigger' => $triggerAction]);
+                        Log::info($outcome === 'sent' ? 'Email handed to the mail server' : 'Email simulated only (not sent)', ['recipient' => $recipient['email'], 'trigger' => $triggerAction]);
                     } catch (Exception $e) {
                         Log::error('Email send failed', ['recipient' => $recipient['email'], 'error' => $e->getMessage()]);
                         

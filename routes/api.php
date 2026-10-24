@@ -35,13 +35,7 @@ Route::prefix('v1')->group(function () {
      *
      * Deliberately unauthenticated and free of any tenant data.
      */
-    Route::get('/health', function () {
-        return response()->json([
-            'application' => 'societyflow',
-            'api'         => 'v1',
-            'status'      => 'ok',
-        ]);
-    });
+    Route::get('/health', [\App\Http\Controllers\Api\HealthController::class, 'health']);
 
     // The password rules the app's meter shows. Public (the register / reset screens need it before sign-in): the platform's
     // policy, or - when a valid token is sent - the signed-in user's society's. Only rules, no society data.
@@ -181,4 +175,4 @@ Route::prefix('v1')->group(function () {
 });
 
 // Legacy sanctum user endpoint
-Route::middleware('auth:sanctum')->get('/user', fn(Request $request) => $request->user());
+Route::middleware('auth:sanctum')->get('/user', [\App\Http\Controllers\Api\HealthController::class, 'user']);

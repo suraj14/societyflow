@@ -42,24 +42,36 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        // Rate limiting
-        $throttleKey = strtolower($request->email) . '|' . $request->ip();
-        
-        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
-            $seconds = RateLimiter::availableIn($throttleKey);
+        // Failed-password lockout, shared with the app's login (App\Support\LoginThrottle): the society's Settings -> Security attempt limit
+        if ($seconds = \App\Support\LoginThrottle::lockedFor($request)) {
             throw ValidationException::withMessages([
                 'email' => "Too many login attempts. Please try again in {$seconds} seconds.",
             ]);
         }
 
+        // an address nobody holds costs the same time as a wrong password, so the answer does not tell them apart
+        if (!User::whereEmail($request->email)->exists()) {
+            \App\Support\LoginThrottle::spendPasswordCheck($request->password);
+        }
+
         $credentials = $request->only('email', 'password');
 
         if (Auth::attempt($credentials, $request->filled('remember'))) {
-            RateLimiter::clear($throttleKey);
+            \App\Support\LoginThrottle::clear($request);
             $request->session()->regenerate();
 
-            // Update last login timestamp
             $user = Auth::user();
+
+            // inactive / suspended: same wording as the API, and no session is kept
+            if ($user->isBlocked()) {
+                Auth::logout();
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+
+                return back()->withErrors(['email' => \App\Http\Middleware\EnsureAccountActive::MESSAGE])->onlyInput('email');
+            }
+
+            // Update last login timestamp
             $user->update(['last_login_at' => now()]);
 
             // Validate society access for non-Super Admin users
@@ -87,7 +99,7 @@ class AuthController extends Controller
             return $this->redirectBasedOnRole($user);
         }
 
-        RateLimiter::hit($throttleKey, 60);
+        \App\Support\LoginThrottle::fail($request);
 
         return back()->withErrors([
             'email' => 'The provided credentials do not match our records.',
@@ -179,7 +191,8 @@ class AuthController extends Controller
         try {
             Password::sendResetLink($request->only('email'));
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Password reset email could not be sent', ['exception' => get_class($e)]);
+            // the code is the SMTP reply code for a refused message (535 bad login, 553 sender not allowed...) - safe to log, unlike the text
+            \Illuminate\Support\Facades\Log::error('Password reset email could not be sent', ['exception' => get_class($e), 'code' => $e->getCode() ?: null]);
         }
 
         return back()->with('success', 'If an account exists for that email, a password reset link has been sent.');
@@ -205,7 +218,7 @@ class AuthController extends Controller
             'token' => 'required',
             'email' => 'required|email',
             // the policy of the society this account belongs to (the platform's when the email is unknown)
-            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(User::where('email', $request->email)->value('society_id'))),
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(User::whereEmail($request->email)->value('society_id'))),
         ]);
 
         $status = Password::reset(
@@ -247,6 +260,9 @@ class AuthController extends Controller
      */
     public function register(Request $request)
     {
+        // one identity per address whatever its letter case: the unique rule below compares what is stored, and only some engines ignore case
+        $request->merge(['email' => mb_strtolower(trim((string) $request->input('email')))]);
+
         $request->validate([
             'society_name' => 'required|string|max:255',
             'name' => 'required|string|max:255',
@@ -261,6 +277,9 @@ class AuthController extends Controller
             'property_type' => ['required', Rule::in(SocietyPropertyType::values())],
         ]);
 
+        // A concurrent registration can take the same address between the check and the insert: that one collision is retried (the next try
+        // sees the other society and picks the next free suffix); anything else fails once, safely.
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
         try {
             DB::beginTransaction();
 
@@ -337,10 +356,16 @@ class AuthController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            
+            if ($e instanceof \Illuminate\Database\UniqueConstraintViolationException && $attempt < 3 && preg_match('/slug|subdomain/i', $e->getMessage())) {
+                continue;
+            }
+            // the cause goes to the log, never to the visitor (it can name tables and constraints)
+            \Illuminate\Support\Facades\Log::error('Society registration failed', ['exception' => get_class($e), 'message' => $e->getMessage()]);
+
             return back()->withInput()->withErrors([
-                'error' => 'Registration failed: ' . $e->getMessage()
+                'error' => 'Registration could not be completed. Please try again, or contact support if it keeps happening.'
             ]);
+        }
         }
     }
 }

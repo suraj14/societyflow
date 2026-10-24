@@ -39,7 +39,8 @@ return [
 
     'providers' => [
         'users' => [
-            'driver' => 'eloquent',
+            // Eloquent with a case-insensitive e-mail match (App\Support\CaseInsensitiveUserProvider, registered in AuthServiceProvider)
+            'driver' => 'eloquent-ci',
             'model' => env('AUTH_MODEL', App\Models\User::class),
         ],
     ],

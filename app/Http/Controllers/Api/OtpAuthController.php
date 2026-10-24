@@ -75,7 +75,7 @@ class OtpAuthController extends Controller
             RateLimiter::hit($cooldownKey, $cooldown);
         }
 
-        $accounts = $this->activeAccountsFor($phone);
+        $accounts = $this->loginCandidates($this->activeAccountsFor($phone));
 
         // The same answer whether or not an account has this number, so numbers cannot be tested for membership; no code
         // is made and no SMS is sent for a number nobody has.
@@ -203,7 +203,7 @@ class OtpAuthController extends Controller
         // Find the account(s). Same rule as sendOtp: a number that (by now)
         // matches more than one active account is never resolved by picking
         // whichever row came first.
-        $accounts = $this->activeAccountsFor($phone);
+        $accounts = $this->loginCandidates($this->activeAccountsFor($phone));
 
         if ($accounts->isEmpty()) {
             return response()->json(['success' => false, 'message' => 'Account not found.'], 404);
@@ -272,6 +272,10 @@ class OtpAuthController extends Controller
         if (!$user || $this->normalizePhone((string) $user->phone) !== ($choice['phone'] ?? null)) {
             return $expired;
         }
+        // and still a phone-only sign-in candidate (a privileged account is never one while the number is shared)
+        if (!$this->loginCandidates($this->activeAccountsFor((string) $choice['phone']))->contains('id', $user->id)) {
+            return $expired;
+        }
 
         return $this->issueLogin($user);
     }
@@ -321,7 +325,7 @@ class OtpAuthController extends Controller
             'message' => 'If an account exists with this email, an OTP has been sent to its registered mobile number.',
         ];
 
-        $user = User::where('email', $request->email)
+        $user = User::whereEmail($request->email)
             ->where('status', 'active')
             ->first();
 
@@ -330,6 +334,14 @@ class OtpAuthController extends Controller
         }
 
         $phone = $this->normalizePhone($user->phone);
+
+        // A number saved on other active accounts must not let one account's code reach another: self-service reset is refused (same answer as
+        // an unknown e-mail) for an Admin / Super Admin on a shared number, and for any account on a number spanning several societies.
+        if ($this->resetRefused($user, $this->activeAccountsFor($phone))) {
+            Log::notice('Password-reset OTP refused: the mobile number is shared', ['society_id' => $user->society_id, 'masked_phone' => $this->maskPhone($phone)]);
+
+            return response()->json($generic);
+        }
 
         // Same resend cooldown as the login code (the response is identical, so this reveals nothing).
         $cooldownKey = 'otp-cooldown:' . $phone;
@@ -341,7 +353,7 @@ class OtpAuthController extends Controller
             RateLimiter::hit($cooldownKey, $cooldown);
         }
 
-        [$otpRow, $otp] = MobileOtp::issue($phone, MobileOtp::PURPOSE_RESET);
+        [$otpRow, $otp] = MobileOtp::issue($phone, MobileOtp::PURPOSE_RESET, $user->id);   // bound to THIS account
 
         $sms = SmsService::sendOtp($phone, $otp, $user->society_id ?? null);
         if (empty($sms['sent']) && !MobileOtp::exposesDevCode()) {
@@ -367,7 +379,7 @@ class OtpAuthController extends Controller
             'email'    => 'required|email',
             'otp'      => 'required|string|size:4',
             // the policy of the account's own society (the platform's if the email is unknown)
-            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(User::where('email', $request->email)->value('society_id'))),
+            'password' => \App\Support\PasswordPolicy::required(\App\Support\PasswordPolicy::forSociety(User::whereEmail($request->email)->value('society_id'))),
         ]);
 
         $rateLimitKey = 'reset-password:' . $request->ip();
@@ -380,7 +392,7 @@ class OtpAuthController extends Controller
         }
         RateLimiter::hit($rateLimitKey, 900);
 
-        $user = User::where('email', $request->email)
+        $user = User::whereEmail($request->email)
             ->where('status', 'active')
             ->first();
 
@@ -390,7 +402,12 @@ class OtpAuthController extends Controller
 
         $phone = $this->normalizePhone($user->phone);
 
-        if (!MobileOtp::check($phone, MobileOtp::PURPOSE_RESET, (string) $request->otp)) {
+        // the rule applies again at redemption: the number may have become shared since the code was sent
+        if ($this->resetRefused($user, $this->activeAccountsFor($phone))) {
+            return response()->json(['success' => false, 'message' => 'Invalid or expired OTP.'], 422);
+        }
+
+        if (!MobileOtp::check($phone, MobileOtp::PURPOSE_RESET, (string) $request->otp, $user->id)) {
             return response()->json(['success' => false, 'message' => 'That code is not valid or has expired. Check it, or request a new one.'], 422);
         }
         RateLimiter::clear($rateLimitKey);
@@ -466,6 +483,35 @@ class OtpAuthController extends Controller
             ->get()
             ->filter(fn (User $u) => $this->normalizePhone((string) $u->phone) === $phone)
             ->values();
+    }
+
+    /**
+     * Who may sign in with a phone number alone. A number on several accounts offers the chooser, but never an Admin / Super Admin: those
+     * sign in with e-mail and password. A privileged account that is the number's only holder is unaffected.
+     *
+     * @param Collection<int, User> $accounts
+     * @return Collection<int, User>
+     */
+    private function loginCandidates(Collection $accounts): Collection
+    {
+        return $accounts->count() > 1 ? $accounts->reject(fn (User $u) => $u->isPrivileged())->values() : $accounts;
+    }
+
+    /**
+     * Is self-service (SMS) password reset refused for this account because its number is not its own alone?
+     *  - an Admin / Super Admin whose number is saved on any other active account;
+     *  - any account whose number is saved on active accounts of more than one society.
+     *
+     * @param Collection<int, User> $holders every active account carrying the number (the target included)
+     */
+    private function resetRefused(User $user, Collection $holders): bool
+    {
+        $others = $holders->reject(fn (User $u) => $u->id === $user->id);
+        if ($others->isEmpty()) {
+            return false;
+        }
+
+        return $user->isPrivileged() || $holders->pluck('society_id')->unique()->count() > 1;
     }
 
     private function choiceKey(string $selectionToken): string

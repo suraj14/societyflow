@@ -15,8 +15,9 @@ class TemplateVariablesTest extends TestCase
 {
     public function test_the_sms_contexts_are_exactly_the_flows_that_really_send_sms(): void
     {
-        $this->assertSame(['login_otp', 'notice', 'gate_pass', 'document'], array_keys(TemplateVariables::sms()));
-        $this->assertSame(['login_otp' => 'Login OTP', 'notice' => 'Notice published', 'gate_pass' => 'Gate pass revoked', 'document' => 'Society document published'], TemplateVariables::smsLabels());
+        // complaint + bill joined on 2026-10-16: each now has a real sender (BusinessNotifications::sms) and a registered text
+        $this->assertSame(['login_otp', 'notice', 'gate_pass', 'complaint', 'bill', 'document'], array_keys(TemplateVariables::sms()));
+        $this->assertSame(['login_otp' => 'Login OTP', 'notice' => 'Notice published', 'gate_pass' => 'Gate pass revoked', 'complaint' => 'Complaint status update', 'bill' => 'Bill generated', 'document' => 'Society document published'], TemplateVariables::smsLabels());
     }
 
     public function test_the_notification_variables_are_the_fields_the_whatsapp_events_already_supply(): void

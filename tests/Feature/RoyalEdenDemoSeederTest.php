@@ -40,6 +40,10 @@ class RoyalEdenDemoSeederTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // The seeder is a snapshot of mid-October 2026 with fixed due dates (5 and 20 Oct), and a bill's status is derived from today's
+        // date (an unpaid bill past its due date is "overdue"). Without a frozen clock this class passed on 17 Oct and failed from 21 Oct
+        // on, for no change in the code. Freeze the clock at the date the data was designed for.
+        \Carbon\Carbon::setTestNow('2026-10-16 12:00:00');
         Storage::fake('local');
         config(['messaging.enabled' => false]);
         foreach (['Admin', 'Owner', 'Tenant', 'Accountant', 'Staff', 'Guard'] as $role) {
@@ -64,6 +68,12 @@ class RoyalEdenDemoSeederTest extends TestCase
         $tenant = Tenant::create(['society_id' => $this->eden->id, 'flat_id' => Flat::where('flat_number', '159')->value('id'), 'user_id' => $tenantUser->id, 'name' => 'Piyus', 'email' => 'piyus@tenant.test', 'phone' => '0000000001', 'move_in_date' => '2026-09-22', 'status' => 'active']);
         $tenantUser->update(['tenant_id' => $tenant->id]);
         $this->makeUserWithRole($this->eden, 'Admin', ['name' => 'Eden Admin', 'email' => 'admin@eden.test']);
+    }
+
+    protected function tearDown(): void
+    {
+        \Carbon\Carbon::setTestNow();
+        parent::tearDown();
     }
 
     private function seed_(): void
