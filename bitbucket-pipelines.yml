@@ -4,11 +4,17 @@
 #   every branch and pull request ....... install dependencies, run the PHPUnit suite (in-memory SQLite), build the release package as a check
 #   branch  production-readiness ........ the same, then a package artifact and a MANUAL "Deploy to production" step (deployment: production)
 #   custom pipelines (Run pipeline) ..... "server-dry-run"      : uploads + dry run on the server, changes nothing live
-#                                         "production-deploy"   : same as the manual step, started by hand on any commit of the branch
+#                                         "production-deploy"   : same as the manual step, started by hand
+#                                         Bitbucket lets a custom pipeline be started on ANY branch, so deploy.sh itself refuses to connect
+#                                         unless the pipeline runs on the designated branch (PROD_DEPLOY_BRANCH, default production-readiness)
+#                                         at the commit the package was built from. Also restrict the Production environment in Bitbucket
+#                                         where your plan allows it (setup guide, section 5): this file can be edited on any branch.
 #
 # The production step is `trigger: manual` on purpose: until the checklist in the setup guide is signed off (server facts verified, a restore of
 # a backup rehearsed, SSH key + known host configured) nothing may deploy by itself. Removing the `trigger: manual` line later makes it automatic.
 # Migrations are NEVER run by the pipeline: a release with a pending migration stops with exit code 3 and needs the interactive deploy.
+# After a deployment the live site must report THIS release (X-SocietyFlow-Release header of /api/v1/health); a site that still serves the
+# previous release counts as a failed deployment, not a successful one.
 #
 # Secrets live only in Bitbucket (SSH key store + repository/deployment variables). This file contains none and never prints one.
 image: php:8.2-cli
@@ -84,7 +90,7 @@ pipelines:
       - step: *install-and-test
       - step: *build-package
       - step:
-          # started by hand from "Run pipeline", so no second manual click is needed here
+          # started by hand from "Run pipeline", so no second manual click is needed here; deploy.sh refuses any branch but the designated one
           name: Deploy to production (dry run first, then apply)
           deployment: production
           script:

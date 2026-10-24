@@ -17,7 +17,12 @@ How the manual / one-off process works (package, dry run, rollback): [DEPLOYMENT
 | PHP version, database engine/version, queue driver, applied migrations, `public/storage` type, disk space, Composer, `mysqldump`, SSH access | **UNVERIFIED** | needs `inspect-server.sh` output |
 | Whether the live database has any of the October migrations | **UNVERIFIED** | needs `migrate:status` on the server |
 | Whether production uses the same `APP_KEY` that was committed in `.env.mysql.template` | **UNVERIFIED** | see TODO P0-20 |
-| The pipeline YAML and `deploy.sh` against a real Bitbucket runner and a real server | **NOT RUN** | tested here: YAML structure, the scripts' syntax, the package builder, and the server scripts on a scratch copy |
+| The pipeline YAML and `deploy.sh` against a real Bitbucket runner and a real server | **NOT RUN** | tested here: YAML parses (Symfony YAML), the scripts' syntax, the package builder, the server scripts on a scratch copy, and `deploy.sh` / `smoke-check.sh` **executed** against fake `ssh`/`scp` and a stub site (`DeploymentScriptsBehaviourTest`) |
+| Only the designated branch can deploy | VERIFIED in the script (refuses before any connection; 13 cases tested) | a custom pipeline can be started on any branch, so `deploy.sh` checks `BITBUCKET_BRANCH` itself. The Bitbucket-side restriction is a **plan-dependent extra** (next row) |
+| Bitbucket deployment permissions (who may deploy, which branches may deploy to *Production*) | **UNVERIFIED for your account** | Atlassian's announcement lists them under the **Premium** tier ([blog](https://www.atlassian.com/blog/bitbucket/deployment-permissions-now-available-in-bitbucket-pipelines)); check Repository settings -> Deployments -> Production |
+| The live site serves the release that was just deployed | CHECKED BY THE PIPELINE, never yet run | the health endpoint sends an opaque `X-SocietyFlow-Release` header; the deploy compares it with the release id it shipped (section 2) |
+| The pipeline can open an SSH connection to the server | **UNVERIFIED** | Pipelines connects from shared Amazon addresses that change; Atlassian does not support allow-listing them (section 4.9) |
+| How long the test step takes in Bitbucket | **UNKNOWN** | measured on the dev PC only: a full SQLite run is about **40 minutes with 8 parallel shards** (each test migrates an in-memory database, ~3 s per test); one runner will be slower (section 10, item 9) |
 
 **Do this first, whatever else you decide:** the live demo credentials are an open door. Deploying this release removes the card, but the accounts behind it may still have those
 passwords. On the server run `php artisan users:rotate-weak-passwords` **without `--force`** (report only) to see which accounts still use known passwords; rotating them is your call
@@ -30,13 +35,21 @@ git push  ->  Bitbucket pipeline
    1 Install + test      PHP 8.2, SQLite in memory, composer check-platform-reqs, route:list, lint, the whole PHPUnit suite   (every branch and pull request)
    2 Build package       scripts/deploy/ci/build-release.sh  -> committed files only, allow-list, secret scan, checksums     (every branch and pull request)
    3 Deploy to production  [production-readiness only, MANUAL button]  scripts/deploy/ci/deploy.sh
-        upload tools + package over SSH (strict host-key checking) -> server dry run -> server apply (--non-interactive) -> outside smoke check
+        refuse unless this run is on the designated branch at the packaged commit (before any connection)
+        -> upload tools + package over SSH (strict host-key checking) -> server dry run -> server apply (--non-interactive)
+        -> outside smoke check, which includes: the live site must report THIS release (X-SocietyFlow-Release)
 ```
 What the server does in `apply-release.sh --non-interactive` (all of it logged): verify checksums -> **stop with exit 3, changing nothing, if the release has a pending migration** -> exclusive lock ->
 back up code + `.env` copy (600) + database (verified) -> record upload names and **business-table record counts** -> maintenance mode -> copy the release over the code (never deletes,
 never touches `.env`, `storage/`, `public/storage`) -> `composer install --no-dev` -> rebuild caches -> `queue:restart` -> back online -> compare record counts (any lost row = failure) ->
-smoke check (home, login, `/owners` protected, health, no error pages, no demo-credentials card) -> **if the smoke check fails: the previous code is restored automatically** (safe because no
-migration ran) -> `deployments.log` line, and `LAST_SUCCESSFUL_RELEASE` only after everything passed.
+smoke check (home, login, `/owners` protected, health, no error pages, no demo-credentials card, **and the live site reports this release**) -> **if the smoke check fails: the previous code is restored
+automatically** (safe because no migration ran) -> `deployments.log` line (with the release's `tag=`), and `LAST_SUCCESSFUL_RELEASE` only after everything passed.
+
+**How "the live site serves this release" is checked.** The packaged deploy puts `RELEASE.txt` (with `release_id=`) in the application root. `GET /api/v1/health` then answers with the usual body plus a header
+`X-SocietyFlow-Release: <tag>`, where `tag` = the first 16 hex characters of `sha256(release id)` - a hash, so the public answer reveals neither the build time nor the commit. After the copy the deploy polls that header for up to
+60 s (PHP may keep serving the old compiled code for a moment) and fails if it is missing or belongs to another release. You can do the same by hand:
+`curl -sI https://societyflow.joboapps.com/api/v1/health | grep -i x-societyflow-release`, and map a tag back to a release with `grep tag=<tag> ~/backups/societyflow/deployments.log`
+or `printf %s <release id> | sha256sum | cut -c1-16`. A site deployed by hand (no `RELEASE.txt`) sends no header; the first packaged deployment is the one that starts sending it.
 
 **Migrations are never run by the pipeline.** A release that contains one needs the interactive deploy (section 6), where you see the SQL and type `MIGRATE` after a verified backup.
 Production deployments therefore split naturally into two kinds: code-only releases (automatic-capable) and releases with schema changes (supervised).
@@ -48,6 +61,10 @@ Production deployments therefore split naturally into two kinds: code-only relea
 * **Every other branch / pull request:** tests and a package build only - nothing can reach the server.
 * **Manual button:** Pipelines -> the latest `production-readiness` run -> step 3 "Deploy to production" -> Run. Or **Run pipeline** -> custom `server-dry-run` (changes nothing live)
   or `production-deploy` (builds and deploys the commit you pick).
+* **The designated branch is enforced twice.** (1) The deploy step exists only under `branches: production-readiness`. (2) Bitbucket lets a *custom* pipeline be started on **any** branch, so `deploy.sh`
+  itself refuses - before opening a single connection - unless `BITBUCKET_BRANCH` equals `PROD_DEPLOY_BRANCH` (default `production-readiness`) and the package was built from `BITBUCKET_COMMIT`. This covers the dry run
+  too: `server-dry-run` on another branch is refused. When production moves to `main`, change the key under `branches:` **and** set `PROD_DEPLOY_BRANCH=main`. The script check protects against honest mistakes;
+  a branch can also edit this file, which is why section 5 asks for the Bitbucket-side restriction where your plan has it.
 * **Making it fully automatic** is deleting the single line `trigger: manual`. Do that only when the checklist in section 7 is signed off **and** you accept that every green push to the branch goes live.
 
 ## 4. One-time server prerequisites (CloudPanel, as `joboapps-societyflow`) - all UNVERIFIED until you run `inspect-server.sh`
@@ -64,6 +81,14 @@ Production deployments therefore split naturally into two kinds: code-only relea
    accepts connections from Cloudflare alone** (CloudPanel firewall / Cloudflare IP allow-list); otherwise list Cloudflare's published ranges. Then `php artisan config:cache`. Confirm with a logged "Login locked out" line showing a real client address.
 7. Cron for the scheduler, the Nginx rule that stops uploaded `.php` files executing under `/storage/`, and (if `QUEUE_CONNECTION` is not `sync`) a queue worker: DEPLOYMENT_CLOUDPANEL.md section 7.
 8. **Restore rehearsal:** a database dump from `db-backup.sh` restored into a scratch database and its table / row counts compared (DEPLOYMENT_CLOUDPANEL.md section 8). Until this has been done once, treat the backups as unproven.
+9. **Can the pipeline reach SSH at all? (decision for you; I changed no firewall.)** Bitbucket Pipelines connects from shared Amazon (AWS) addresses that change. Atlassian states it does not recommend using those ranges as a security control
+   and that IP rules should not be the only protection ([Atlassian: IP addresses](https://support.atlassian.com/bitbucket-cloud/docs/what-are-the-bitbucket-cloud-ip-addresses-i-should-use-to-configure-my-corporate-firewall/)).
+   If the CloudPanel firewall only lets your own address reach port 22, the deploy fails at its first step (`ssh: connect to host ... timed out`). Options, in the order I would consider them:
+   (a) leave port 22 reachable but **key-only** for the site user (no password login; CloudPanel's SSH keys are key based - confirm password authentication is off) and rely on the deploy key + host-key checking;
+   (b) restrict to Atlassian's smaller published range: add `atlassian-ip-ranges: true` to the deploy step with `size: 4x` (more build minutes; "not available in 1x and 2x steps"; list at `ip-ranges.atlassian.com`) - UNVERIFIED on your plan;
+   (c) a self-hosted Bitbucket runner on the server (outbound connection only, port 22 can stay closed) - more setup, not built here.
+10. **PHP must pick up the new files promptly.** PHP-FPM keeps compiled code (OPcache). The release check waits up to 60 s for the new release to be served; if the files are right (`sha256sum -c RELEASE.sha256` passes in the app folder) but the old release
+    keeps answering, the site's PHP-FPM needs a reload (CloudPanel -> Sites -> your site -> PHP settings; saving them is expected to reload it - UNVERIFIED on your version) or `opcache.validate_timestamps=1` for the site. Not inspected: I had no server access.
 
 ## 5. Bitbucket settings (names only - you set the values)
 
@@ -81,9 +106,18 @@ Production deployments therefore split naturally into two kinds: code-only relea
 | `PROD_URL` | `https://societyflow.joboapps.com` | for the outside smoke check |
 | `PROD_PHP_BIN` | `/usr/bin/php8.2` | optional; the site's PHP CLI |
 | `PROD_COMPOSER_BIN` | `composer` | optional |
+| `PROD_DEPLOY_BRANCH` | `production-readiness` | optional; the only branch `deploy.sh` will deploy from (default `production-readiness`; set `main` when production moves there) |
 
-Optional hardening: Deployments -> Production -> **Deployment permissions** (only admins may run it) and a **branch restriction** so only reviewed pull requests can be merged into the deploying branch.
 No private key, password, `.env` content or token goes into the repository, the YAML or a variable of this list.
+
+**Who can deploy - the trust model (read this once).** The deploy key and the `PROD_*` variables let a pipeline step run commands on the server as the site user, and a deployed package *is* code that the site executes. So anyone who can
+edit `bitbucket-pipelines.yml` or `deploy.sh` on some branch **and** run a pipeline for the Production environment is effectively a server administrator. The controls, strongest first:
+1. **Deployment permissions** on Production (Repository settings -> Pipelines -> Deployments -> Production): only administrators (or named people) may run a deployment, and only the designated branch may deploy. Atlassian lists this under the
+   **Premium** tier - check your plan; if it is missing, the next two are what you have.
+2. **Repository access:** give write access only to people you would trust with the server. Do not add collaborators "just to try".
+3. **The script's own branch check** (above): stops honest mistakes such as running `production-deploy` on the wrong branch; it cannot stop someone who edits it on that branch.
+Also recommended for `production-readiness` (and later `main`) where your plan offers branch permissions / merge checks: changes arrive by pull request, with a passing pipeline and at least one approval, no force push, no branch deletion.
+That is what makes "reviewed code only" true - the pipeline alone cannot guarantee it.
 
 ## 6. First deployment (supervised) and every release that contains a migration
 
@@ -98,7 +132,7 @@ The live site is older than this branch, so the first release will carry a **lon
 ## 7. Pre / post deployment verification (data preservation)
 
 Automatic (the server script does these and fails loudly): checksums of every file, uploads before / after (nothing missing), **record counts, highest ids and money totals of 29 business tables before vs after** (owners, flats, tenants, residents,
-users, maintenance bills, payments, expenses, facility bookings, visitors, complaints, notices, documents, settings, ...), smoke check, new log errors, `deployments.log`.
+users, maintenance bills, payments, expenses, facility bookings, visitors, complaints, notices, documents, settings, ...), smoke check **including that the live site reports the release just deployed**, new log errors, `deployments.log`.
 By hand once per release: sign in as an admin of a **test** society; open `https://societyflow.joboapps.com/owners` and compare the owner count with `fingerprint-before-<stamp>.txt` (`owners` row); open one owner's edit page (Villa Area / Villa No. load);
 open two receipts and a private document; check the bell; log in once from the mobile app. Compare `~/backups/societyflow/uploads-before-*.txt` with `uploads-after-*.txt` (only additions).
 Checklist before enabling any automation: [ ] `inspect-server.sh` clean [ ] DB backup restored once in a scratch database and counts compared [ ] SSH deploy key + known host verified [ ] `TRUSTED_PROXIES` decided [ ] Nginx upload rule in place
@@ -106,7 +140,8 @@ Checklist before enabling any automation: [ ] `inspect-server.sh` clean [ ] DB b
 
 ## 8. Recovery
 
-* **Which release is live / was the last good one:** `cat <app>/RELEASE.txt` (id, commit, build time); `cat ~/backups/societyflow/LAST_SUCCESSFUL_RELEASE`; `tail ~/backups/societyflow/deployments.log` (every attempt: OK / ROLLED_BACK / FAILED_CHECKS with the previous release).
+* **Which release is live / was the last good one:** `cat <app>/RELEASE.txt` (id, commit, build time); `cat ~/backups/societyflow/LAST_SUCCESSFUL_RELEASE`; `tail ~/backups/societyflow/deployments.log` (every attempt: OK / ROLLED_BACK / FAILED_CHECKS with the previous release
+  and the release's `tag=`, which is what the live health header shows). From outside: `curl -sI https://societyflow.joboapps.com/api/v1/health | grep -i x-societyflow-release`.
 * **Code:** `bash ~/deploy-tools/rollback-code.sh --backup ~/backups/societyflow/code-<stamp>.tar.gz --apply`. Restores the previous code and `vendor/`; never touches `.env`, uploads or the database. The pipeline already does this by itself when its smoke check fails.
 * **Database:** separate and rarely needed. Never `migrate:rollback`. A code-only release changes no schema, so there is nothing to undo. A release with migrations: additive ones are compatible with the old code (leave them); anything that
   rewrote data needs a restore from the dump taken just before - and a restore **loses everything written after it**, so decide with the business, restore into a scratch database first and copy tables back deliberately. Never restore an old dump over a newer production database to "undo a deploy".
@@ -136,4 +171,7 @@ Mobile (`G:\xampp\htdocs\societyflowmob`, remote `origin`, branch `main`): the s
 6. **Laravel 10 / PHP 8.2 support horizons** (TODO P2-69); dependency advisories unchecked (`composer audit` could not reach packagist from the dev PC) - the pipeline can run it; add `composer audit` to step 1 once you accept it may fail the build on advisories.
 7. **Release commit / tag**: none yet; the pipeline records the commit SHA in `RELEASE.txt`, so tagging `rc-YYYY-MM-DD` before each deploy is advisable.
 8. **Mobile release** needs a keystore and a final application id (separate repository; no APK is published by any of this).
-9. **Cost / time:** the PHPUnit suite takes about 20 minutes on a single runner; consider parallel steps later.
+9. **Cost / time (measured on the dev PC, not in Bitbucket):** a full SQLite run of the PHPUnit suite (~2,600 tests) took about 40 minutes with 8 parallel shards, because every test migrates a fresh in-memory database (~3 s per test).
+   One Bitbucket runner will take much longer than that, may meet the step time limit, and spends your monthly build minutes on every push. Before relying on the pipeline: run it once and read the real duration; if it is too long,
+   split the suite over parallel steps (the same `--filter` slicing as `scripts/run-test-shards.ps1`) or run the full suite only on `production-readiness` and pull requests into it, with a short gate (lint, `DeploymentArtifactsTest`, the security suites) on other branches.
+10. **The outside check can be blocked by Cloudflare or a firewall** (a bot challenge or a 403 for the runner's address). `deploy.sh` says so when it fails: look at the `FAIL` lines first and open the site in a browser before rolling anything back.

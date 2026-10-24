@@ -18,8 +18,9 @@
 #            --non-interactive    for the automated pipeline (needs --apply and --confirm-release <id>, which must equal the package's
 #                                 release id). It deploys ONLY when the release has no pending migration: if any migration is pending it
 #                                 stops BEFORE changing anything and tells you to run the interactive deploy. After the site is up it
-#                                 runs the smoke check, and if that fails it restores the previous CODE automatically (safe because no
-#                                 migration ran, so there is no database change to be incompatible with).
+#                                 runs the smoke check (which includes: the live site reports THIS release's fingerprint), and if that
+#                                 fails it restores the previous CODE automatically (safe because no migration ran, so there is no
+#                                 database change to be incompatible with).
 #            --confirm-release ID the release id the pipeline expects to deploy (non-interactive only)
 #            --no-smoke           skip the post-deploy smoke check (not allowed with --non-interactive)
 #   env      PHP_BIN (default php; use /usr/bin/php8.2 etc. to match the site's PHP), COMPOSER_BIN (default composer)
@@ -370,14 +371,16 @@ APP_URL="$(env_val APP_URL)"
 SMOKE_OK=1
 if [ "$NO_SMOKE" = 1 ]; then warn "smoke check skipped (--no-smoke)"
 elif command -v curl >/dev/null 2>&1 && [ -n "$APP_URL" ]; then
-    bash "$HERE/smoke-check.sh" --url "$APP_URL" --expect-sha "$SRC_HEAD" | sed 's/^/   /' || SMOKE_OK=0
+    # --expect-release: the health answer must carry THIS release's fingerprint, i.e. the site really serves the code just copied (not the old one)
+    bash "$HERE/smoke-check.sh" --url "$APP_URL" --expect-release "$RELEASE_ID" | sed 's/^/   /' || SMOKE_OK=0
 else SMOKE_OK=0; warn "curl or APP_URL missing: the smoke check could not run"; fi
 if [ -n "$LOG_FILE" ] && [ -f "$LOG_FILE" ]; then
     NEW_ERR="$(tail -c +"$((LOG_OFFSET + 1))" "$LOG_FILE" | grep -c '\.ERROR\|\.CRITICAL' || true)"
     [ "$NEW_ERR" = 0 ] && ok "no new ERROR/CRITICAL lines in $(basename "$LOG_FILE")" || warn "$NEW_ERR new ERROR/CRITICAL line(s) in $(basename "$LOG_FILE") since the deploy began - read them"
 fi
 
-record() { printf '%s release=%s commit=%s status=%s previous=%s\n' "$STAMP" "$RELEASE_ID" "${SRC_HEAD:-?}" "$1" "${PREV_RELEASE_ID:-none}" >> "$BACKUP_DIR/deployments.log"; }
+# tag = the value the health endpoint shows in X-SocietyFlow-Release for this release, so a header seen on the live site can be matched to a line here
+record() { printf '%s release=%s commit=%s tag=%s status=%s previous=%s\n' "$STAMP" "$RELEASE_ID" "${SRC_HEAD:-?}" "$(printf '%s' "$RELEASE_ID" | sha256sum | cut -c1-16)" "$1" "${PREV_RELEASE_ID:-none}" >> "$BACKUP_DIR/deployments.log"; }
 if [ "$SMOKE_OK" = 0 ] && [ "$NON_INTERACTIVE" = 1 ]; then
     # No migration ran in this mode, so putting the previous CODE back cannot clash with the database.
     printf '\nThe smoke check FAILED: restoring the previous code automatically (code only; the database was not changed by this deploy).\n' >&2

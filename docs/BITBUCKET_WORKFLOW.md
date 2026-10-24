@@ -22,6 +22,17 @@ moving `main` there is a plain fast-forward - no force push, no history lost. Do
 * Deploy only from a tagged commit: `git tag -a rc-YYYY-MM-DD -m "release candidate"` then build the package (docs/DEPLOYMENT_CLOUDPANEL.md). No release tag exists yet.
 * The mobile repository is separate; its API contract is the JSON the Laravel API returns (see docs/API_COMPATIBILITY.md).
 
+## Protecting the branches (Bitbucket settings - yours to set; which ones exist depends on your plan)
+
+Nothing in the repository can enforce review; Bitbucket does, through Repository settings -> **Branch restrictions** / **Merge checks** (and, for deployments, Pipelines -> Deployments -> Production -> **Deployment permissions**,
+which Atlassian lists under the Premium tier - see [BITBUCKET_PIPELINES_SETUP.md](BITBUCKET_PIPELINES_SETUP.md) section 5). For `production-readiness` (and `main` once it holds the application):
+
+* changes arrive by **pull request**, with at least **one approval** and a **successful pipeline build**;
+* **no force push** and **no branch deletion** (history stays intact);
+* only the people you would trust with the server may have write access - a pipeline with the deploy key can run commands there.
+
+Today you push straight to `production-readiness`. Until you move to pull requests the manual deploy button and the checklist are the only gates, so keep the production step manual.
+
 ## Known repository hygiene items
 
 * `.env.mysql.template` carried a real `APP_KEY` from the first commit until c939ffa: treat that key as exposed (TODO P0-20). History was not rewritten.

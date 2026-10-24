@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Symfony\Component\Yaml\Yaml;
+use Tests\Concerns\RunsDeploymentScripts;
 use Tests\TestCase;
 
 /**
@@ -12,6 +13,14 @@ use Tests\TestCase;
  */
 class DeploymentArtifactsTest extends TestCase
 {
+    use RunsDeploymentScripts;
+
+    protected function tearDown(): void
+    {
+        $this->cleanUpDeploymentScripts();
+        parent::tearDown();
+    }
+
     private function root(string $path = ''): string
     {
         return base_path($path);
@@ -147,13 +156,39 @@ class DeploymentArtifactsTest extends TestCase
 
     public function test_every_script_parses_with_bash(): void
     {
-        $bash = trim((string) @shell_exec(PHP_OS_FAMILY === 'Windows' ? 'where bash 2>NUL' : 'command -v bash'));
-        if ($bash === '') {
-            $this->markTestSkipped('bash is not available here; the pipeline runs this on Linux');
-        }
+        $this->requireBash();
         foreach ($this->scripts() as $file) {
-            $out = shell_exec('bash -n ' . escapeshellarg($file) . ' 2>&1');
-            $this->assertSame('', trim((string) $out), basename($file) . ": $out");
+            $r = $this->execute([$this->bash, '-n', $this->posix($file)]);
+            $this->assertSame(0, $r['code'], basename($file) . ': ' . $r['err']);
+            $this->assertSame('', trim($r['err']), basename($file));
         }
+    }
+
+    public function test_only_the_designated_branch_at_the_packaged_commit_may_connect(): void
+    {
+        $deploy = file_get_contents($this->root('scripts/deploy/ci/deploy.sh'));
+
+        $this->assertStringContainsString('PROD_DEPLOY_BRANCH:-production-readiness', $deploy, 'the designated branch is production-readiness unless the operator names another');
+        $this->assertMatchesRegularExpression('/"\$\{BITBUCKET_BRANCH:-\}" != "\$APPROVED_BRANCH"/', $deploy);
+        $this->assertStringContainsString('"$COMMIT" = "$BITBUCKET_COMMIT"', $deploy, 'the package must come from the commit the pipeline is running');
+        // every refusal is written before the first thing that can open a connection (the rsh() helper wrapping ssh, or scp)
+        $firstConnection = min(strpos($deploy, 'rsh()'), strpos($deploy, 'scp '));
+        $this->assertLessThan($firstConnection, strrpos($deploy, 'REFUSED'), 'a REFUSED check comes after a connection could already have been opened');
+        $this->assertGreaterThanOrEqual(3, substr_count($deploy, 'REFUSED'));
+    }
+
+    public function test_the_outside_check_compares_the_release_instead_of_printing_it(): void
+    {
+        $smoke = file_get_contents($this->root('scripts/deploy/server/smoke-check.sh'));
+        $deploy = file_get_contents($this->root('scripts/deploy/ci/deploy.sh'));
+        $apply = file_get_contents($this->root('scripts/deploy/server/apply-release.sh'));
+
+        $this->assertStringNotContainsString('expect-sha', $smoke . $deploy . $apply, 'the old option only printed the commit and compared nothing');
+        $this->assertStringContainsString('--expect-release "$RELEASE_ID"', $deploy);
+        $this->assertStringContainsString('--expect-release "$RELEASE_ID"', $apply);
+        $this->assertStringContainsString(strtolower(\App\Support\ReleaseFingerprint::HEADER), $smoke, 'the script must read the header the application sends');
+        $this->assertStringContainsString('sha256sum | cut -c1-16', $smoke, 'same fingerprint recipe as App\Support\ReleaseFingerprint');
+        $this->assertMatchesRegularExpression('/if \[ "\$got" = "\$want" \]; then pass .*\n\s*elif \[ -z "\$got" \]; then miss .*\n\s*else miss /', $smoke, 'a missing or different fingerprint is a FAIL');
+        $this->assertStringNotContainsString('verified it from outside', $deploy, 'do not claim verification the script does not perform');
     }
 }

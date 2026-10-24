@@ -77,6 +77,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Release file
+    |--------------------------------------------------------------------------
+    |
+    | The RELEASE.txt that the packaged deploy (scripts/deploy) places in the
+    | application root. Only its release id is ever read, and only to give the
+    | public health answer an opaque fingerprint of the running release (see
+    | App\Support\ReleaseFingerprint). Absent on a development machine.
+    |
+    */
+
+    'release_file' => base_path('RELEASE.txt'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     */
