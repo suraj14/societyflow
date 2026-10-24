@@ -111,6 +111,203 @@ class DeploymentScriptsBehaviourTest extends TestCase
         ];
     }
 
+    // ---------------------------------------------------------------------------------------------- apply-release.sh: dry run, then apply
+
+    private function skipWhenRoot(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $this->markTestSkipped('apply-release.sh refuses to run as root, on purpose; this runs on a developer machine');
+        }
+    }
+
+    /**
+     * A throw-away "live application" (only the files the pre-flight looks for) and a tiny release package for it, plus a php wrapper that
+     * claims the extensions are loaded and otherwise runs the real PHP.
+     *
+     * @return array{id:string, app:string, releases:string, backups:string, bin:string, package:string, pkgDir:string, php:string}
+     */
+    private function stagingWorkspace(string $id = '20261024-130000-aaaaaaaaaa'): array
+    {
+        $dir = $this->scratchDir();
+        $app = $dir . DIRECTORY_SEPARATOR . 'live';
+        foreach (['bootstrap', 'public', 'vendor', 'storage'] as $d) {
+            mkdir($app . DIRECTORY_SEPARATOR . $d, 0700, true);
+        }
+        file_put_contents($app . '/artisan', "<?php\n");
+        file_put_contents($app . '/.env', "APP_ENV=testing\n");
+        file_put_contents($app . '/bootstrap/app.php', "<?php\n");
+        file_put_contents($app . '/public/index.php', "<?php\n");
+        file_put_contents($app . '/vendor/autoload.php', "<?php\n");
+        file_put_contents($app . '/app-file.txt', "live version\n");
+
+        $bin = $dir . DIRECTORY_SEPARATOR . 'bin';
+        mkdir($bin, 0700, true);
+        file_put_contents(
+            $bin . '/php',
+            "#!/usr/bin/env bash\ncase \"\$1\" in\n  -m) printf '%s\\n' ctype dom fileinfo filter gd hash iconv json libxml mbstring openssl pcre pdo_mysql session simplexml tokenizer xml xmlreader xmlwriter zip zlib curl;;\n  *) exec \"" . $this->posix(PHP_BINARY) . "\" \"\$@\";;\nesac\n",
+        );
+        $this->assertSame(0, $this->bashSnippet('chmod +x ' . escapeshellarg($this->posix($bin . '/php')))['code']);
+
+        $workspace = ['id' => $id, 'app' => $app, 'releases' => $dir . DIRECTORY_SEPARATOR . 'releases', 'backups' => $dir . DIRECTORY_SEPARATOR . 'backups', 'bin' => $bin,
+            'package' => $dir . DIRECTORY_SEPARATOR . 'incoming' . DIRECTORY_SEPARATOR . "societyflow-$id.tar.gz", 'pkgDir' => $dir . DIRECTORY_SEPARATOR . 'pkg', 'php' => $bin . '/php'];
+        $this->buildPackage($workspace, 'new version');
+
+        return $workspace;
+    }
+
+    /** (Re)builds the package in $ws['package'] with the given content for app-file.txt. */
+    private function buildPackage(array $ws, string $content): void
+    {
+        $this->assertSame(0, $this->bashSnippet('rm -rf ' . escapeshellarg($this->posix($ws['pkgDir'])))['code']);
+        mkdir($ws['pkgDir'] . '/app', 0700, true);
+        @mkdir(dirname($ws['package']), 0700, true);
+        file_put_contents($ws['pkgDir'] . '/app-file.txt', $content . "\n");
+        file_put_contents($ws['pkgDir'] . '/app/Example.php', "<?php\n// {$content}\n");
+        file_put_contents($ws['pkgDir'] . '/RELEASE.txt', "release_id={$ws['id']}\nbuilt_utc=2026-10-24 13:00:00\nsource_head=aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd\nfiles=3\n");
+        $pkg = escapeshellarg($this->posix($ws['pkgDir']));
+        $out = escapeshellarg($this->posix($ws['package']));
+        $incoming = escapeshellarg($this->posix(dirname($ws['package'])));
+        $list = escapeshellarg($this->posix(dirname($ws['package']) . '/list.txt'));
+        // same shape as scripts/deploy/ci/build-release.sh: member names WITHOUT a leading ./, RELEASE.sha256 hashing every other file
+        $r = $this->bashSnippet(
+            "cd $pkg && find . -type f ! -name RELEASE.sha256 | sed 's|^\\./||' | LC_ALL=C sort | while IFS= read -r p; do sha256sum -- \"\$p\"; done > RELEASE.sha256"
+            . " && find . -type f | sed 's|^\\./||' | LC_ALL=C sort > $list && tar -czf $out -C $pkg -T $list"
+            . " && cd $incoming && sha256sum " . escapeshellarg(basename($ws['package'])) . ' > ' . escapeshellarg(basename($ws['package']) . '.sha256'),
+        );
+        $this->assertSame(0, $r['code'], $r['err']);
+    }
+
+    /** @param list<string> $extra @return array{code:int,out:string,err:string} */
+    private function applyRelease(array $ws, array $extra = []): array
+    {
+        return $this->runScript(
+            base_path('scripts/deploy/server/apply-release.sh'),
+            array_merge(['--package', $this->posix($ws['package']), '--app-dir', $this->posix($ws['app']), '--releases-dir', $this->posix($ws['releases']),
+                '--backup-dir', $this->posix($ws['backups']), '--site-user', 'siteuser'], $extra),
+            ['PHP_BIN' => $this->posix($ws['php']), 'COMPOSER_BIN' => 'composer'],
+            $ws['bin'],
+        );
+    }
+
+    /** a fingerprint of everything under the fake live application */
+    private function treeOf(string $dir): string
+    {
+        $lines = [];
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)) as $file) {
+            $lines[] = str_replace('\\', '/', substr($file->getPathname(), strlen($dir))) . ' ' . sha1_file($file->getPathname());
+        }
+        sort($lines);
+
+        return implode("\n", $lines);
+    }
+
+    public function test_a_dry_run_followed_by_a_second_run_reuses_its_own_unpacked_folder(): void
+    {
+        $this->skipWhenRoot();
+        $ws = $this->stagingWorkspace();
+
+        $first = $this->applyRelease($ws);
+        $this->assertSame(0, $first['code'], $first['out'] . $first['err']);
+        $this->assertStringContainsString('DRY RUN complete', $first['out']);
+        $this->assertStringContainsString("release {$ws['id']} unpacked", $first['out']);
+
+        $second = $this->applyRelease($ws);
+        $this->assertSame(0, $second['code'], 'the second run must not trip over the folder the first one made: ' . $second['out'] . $second['err']);
+        $this->assertStringContainsString('was already unpacked by its dry run; it is identical to the package', $second['out']);
+    }
+
+    public function test_the_real_run_after_the_dry_run_gets_past_unpacking_and_stops_before_changing_anything_when_it_cannot_read_the_database(): void
+    {
+        $this->skipWhenRoot();
+        $ws = $this->stagingWorkspace();
+        $before = $this->treeOf($ws['app']);
+        $this->assertSame(0, $this->applyRelease($ws)['code']);
+
+        // what deploy.sh does next: the same package, --apply --non-interactive. The fake app has no database, so the automated gate stops it.
+        $apply = $this->applyRelease($ws, ['--apply', '--non-interactive', '--confirm-release', $ws['id']]);
+
+        $this->assertSame(3, $apply['code'], 'exit 3 = the automated deploy refuses to go on: ' . $apply['out'] . $apply['err']);
+        $this->assertStringContainsString('was already unpacked by its dry run', $apply['out']);
+        $this->assertStringContainsString('nothing was changed', $apply['err']);
+        $this->assertSame($before, $this->treeOf($ws['app']), 'the live application must be byte-for-byte unchanged');
+        $this->assertFileDoesNotExist($ws['app'] . '/storage/framework/down', 'the site must not have been put into maintenance mode');
+    }
+
+    /** @dataProvider tamperedStagingFolders */
+    public function test_a_staging_folder_that_is_not_exactly_this_package_is_refused(string $tamper): void
+    {
+        $this->skipWhenRoot();
+        $ws = $this->stagingWorkspace();
+        $this->assertSame(0, $this->applyRelease($ws)['code']);
+        $stage = $ws['releases'] . DIRECTORY_SEPARATOR . $ws['id'];
+        $this->assertDirectoryExists($stage);
+        $before = $this->treeOf($ws['app']);
+
+        match ($tamper) {
+            'an edited file'          => file_put_contents($stage . '/app/Example.php', "<?php\n// something else\n"),
+            'an extra file'           => file_put_contents($stage . '/app/Injected.php', "<?php\n"),
+            'a missing file'          => unlink($stage . '/app-file.txt'),
+            'another package under the same release id' => $this->buildPackage($ws, 'a different build'),
+        };
+
+        $r = $this->applyRelease($ws);
+
+        $this->assertSame(1, $r['code'], $r['out'] . $r['err']);
+        $this->assertStringContainsString('NOT identical to this package', $r['err']);
+        $this->assertSame($before, $this->treeOf($ws['app']), 'the live application must be untouched');
+    }
+
+    public static function tamperedStagingFolders(): array
+    {
+        return [
+            'an edited file'                            => ['an edited file'],
+            'an extra file'                             => ['an extra file'],
+            'a missing file'                            => ['a missing file'],
+            'another package under the same release id' => ['another package under the same release id'],
+        ];
+    }
+
+    // ---------------------------------------------------------------------------------------------- inspect-server.sh: will PHP serve the new code?
+
+    /**
+     * @dataProvider opcacheSettings
+     * @param array{ini?:string, confd?:string, pool?:string, noPool?:bool} $tree
+     */
+    public function test_the_server_inspection_warns_when_php_would_keep_serving_old_code(array $tree, string $expectedMarker, string $expectedText): void
+    {
+        $dir = $this->scratchDir();
+        $etc = $dir . '/etc-php/8.2/fpm';
+        mkdir($etc . '/conf.d', 0700, true);
+        mkdir($etc . '/pool.d', 0700, true);
+        mkdir($dir . '/app', 0700, true);
+        file_put_contents($etc . '/php.ini', ($tree['ini'] ?? '') . "\n");
+        file_put_contents($etc . '/conf.d/10-opcache.ini', ($tree['confd'] ?? '') . "\n");
+        if (empty($tree['noPool'])) {
+            file_put_contents($etc . '/pool.d/siteuser.conf', "[siteuser]\nuser = siteuser\ngroup = siteuser\nlisten = /run/php/x.sock\n" . ($tree['pool'] ?? '') . "\n");
+        }
+        $bin = $this->scratchDir('sfbin');
+
+        $r = $this->runScript(base_path('scripts/deploy/server/inspect-server.sh'), [$this->posix($dir . '/app'), 'siteuser', 'example.invalid'], ['PHP_ETC' => $this->posix($dir . '/etc-php'), 'PHP_BIN' => '/nonexistent'], $bin);
+
+        $this->assertSame(0, $r['code'], $r['err']);
+        $this->assertSame(1, preg_match('/==== PHP - will the web runtime pick up new files[^\n]*\n(.*?)\n==== Nginx/s', $r['out'], $m), 'the OPcache section is missing: ' . $r['out']);
+        $this->assertStringContainsString($expectedMarker, $m[1]);
+        $this->assertStringContainsString($expectedText, $m[1]);
+    }
+
+    public static function opcacheSettings(): array
+    {
+        return [
+            'PHP defaults'                                  => [[], '[ok]', 'new code is served within about 2 s'],
+            'validate_timestamps off in php.ini'            => [['ini' => 'opcache.validate_timestamps=0'], '[!!]', 'will keep serving the old code'],
+            'php.ini off but the site pool turns it on'     => [['ini' => 'opcache.validate_timestamps=0', 'pool' => 'php_admin_value[opcache.validate_timestamps] = 1'], '[ok]', 'validate_timestamps=1'],
+            'the site pool switches it off with a flag'     => [['confd' => 'opcache.validate_timestamps=1', 'pool' => 'php_admin_flag[opcache.validate_timestamps] = off'], '[!!]', 'will keep serving the old code'],
+            'a long revalidate interval'                    => [['confd' => "opcache.validate_timestamps=1\nopcache.revalidate_freq=60"], '[!!]', 'can take up to 60 s'],
+            'OPcache disabled'                              => [['confd' => 'opcache.enable=0'], '[ok]', 'new code is served at once'],
+            'no pool for the site user (cannot be checked)' => [['ini' => 'opcache.validate_timestamps=0', 'noPool' => true], 'could not be checked', 'validate_timestamps'],
+        ];
+    }
+
     // ---------------------------------------------------------------------------------------------- smoke-check.sh: which release is live
 
     /** @param list<string> $extra @return array{code:int,out:string,err:string} */

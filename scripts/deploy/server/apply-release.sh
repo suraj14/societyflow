@@ -159,13 +159,28 @@ RELEASE_ID="$(tar -xzOf "$PACKAGE" RELEASE.txt 2>/dev/null | grep -E '^release_i
 [ -n "$RELEASE_ID" ] || die "the package has no RELEASE.txt - it was not made by New-ReleasePackage.ps1"
 STAGE="$RELEASES_DIR/$RELEASE_ID"
 mkdir -p "$RELEASES_DIR"; chmod 700 "$RELEASES_DIR" 2>/dev/null || true
+REUSE_STAGE=0
 if [ -e "$STAGE" ] && [ -n "$(ls -A "$STAGE" 2>/dev/null)" ]; then
-    die "$STAGE already exists and is not empty (this release was unpacked before). Check it, remove it yourself if it is stale, and run again."
+    # The normal sequence is: dry run (which unpacks here), read the lists, then --apply (the pipeline does both in one go). So a folder left by
+    # this release's own dry run must be reusable - but ONLY when it is exactly this package: the same set of files, the package's own
+    # RELEASE.sha256 (which hashes every other file, RELEASE.txt included) equal to the staged one, and every staged file matching it.
+    # A different package under the same id, or an extra, missing or edited file, is refused and nothing is copied.
+    PKG_FILES="$(tar -tzf "$PACKAGE" | sed 's#^\./##' | grep -v '/$' | sort || true)"
+    STAGE_FILES="$(cd "$STAGE" && find . -type f -not -path './.preview/*' | sed 's#^\./##' | sort)"
+    if [ -n "$PKG_FILES" ] && [ "$PKG_FILES" = "$STAGE_FILES" ] \
+       && tar -xzOf "$PACKAGE" RELEASE.sha256 | cmp -s - "$STAGE/RELEASE.sha256" \
+       && ( cd "$STAGE" && sha256sum -c --quiet RELEASE.sha256 ) >/dev/null 2>&1; then
+        REUSE_STAGE=1
+    else
+        die "$STAGE already exists and is NOT identical to this package (different, missing, extra or edited files). Nothing was changed. Check it, remove that folder yourself if it is stale, and run again."
+    fi
 fi
-mkdir -p "$STAGE"
-tar --no-same-owner --no-same-permissions -xzf "$PACKAGE" -C "$STAGE"
+if [ "$REUSE_STAGE" = 0 ]; then
+    mkdir -p "$STAGE"
+    tar --no-same-owner --no-same-permissions -xzf "$PACKAGE" -C "$STAGE"
+fi
 ( cd "$STAGE" && sha256sum -c --quiet RELEASE.sha256 ) || die "files in the package do not match RELEASE.sha256"
-ok "release $RELEASE_ID unpacked: $(find "$STAGE" -type f | wc -l) files, every hash matches RELEASE.sha256"
+ok "release $RELEASE_ID $([ "$REUSE_STAGE" = 1 ] && echo 'was already unpacked by its dry run; it is identical to the package' || echo unpacked): $(find "$STAGE" -type f -not -path "$STAGE/.preview/*" | wc -l) files, every hash matches RELEASE.sha256"
 BAD="$(find "$STAGE" \( -name '.env' -o -name '.env.*' -o -name '*.sqlite' -o -name '*.pem' -o -name '*.key' \) -o -path "$STAGE/storage" -o -path "$STAGE/vendor" -o -path "$STAGE/public/storage" | head -3 || true)"
 [ -z "$BAD" ] || die "the package contains something that must never be deployed: $BAD"
 ok "package holds no .env, key, database, storage or vendor"
@@ -181,7 +196,8 @@ LISTS="$STAGE/.preview"; mkdir -p "$LISTS"
     elif cmp -s "$STAGE/$f" "$APP_DIR/$f"; then echo "$f" >> "$LISTS/same.txt"
     else echo "$f" >> "$LISTS/change.txt"; fi
 done
-( cd "$APP_DIR" && find app config routes resources database/migrations database/seeders public bootstrap/app.php -type f -not -path 'public/storage/*' 2>/dev/null | sort ) > "$LISTS/live-code.txt"
+# a folder that does not exist on an older or trimmed install makes find exit non-zero; that is information, not an error
+( cd "$APP_DIR" && { find app config routes resources database/migrations database/seeders public bootstrap/app.php -type f -not -path 'public/storage/*' 2>/dev/null || true; } | sort ) > "$LISTS/live-code.txt"
 ( cd "$STAGE" && find . -type f | sed 's|^\./||' | sort ) > "$LISTS/stage-all.txt"
 comm -23 "$LISTS/live-code.txt" "$LISTS/stage-all.txt" > "$LISTS/live-only.txt"
 say "   new files:      $(wc -l < "$LISTS/add.txt")"

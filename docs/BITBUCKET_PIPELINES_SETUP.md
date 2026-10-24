@@ -88,7 +88,8 @@ Production deployments therefore split naturally into two kinds: code-only relea
    (b) restrict to Atlassian's smaller published range: add `atlassian-ip-ranges: true` to the deploy step with `size: 4x` (more build minutes; "not available in 1x and 2x steps"; list at `ip-ranges.atlassian.com`) - UNVERIFIED on your plan;
    (c) a self-hosted Bitbucket runner on the server (outbound connection only, port 22 can stay closed) - more setup, not built here.
 10. **PHP must pick up the new files promptly.** PHP-FPM keeps compiled code (OPcache). The release check waits up to 60 s for the new release to be served; if the files are right (`sha256sum -c RELEASE.sha256` passes in the app folder) but the old release
-    keeps answering, the site's PHP-FPM needs a reload (CloudPanel -> Sites -> your site -> PHP settings; saving them is expected to reload it - UNVERIFIED on your version) or `opcache.validate_timestamps=1` for the site. Not inspected: I had no server access.
+    keeps answering, the site's PHP-FPM needs a reload (CloudPanel -> Sites -> your site -> PHP settings; saving them is expected to reload it - UNVERIFIED on your version) or `opcache.validate_timestamps=1` for the site.
+    Not inspected: I had no server access. `inspect-server.sh` now prints the OPcache settings that apply to the site's pool and marks `[!!]` when `validate_timestamps` is off or `revalidate_freq` is long.
 
 ## 5. Bitbucket settings (names only - you set the values)
 
@@ -128,6 +129,10 @@ The live site is older than this branch, so the first release will carry a **lon
 3. Read `MIGRATIONS-REVIEW.txt` (in the package folder built locally with `New-ReleasePackage.ps1`, or `INCLUDED.txt` in the pipeline artifact) and the flagged migrations; decide each is safe for the live data (DEPLOYMENT_CLOUDPANEL.md section 8 classifies the October ones).
 4. SSH in and run the interactive deploy: `bash ~/deploy-tools/apply-release.sh --package ~/incoming/<package> --apply` - it backs up code and database (verified), shows the SQL, and waits for you to type `MIGRATE`.
 5. Verify (section 7). From the next code-only release on, the pipeline step can be used.
+
+The dry run unpacks the package into `~/releases/<release id>`; the real run **reuses that folder, but only if it is exactly the package** (same files, same checksum list, every file matching it). A different, edited, missing or extra file stops the
+script before anything is copied and names the folder to look at. So "dry run, read, then apply" and "run the deployment step again after fixing something" both work. (A rehearsal of the whole chain found that the first version refused its own
+dry-run folder, which would have made every automated deployment fail; this is covered by `DeploymentScriptsBehaviourTest`.)
 
 ## 7. Pre / post deployment verification (data preservation)
 

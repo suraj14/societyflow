@@ -14,6 +14,7 @@ APP_DIR="${1:-/home/joboapps-societyflow/htdocs/societyflow.joboapps.com}"
 SITE_USER="${2:-joboapps-societyflow}"
 DOMAIN="${3:-societyflow.joboapps.com}"
 PHP_BIN="${PHP_BIN:-php}"
+PHP_ETC="${PHP_ETC:-/etc/php}"   # only overridable so the OPcache check can be tried against a made-up folder tree
 
 sect() { printf '\n==== %s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -60,11 +61,11 @@ fi
 info "other PHP binaries on the box: $(ls /usr/bin/php[0-9]* 2>/dev/null | tr '\n' ' ')"
 
 sect "PHP - the web runtime (PHP-FPM) that serves this site"
-found=0
-for f in /etc/php/*/fpm/pool.d/*.conf; do
+found=0; pool_file=""; pool_ver=""
+for f in "$PHP_ETC"/*/fpm/pool.d/*.conf; do
     [ -r "$f" ] || continue
     if grep -qE "^\s*user\s*=\s*$SITE_USER\s*$" "$f"; then
-        found=1; ver="$(echo "$f" | cut -d/ -f4)"
+        found=1; ver="$(basename "$(dirname "$(dirname "$(dirname "$f")")")")"; pool_file="$f"; pool_ver="$ver"
         ok "pool for $SITE_USER: PHP $ver  ($f)"
         grep -E '^\s*(listen|pm\.max_children|php_admin_value\[(memory_limit|upload_max_filesize|post_max_size|max_execution_time)\]|php_admin_flag\[display_errors\]|php_value\[(memory_limit|upload_max_filesize|post_max_size)\])' "$f" | sed 's/^/           /'
         have systemctl && info "service php${ver}-fpm: $(systemctl is-active "php${ver}-fpm" 2>/dev/null)"
@@ -74,6 +75,30 @@ for f in /etc/php/*/fpm/pool.d/*.conf; do
 done
 [ "$found" = 0 ] && info "no FPM pool file readable for $SITE_USER (CloudPanel keeps them under /etc/php/<ver>/fpm/pool.d/). Check the PHP version in CloudPanel -> Sites -> $DOMAIN -> Settings."
 info "from outside (run on your PC, read-only):  curl -sI https://$DOMAIN/login | grep -i -E 'server|x-powered-by'"
+
+sect "PHP - will the web runtime pick up new files after a deployment? (OPcache)"
+# PHP-FPM keeps compiled code. With opcache.validate_timestamps=0 it never looks at the files again until FPM is reloaded, and the site user
+# cannot reload FPM over SSH. The deploy's release check (smoke-check.sh --expect-release) would then see the OLD release, fail, and put the code back.
+if [ -z "$pool_file" ]; then
+    info "no FPM pool for $SITE_USER was readable, so OPcache could not be checked. In CloudPanel -> Sites -> $DOMAIN -> PHP settings look for opcache.validate_timestamps (want 1 / On)."
+else
+    # php.ini, then conf.d, then the site's own pool: a later assignment wins, so the LAST match is the effective one
+    opcache_lines="$(grep -HsE '^\s*(php_admin_value\[|php_admin_flag\[|php_value\[|php_flag\[)?opcache\.(enable|validate_timestamps|revalidate_freq)\]?\s*=' "$PHP_ETC/$pool_ver/fpm/php.ini" "$PHP_ETC/$pool_ver"/fpm/conf.d/*.ini "$pool_file" 2>/dev/null || true)"
+    if [ -n "$opcache_lines" ]; then printf '%s\n' "$opcache_lines" | sed 's/^/           /'; else info "no opcache.* line found in php.ini, conf.d or the pool file: PHP's defaults apply (validate_timestamps=1, revalidate_freq=2)"; fi
+    effective() { printf '%s\n' "$opcache_lines" | grep -E "opcache\.$1\]?\s*=" | tail -n1 | sed -E 's/^.*=\s*//; s/\s*(;.*)?$//; s/"//g' | tr 'A-Z' 'a-z'; }
+    validate="$(effective validate_timestamps)"; freq="$(effective revalidate_freq)"; enabled="$(effective enable)"
+    case "$validate" in
+        0|off|false|no) bad "opcache.validate_timestamps is OFF: PHP-FPM will keep serving the old code after a deployment until FPM is reloaded. Turn it On for this site (CloudPanel -> PHP settings) or plan an FPM reload after each deploy." ;;
+        *)              case "$enabled" in
+                            0|off|false|no) ok "OPcache is switched off for this site: new code is served at once" ;;
+                            *) if printf '%s' "${freq:-2}" | grep -qE '^[0-9]+$' && [ "${freq:-2}" -gt 45 ]; then
+                                   bad "opcache.revalidate_freq=${freq} s: new code can take up to ${freq} s to appear, about as long as the deploy's release check waits (60 s). Lower it (e.g. 2) for this site."
+                               else
+                                   ok "OPcache re-checks files (validate_timestamps=${validate:-1 (default)}, revalidate_freq=${freq:-2 (default)} s): new code is served within about ${freq:-2} s"
+                               fi ;;
+                        esac ;;
+    esac
+fi
 
 sect "Nginx virtual host and document root"
 vh=""; for c in "/etc/nginx/sites-enabled/$DOMAIN.conf" "/etc/nginx/sites-enabled/$DOMAIN" "/etc/nginx/conf.d/$DOMAIN.conf"; do [ -r "$c" ] && vh="$c" && break; done
