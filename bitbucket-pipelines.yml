@@ -1,7 +1,9 @@
 # SocietyFlow web - Bitbucket Pipelines
 #
 # What runs where (nothing deploys until you have done docs/BITBUCKET_PIPELINES_SETUP.md):
-#   every branch and pull request ....... install dependencies, run the PHPUnit suite (in-memory SQLite), build the release package as a check
+#   every branch and pull request ....... install dependencies, run the PHPUnit suite against a MariaDB 10.4.32 service container (the engine of
+#                                         the recorded full runs and close to production; the in-memory SQLite default of a developer PC takes
+#                                         ~9x longer because every test re-runs all migrations), build the release package as a check
 #   branch  production-readiness ........ the same, then a package artifact and a MANUAL "Deploy to production" step (deployment: production)
 #   custom pipelines (Run pipeline) ..... "server-dry-run"      : uploads + dry run on the server, changes nothing live
 #                                         "production-deploy"   : same as the manual step, started by hand
@@ -22,9 +24,19 @@ image: php:8.2-cli
 definitions:
   caches:
     composer-cache: ~/.composer/cache
+  services:
+    # A throw-away database that exists only for the duration of the test step. Pinned to the version of the recorded MariaDB test runs
+    # (10.4.32). An empty root password on a container nobody can reach is deliberate: no password belongs in this file.
+    mariadb:
+      image: mariadb:10.4.32
+      variables:
+        MYSQL_DATABASE: societyflow_test
+        MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
   steps:
     - step: &install-and-test
-        name: Install and test (PHP 8.2, SQLite in memory)
+        name: Install and test (PHP 8.2, MariaDB 10.4.32)
+        services:
+          - mariadb
         caches:
           - composer-cache
         script:
@@ -45,8 +57,13 @@ definitions:
           - 'if git ls-files -z "*.php" ":!*.blade.php" | xargs -0 -n1 php -l | grep -v "^No syntax errors"; then echo "PHP syntax errors found"; exit 1; fi'
           - cp .env.example .env && php artisan key:generate --ansi
           - php artisan route:list > /dev/null
-          - mkdir -p test-results
-          - php vendor/phpunit/phpunit/phpunit --no-progress --log-junit test-results/junit.xml
+          # services have no readiness check; wait for the database, then point the suite at it (phpunit.xml only sets sqlite when nothing else is set)
+          - |
+            set -e
+            export DB_CONNECTION=mysql DB_HOST=127.0.0.1 DB_PORT=3306 DB_DATABASE=societyflow_test DB_USERNAME=root DB_PASSWORD=
+            php scripts/ci/wait-for-db.php
+            mkdir -p test-results
+            php vendor/phpunit/phpunit/phpunit --no-progress --log-junit test-results/junit.xml
         artifacts:
           - test-results/**
     - step: &build-package

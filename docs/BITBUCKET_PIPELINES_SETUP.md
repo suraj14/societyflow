@@ -1,8 +1,8 @@
 # Automatic deployment: Bitbucket -> CloudPanel (setup, safety, recovery)
 
-**Status 2026-10-24: BUILT AND TESTED LOCALLY; NOT ENABLED; NO PRODUCTION DEPLOYMENT HAS BEEN PERFORMED.**
-No SSH access to the server was available, so nothing on the server was inspected or changed. The pipeline has never run in Bitbucket (only a
-syntax / structure check and the scripts' own tests were possible here). The production step is a **manual** button on purpose.
+**Status 2026-10-24: BUILT AND REHEARSED LOCALLY (scratch site, local stand-ins for ssh and Bitbucket); NOT ENABLED; NO PRODUCTION DEPLOYMENT HAS BEEN PERFORMED.**
+No SSH access to the server was available, so nothing on the server was inspected or changed. The pipeline has never run in Bitbucket: here the YAML was parsed, its steps were simulated on a clean checkout,
+and the scripts were run end to end against a scratch copy of the application (including a failed deployment that rolled itself back). The production step is a **manual** button on purpose.
 How the manual / one-off process works (package, dry run, rollback): [DEPLOYMENT_CLOUDPANEL.md](DEPLOYMENT_CLOUDPANEL.md). Branches: [BITBUCKET_WORKFLOW.md](BITBUCKET_WORKFLOW.md).
 
 ## 1. What was verified, and what was not
@@ -22,7 +22,7 @@ How the manual / one-off process works (package, dry run, rollback): [DEPLOYMENT
 | Bitbucket deployment permissions (who may deploy, which branches may deploy to *Production*) | **UNVERIFIED for your account** | Atlassian's announcement lists them under the **Premium** tier ([blog](https://www.atlassian.com/blog/bitbucket/deployment-permissions-now-available-in-bitbucket-pipelines)); check Repository settings -> Deployments -> Production |
 | The live site serves the release that was just deployed | CHECKED BY THE PIPELINE, never yet run | the health endpoint sends an opaque `X-SocietyFlow-Release` header; the deploy compares it with the release id it shipped (section 2) |
 | The pipeline can open an SSH connection to the server | **UNVERIFIED** | Pipelines connects from shared Amazon addresses that change; Atlassian does not support allow-listing them (section 4.9) |
-| How long the test step takes in Bitbucket | **UNKNOWN** | measured on the dev PC only: a full SQLite run is about **40 minutes with 8 parallel shards** (each test migrates an in-memory database, ~3 s per test); one runner will be slower (section 10, item 9) |
+| How long the test step takes in Bitbucket | **UNKNOWN until the first run** | measured on the dev PC: the whole suite (2,635 tests) in ONE process against MariaDB 10.4.32 - what the pipeline does - took **27.5 minutes**, all passing; the same engine in 8 parallel shards took about 4 minutes, in-memory SQLite in 8 shards about 39 minutes (section 10, item 9) |
 
 **Do this first, whatever else you decide:** the live demo credentials are an open door. Deploying this release removes the card, but the accounts behind it may still have those
 passwords. On the server run `php artisan users:rotate-weak-passwords` **without `--force`** (report only) to see which accounts still use known passwords; rotating them is your call
@@ -32,7 +32,7 @@ passwords. On the server run `php artisan users:rotate-weak-passwords` **without
 
 ```
 git push  ->  Bitbucket pipeline
-   1 Install + test      PHP 8.2, SQLite in memory, composer check-platform-reqs, route:list, lint, the whole PHPUnit suite   (every branch and pull request)
+   1 Install + test      PHP 8.2 + a throw-away MariaDB 10.4.32 service, composer check-platform-reqs, route:list, lint, the whole PHPUnit suite   (every branch and pull request)
    2 Build package       scripts/deploy/ci/build-release.sh  -> committed files only, allow-list, secret scan, checksums     (every branch and pull request)
    3 Deploy to production  [production-readiness only, MANUAL button]  scripts/deploy/ci/deploy.sh
         refuse unless this run is on the designated branch at the packaged commit (before any connection)
@@ -182,9 +182,11 @@ Mobile (`G:\xampp\htdocs\societyflowmob`, remote `origin`, branch `main`): the s
 6. **Laravel 10 / PHP 8.2 support horizons** (TODO P2-69); dependency advisories unchecked (`composer audit` could not reach packagist from the dev PC) - the pipeline can run it; add `composer audit` to step 1 once you accept it may fail the build on advisories.
 7. **Release commit / tag**: none yet; the pipeline records the commit SHA in `RELEASE.txt`, so tagging `rc-YYYY-MM-DD` before each deploy is advisable.
 8. **Mobile release** needs a keystore and a final application id (separate repository; no APK is published by any of this).
-9. **Cost / time (measured on the dev PC, not in Bitbucket):** a full SQLite run of the PHPUnit suite (~2,600 tests) took about 40 minutes with 8 parallel shards, because every test migrates a fresh in-memory database (~3 s per test).
-   One Bitbucket runner will take much longer than that, may meet the step time limit, and spends your monthly build minutes on every push. Before relying on the pipeline: run it once and read the real duration; if it is too long,
-   split the suite over parallel steps (the same `--filter` slicing as `scripts/run-test-shards.ps1`) or run the full suite only on `production-readiness` and pull requests into it, with a short gate (lint, `DeploymentArtifactsTest`, the security suites) on other branches.
+9. **Cost / time (measured on the dev PC, not in Bitbucket).** Every in-memory SQLite test re-runs all migrations (~3 s each), so a full SQLite run needed ~39 minutes even in 8 parallel shards. Against MariaDB the schema is migrated once per
+   process and each test rolls back in a transaction: the test step therefore uses a MariaDB 10.4.32 service container. Recorded runs: MariaDB, 8 shards, ~4 minutes; MariaDB, **one process (what the pipeline runs), 27.5 minutes for 2,635 tests**, all
+   passing. A Bitbucket runner will differ (fewer cores, a container start, `composer install`, extension builds), so expect roughly half an hour per push and every push spends build minutes (a free plan's monthly allowance is a few such runs).
+   Read the real duration after the first run. If it is too much: split the suite over parallel steps (the same `--filter` slicing as `scripts/run-test-shards.ps1`, which cut the MariaDB run from 27.5 to ~4 minutes locally), or run the full suite only on
+   `production-readiness` and pull requests into it, with a short gate (lint, `DeploymentArtifactsTest`, the security suites) on other branches.
 10. **A check can be blocked by Cloudflare or a firewall** (a bot challenge or a 403 for the requesting address). Two checks request the public URL: the server asks for its own `APP_URL` (a block there makes the unattended run
     roll the release back as "smoke check failed", every time - the `FAIL` lines show a 403/503/challenge page instead of the real pages), and the pipeline asks from outside (a block there fails the step but leaves the new release live; `deploy.sh` says so).
     In both cases look at the `FAIL` lines and open the site in a browser first; the fix is a Cloudflare / firewall rule for that address, not a rollback. Neither check has been tried against the real site.

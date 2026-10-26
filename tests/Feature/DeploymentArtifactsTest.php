@@ -84,6 +84,46 @@ class DeploymentArtifactsTest extends TestCase
         $this->assertLessThan(strpos($script, 'composer install'), strpos($script, 'mkdir -p bootstrap/cache'), 'the folders must exist before composer install runs package:discover');
     }
 
+    public function test_the_test_step_runs_against_a_pinned_throwaway_mariadb_and_waits_for_it(): void
+    {
+        // The recorded full runs: MariaDB 10.4.32 in 254 s, in-memory SQLite in 2,344 s (every SQLite test re-runs all migrations). A pipeline that
+        // tests on SQLite alone would also never meet the engine production uses.
+        $pipeline = $this->pipeline();
+        $service = $pipeline['definitions']['services']['mariadb'];
+        $this->assertMatchesRegularExpression('/^mariadb:\d+\.\d+\.\d+$/', $service['image'], 'pin an exact version, never latest');
+        $this->assertSame('mariadb:10.4.32', $service['image'], 'the version of the recorded test runs; change it only together with a recorded run on the new version');
+        $this->assertArrayNotHasKey('MYSQL_ROOT_PASSWORD', $service['variables'], 'no password belongs in this file: the container is throw-away and unreachable');
+        $this->assertSame('yes', $service['variables']['MYSQL_ALLOW_EMPTY_PASSWORD']);
+
+        foreach (['default'] as $name) {
+            $step = $pipeline['pipelines'][$name][0]['step'];
+            $this->assertContains('mariadb', $step['services'], "the $name pipeline's test step needs the database service");
+            $script = implode("\n", $step['script']);
+            $this->assertStringContainsString('DB_CONNECTION=mysql', $script);
+            $this->assertStringContainsString('DB_HOST=127.0.0.1', $script, 'services listen on 127.0.0.1 (Atlassian recommends it over "localhost")');
+            $this->assertLessThan(strpos($script, 'phpunit'), strpos($script, 'scripts/ci/wait-for-db.php'), 'services have no readiness check: wait before the first test');
+            $this->assertStringContainsString('set -e', $script, 'a failed wait must stop the block');
+        }
+        $this->assertFileExists($this->root('scripts/ci/wait-for-db.php'));
+        // pull requests and the deploying branch use the very same step
+        $this->assertSame($pipeline['pipelines']['default'][0], $pipeline['pipelines']['branches']['production-readiness'][0]);
+        $this->assertSame($pipeline['pipelines']['default'][0], $pipeline['pipelines']['pull-requests']['**'][0]);
+    }
+
+    public function test_the_database_wait_script_gives_up_cleanly_and_leaks_nothing(): void
+    {
+        $probe = stream_socket_server('tcp://127.0.0.1:0');
+        $port = (int) substr(strrchr((string) stream_socket_get_name($probe, false), ':'), 1);
+        fclose($probe);   // nothing listens on $port any more
+
+        $r = $this->execute([PHP_BINARY, $this->root('scripts/ci/wait-for-db.php')], array_merge(getenv(), ['DB_HOST' => '127.0.0.1', 'DB_PORT' => (string) $port, 'DB_USERNAME' => 'secret_user_name', 'DB_PASSWORD' => 'secret_password_value', 'DB_WAIT_SECONDS' => '1']));
+
+        $this->assertSame(1, $r['code'], 'no database: a non-zero exit stops the pipeline step');
+        $this->assertStringContainsString('did not accept a connection within 1 s', $r['err']);
+        $this->assertStringNotContainsString('secret_user_name', $r['out'] . $r['err'], 'an exception message can name the user and host; it must not be printed');
+        $this->assertStringNotContainsString('secret_password_value', $r['out'] . $r['err']);
+    }
+
     public function test_the_build_image_installs_only_extensions_it_does_not_already_have_and_checks_the_rest(): void
     {
         // The official php image compiles mbstring, pdo_sqlite, curl, dom, fileinfo ... in; installing them again loads them twice and PHP then
