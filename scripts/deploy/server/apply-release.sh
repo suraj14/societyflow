@@ -23,6 +23,9 @@
 #                                 (safe because no migration ran, so there is no database change to be incompatible with).
 #            --confirm-release ID the release id the pipeline expects to deploy (non-interactive only)
 #            --no-smoke           skip the post-deploy smoke check (not allowed with --non-interactive)
+#            --app-url URL        the public address the post-deploy checks request (https://societyflow.joboapps.com). Default: APP_URL from the
+#                                 site's .env - which on a server whose .env still names a development address would make every check fail.
+#                                 .env is never edited by this script.
 #   env      PHP_BIN (default php; use /usr/bin/php8.2 etc. to match the site's PHP), COMPOSER_BIN (default composer)
 #
 # Every deployment takes an exclusive lock (two cannot run at once), records before/after record counts of the business tables
@@ -46,6 +49,7 @@ BACKUP_DIR="/home/joboapps-societyflow/backups/societyflow"
 RELEASES_DIR="/home/joboapps-societyflow/releases"
 PHP_BIN="${PHP_BIN:-php}"
 COMPOSER_BIN="${COMPOSER_BIN:-composer}"
+PUBLIC_URL=""
 PACKAGE=""; APPLY=0; SKIP_DB=0; SKIP_COMPOSER=0; CLEAR_APP_CACHE=0; QUEUE_RESTART=1; NON_INTERACTIVE=0; CONFIRM_RELEASE=""; NO_SMOKE=0
 
 while [ $# -gt 0 ]; do
@@ -64,10 +68,13 @@ while [ $# -gt 0 ]; do
         --non-interactive)  NON_INTERACTIVE=1; shift;;
         --confirm-release)  CONFIRM_RELEASE="$2"; shift 2;;
         --no-smoke)         NO_SMOKE=1; shift;;
+        --app-url)          PUBLIC_URL="$2"; shift 2;;
         -h|--help)          sed -n '2,40p' "$0"; exit 0;;
         *) echo "unknown option: $1" >&2; exit 2;;
     esac
 done
+
+if [ -n "$PUBLIC_URL" ] && ! printf '%s' "$PUBLIC_URL" | grep -qE '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'; then echo "--app-url must be a plain http(s) address" >&2; exit 2; fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
@@ -84,6 +91,7 @@ down_hint() {
 }
 art()  { ( cd "$APP_DIR" && "$PHP_BIN" artisan "$@" ); }
 env_val() { local v; v="$(grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2-)"; v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"; printf '%s' "$v"; }
+site_url() { if [ -n "$PUBLIC_URL" ]; then printf '%s' "${PUBLIC_URL%/}"; else env_val APP_URL; fi; }
 # tag = the value the health endpoint shows in X-SocietyFlow-Release for this release, so a header seen on the live site can be matched to a line here
 record() { printf '%s release=%s commit=%s tag=%s status=%s previous=%s\n' "$STAMP" "$RELEASE_ID" "${SRC_HEAD:-?}" "$(printf '%s' "$RELEASE_ID" | sha256sum | cut -c1-16)" "$1" "${PREV_RELEASE_ID:-none}" >> "$BACKUP_DIR/deployments.log"; }
 # Unattended runs only (--non-interactive). Once the release has been copied, ANY failure - a failed composer install, an unwritable folder, a failed
@@ -99,8 +107,8 @@ auto_rollback() { # auto_rollback "<what failed>"
     : > "$mark"
     trap - ERR; set +e
     printf '\n%s: restoring the previous code automatically (code only; this deploy did not change the database).\n' "$1" >&2
-    printf 'ROLLBACK\n' | PHP_BIN="$PHP_BIN" bash "$HERE/rollback-code.sh" --backup "$BACKUP_CODE" --app-dir "$APP_DIR" --apply
-    local rc=$? url; url="$(env_val APP_URL)"
+    printf 'ROLLBACK\n' | PHP_BIN="$PHP_BIN" bash "$HERE/rollback-code.sh" --backup "$BACKUP_CODE" --app-dir "$APP_DIR" --apply ${PUBLIC_URL:+--app-url "$PUBLIC_URL"}
+    local rc=$? url; url="$(site_url)"
     if [ "$rc" = 0 ]; then
         echo restored > "$mark"; DOWN=0
         if command -v curl >/dev/null 2>&1 && [ -n "$url" ]; then bash "$HERE/smoke-check.sh" --url "$url" | sed 's/^/   (after rollback) /'; fi
@@ -419,7 +427,7 @@ if APP_DIR="$APP_DIR" PHP_BIN="$PHP_BIN" bash "$HERE/data-fingerprint.sh" > "$FP
     bash "$HERE/data-fingerprint.sh" --compare "$FP_BEFORE" "$FP_AFTER" | sed 's/^/   /' && ok "record counts: nothing lost" || { DATA_OK=0; warn "RECORDS WENT MISSING - see the LOST lines above; do not carry on, restore from $DB_BACKUP after a decision"; }
 else DATA_OK=0; warn "could not read the database after the deploy"; fi
 
-APP_URL="$(env_val APP_URL)"
+APP_URL="$(site_url)"
 SMOKE_OK=1
 if [ "$NO_SMOKE" = 1 ]; then warn "smoke check skipped (--no-smoke)"
 elif command -v curl >/dev/null 2>&1 && [ -n "$APP_URL" ]; then

@@ -72,7 +72,7 @@ PKG="incoming/$(basename "$ARCHIVE")"
 REMOTE_ENV="PHP_BIN='$PHP_BIN_R' COMPOSER_BIN='$COMPOSER_BIN_R'"
 # The working folders are the guide's layout under the site user's home (~ is expanded by the REMOTE shell), passed explicitly so the
 # server script never falls back to paths built into it.
-APPLY_ARGS="--package ~/'$PKG' --app-dir '$PROD_APP_DIR' --domain '${PROD_URL#https://}' --site-user '$PROD_SSH_USER' --backup-dir ~/backups/societyflow --releases-dir ~/releases"
+APPLY_ARGS="--package ~/'$PKG' --app-dir '$PROD_APP_DIR' --domain '${PROD_URL#https://}' --site-user '$PROD_SSH_USER' --backup-dir ~/backups/societyflow --releases-dir ~/releases --app-url '$PROD_URL'"
 echo "---- server-side dry run"
 rsh "cd ~ && $REMOTE_ENV bash ~/deploy-tools/apply-release.sh $APPLY_ARGS" || { echo "deploy: the server-side dry run failed" >&2; exit 1; }
 [ "$MODE" = apply ] || { echo "dry run finished: nothing on the live site was changed"; exit 0; }

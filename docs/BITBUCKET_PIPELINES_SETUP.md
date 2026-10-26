@@ -97,6 +97,15 @@ Production deployments therefore split naturally into two kinds: code-only relea
     keeps answering, the site's PHP-FPM needs a reload (CloudPanel -> Sites -> your site -> PHP settings; saving them is expected to reload it - UNVERIFIED on your version) or `opcache.validate_timestamps=1` for the site.
     Not inspected: I had no server access. `inspect-server.sh` now prints the OPcache settings that apply to the site's pool and marks `[!!]` when `validate_timestamps` is off or `revalidate_freq` is long.
 
+### 4a. What the first read-only inspection of the real server showed (2026-10-26, `inspect-server.sh` over SSH as `societyflow`)
+
+* SSH as **`societyflow`** works from the dev PC (host key already in `known_hosts`); the site's own user `joboapps-societyflow` refuses key login. `societyflow` is in the site's group, its home `/home/societyflow` has `htdocs` / `backups` links to the site's, the app folder is writable by it. The box also hosts other applications - nothing outside this site may be touched.
+* **Production uses SQLite** (`database/database.sqlite`, 77 tables, ~1.7 MB, 189 users / 167 owners / 253 flats, last written 24 Oct, integrity ok). `db-backup.sh` supports SQLite. A manual copy exists (`~/societyflow-backups/societyflow-20261026-083243.sqlite`): integrity ok, identical row counts in all 77 tables.
+* **PHP: the web runtime is 8.3 (FPM), the default command line is 8.4** - set `PROD_PHP_BIN=/usr/bin/php8.3` (and `--site-user societyflow` is passed automatically). OPcache re-checks files every 2 s, so a new release is served almost at once.
+* **No `RELEASE.txt`**: the live code (14 Oct, 110 migrations applied, none pending *for that code*) was copied by hand and even contains development files (docs, tests, `.env.mysql.template`); the first packaged deploy adds and overwrites only and leaves those where they are. Laravel 10.50, `APP_DEBUG=false`.
+* **`.env` still says `APP_URL=http://192.168.29.143:8000`** (a development address), `SESSION_SECURE_COOKIE=false`, no `TRUSTED_PROXIES` (Cloudflare). The deploy never edits `.env`, so the post-deploy checks are given the real address with `--app-url` (`deploy.sh` passes `PROD_URL`); otherwise every release would be judged "not serving" and rolled back. Fixing the `.env` values is a separate decision for you (password-reset links, secure cookies, client IPs).
+* `public/storage` is a real folder with files (left alone); 725 uploads in `storage/app/public`; folders are world-writable (777), `.env` is 770.
+
 ## 5. Bitbucket settings (names only - you set the values)
 
 **Repository settings -> Pipelines -> Settings:** enable Pipelines.

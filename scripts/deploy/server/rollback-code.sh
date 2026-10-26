@@ -17,12 +17,13 @@ umask 022
 
 APP_DIR="/home/joboapps-societyflow/htdocs/societyflow.joboapps.com"
 PHP_BIN="${PHP_BIN:-php}"
-BACKUP=""; APPLY=0
+BACKUP=""; APPLY=0; PUBLIC_URL=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --backup)  BACKUP="$2"; shift 2;;
         --app-dir) APP_DIR="$2"; shift 2;;
         --apply)   APPLY=1; shift;;
+        --app-url) PUBLIC_URL="$2"; shift 2;;
         -h|--help) sed -n '2,16p' "$0"; exit 0;;
         *) echo "unknown option: $1" >&2; exit 2;;
     esac
@@ -84,7 +85,8 @@ art up
 ok "site is live again on the restored code"
 
 say; say "== Verification"
-APP_URL="$(env_val APP_URL)"
+if [ -n "$PUBLIC_URL" ] && ! printf '%s' "$PUBLIC_URL" | grep -qE '^https?://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?$'; then APP_URL=""; else APP_URL="${PUBLIC_URL%/}"; fi
+[ -n "$APP_URL" ] || APP_URL="$(env_val APP_URL)"   # --app-url wins: a server whose .env names a development address would fail this check
 if command -v curl >/dev/null 2>&1 && [ -n "$APP_URL" ]; then
     CODE="$(curl -sS -m 30 -o /dev/null -w '%{http_code}' "$APP_URL/login" 2>/dev/null || echo 000)"
     [ "$CODE" = 200 ] && ok "GET $APP_URL/login -> 200" || say "   WARN  GET $APP_URL/login -> $CODE"

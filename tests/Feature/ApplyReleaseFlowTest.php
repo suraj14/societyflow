@@ -67,10 +67,10 @@ SH));
     }
 
     /** @param array<string,string> $env @return array{code:int,out:string,err:string,deployments:string,artisan:string,smoke:string,all:string} */
-    private function apply(array $ws, string $tools, array $env = [], bool $interactive = false): array
+    private function apply(array $ws, string $tools, array $env = [], bool $interactive = false, array $extraArgs = []): array
     {
-        $args = ['--package', $this->posix($ws['package']), '--app-dir', $this->posix($ws['app']), '--releases-dir', $this->posix($ws['releases']),
-            '--backup-dir', $this->posix($ws['backups']), '--site-user', 'siteuser', '--apply'];
+        $args = array_merge(['--package', $this->posix($ws['package']), '--app-dir', $this->posix($ws['app']), '--releases-dir', $this->posix($ws['releases']),
+            '--backup-dir', $this->posix($ws['backups']), '--site-user', 'siteuser', '--apply'], $extraArgs);
         if (!$interactive) {
             array_push($args, '--non-interactive', '--confirm-release', $ws['id']);
         }
@@ -111,6 +111,39 @@ SH));
         $this->assertStringContainsString('--expect-release ' . $ws['id'], $r['smoke'], 'the smoke check must be asked to verify THIS release');
         $this->assertMatchesRegularExpression('/artisan down.*artisan up/s', $r['artisan']);
         $this->assertDirectoryDoesNotExist($ws['backups'] . '/.deploy.lock.d', 'the deployment lock must not outlive the run');
+    }
+
+    public function test_the_checks_use_the_given_public_address_not_the_one_in_env(): void
+    {
+        // the real server's .env still names a development address (http://192.168.29.143:8000); .env is never edited, so --app-url carries the truth
+        $ws = $this->stagingWorkspace();
+        $r = $this->apply($ws, $this->stubbedTools($ws), extraArgs: ['--app-url', 'https://societyflow.example.test/']);
+
+        $this->assertSame(0, $r['code'], $r['all']);
+        $this->assertStringContainsString('--url https://societyflow.example.test --expect-release', $r['smoke'], 'trailing slash removed, address from the option');
+        $this->assertStringNotContainsString('127.0.0.1:9', $r['smoke'], 'the .env address must not be used');
+        $this->assertStringContainsString('APP_URL=http://127.0.0.1:9', (string) file_get_contents($ws['app'] . '/.env'), '.env itself is untouched');
+    }
+
+    public function test_after_a_rollback_the_restored_site_is_also_checked_at_the_given_address(): void
+    {
+        $ws = $this->stagingWorkspace();
+        $r = $this->apply($ws, $this->stubbedTools($ws), ['STUB_COMPOSER' => 'fail'], extraArgs: ['--app-url', 'https://societyflow.example.test']);
+
+        $this->assertStringContainsString('status=ROLLED_BACK', $r['deployments']);
+        $this->assertStringContainsString('--url https://societyflow.example.test', $r['smoke']);
+        $this->assertStringNotContainsString('127.0.0.1:9', $r['smoke']);
+    }
+
+    public function test_a_malformed_public_address_is_refused_before_anything_happens(): void
+    {
+        $ws = $this->stagingWorkspace();
+        $before = $this->treeOf($ws['app']);
+        $r = $this->apply($ws, $this->stubbedTools($ws), extraArgs: ['--app-url', 'https://x.test/;rm -rf /']);
+
+        $this->assertSame(2, $r['code']);
+        $this->assertStringContainsString('--app-url must be a plain http(s) address', $r['all']);
+        $this->assertSame($before, $this->treeOf($ws['app']));
     }
 
     public function test_unattended_a_pending_migration_stops_the_run_with_exit_3_before_anything_changes(): void
