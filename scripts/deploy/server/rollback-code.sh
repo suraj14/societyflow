@@ -66,7 +66,7 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 say; say "== Maintenance mode"
 art down --retry=60 || say "   (artisan down failed - continuing; the site may be partly unavailable)"
 say "== Restoring the files"
-tar -xzf "$BACKUP" -C "$APP_DIR" --no-same-owner
+tar -xzf "$BACKUP" -C "$APP_DIR" --no-same-owner --no-same-permissions --no-overwrite-dir   # never chmod directories that already exist ("Cannot change mode")
 ok "files restored from $BACKUP"
 # RELEASE.txt / RELEASE.sha256 describe the release that was just rolled back. If the backup held them (the previous release was a packaged one) tar
 # has put them back; if the previous state had none, the stale ones must go, because things DO read them: the health endpoint's release tag,

@@ -4,6 +4,14 @@ Update this after every major task. Keep it short; link, don't paste.
 
 **Last updated:** 2026-10-24 (the whole deployment chain rehearsed locally; six defects found and fixed; nothing deployed)
 
+## 2026-10-26 (later) - cache / file-mode deploy errors fixed in code (UNCOMMITTED; production NOT touched, NOT deployed)
+
+Working tree on `production-readiness`, nothing committed or pushed. Details: [DEPLOYMENT_CLOUDPANEL.md](DEPLOYMENT_CLOUDPANEL.md) section 12, [MESSAGING_STAGING_AND_DEPLOYMENT.md](MESSAGING_STAGING_AND_DEPLOYMENT.md) section E; items TODO P0-23, P1-151, P2-79.
+- **Cause (inferred from the error text and Laravel's file-cache source; the live server was not inspected for it):** the hashed cache folder is created with a silent `mkdir`; folders owned by another account (deploy/SSH user vs the site user) make the write fail as "No such file or directory". `tar -p` chmods existing folders, which a non-owner cannot do.
+- **Changed:** `apply-release.sh` / `rollback-code.sh` extract with `--no-same-permissions --no-overwrite-dir`; pre-flight refuses a runtime folder this account cannot write and prints the repair; missing runtime folders are created; `messaging:status` probes the cache first and prints the real error (exit 1); `.env.example` uses `CACHE_DRIVER` (Laravel 10 ignores `CACHE_STORE`).
+- **Tests:** targeted run 198 tests / 1637 assertions / 0 failures; `ApplyReleaseFlowTest` + `MessagingStatusCacheHealthTest` 23 tests / 0 failures / 2 skipped (the two Unix-permission tests skip on Windows). Mutation check: the old `tar -xpf` makes the new static test fail. Full suite NOT re-run.
+- **Operator:** one-time `chown`/`chmod 775` on the live `storage` + `bootstrap/cache` as the site owner/root; run artisan as the site user; messaging stays OFF until section E is followed with an approved test recipient.
+
 ## 2026-10-24 - Bitbucket + automatic deployment (built, REHEARSED locally, NOT enabled, NOT run against Bitbucket or the server)
 
 Web `production-readiness` + `integration/main-merge` and mobile `main` are on Bitbucket. Full guide: [BITBUCKET_PIPELINES_SETUP.md](BITBUCKET_PIPELINES_SETUP.md); branches and protection: [BITBUCKET_WORKFLOW.md](BITBUCKET_WORKFLOW.md); endpoint match: [API_COMPATIBILITY.md](API_COMPATIBILITY.md).

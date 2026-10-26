@@ -111,3 +111,17 @@ Date, build/commit, server, recipient (approved), channel, action, provider requ
 3. Synced templates send from the number they belong to; check the card's "Sends from" line matches the number you intend.
 4. No migration, queue or config-cache change is needed for this round (code only). After deploying run `php artisan route:clear && php artisan view:clear` (and `config:cache` / `route:cache` again if used).
 5. A real test send (approved tester only) is still required before calling WhatsApp working.
+## E. Turning real delivery ON in production (explicit, reviewed, reversible) - added 2026-10-26
+
+Nothing in a deploy turns messaging on: `apply-release.sh` never edits `.env`, never seeds, never runs the scheduler or a notification command, and `EXTERNAL_MESSAGING_ENABLED` defaults to `false` in `config/messaging.php` and `.env.example`. While it is false, mail is forced to the `log` transport, SMS / Fast2SMS / WhatsApp calls are not made, and the delivery log shows `blocked` / `simulated`, never `sent`. (`php artisan messaging:status` showing "OFF - nothing leaves this server", the SMS "disabled" and e-mail "blocked by the safety switch" results are therefore the **correct** behaviour today, not a fault.)
+
+Safety layers already in code (do not bypass): the kill switch (`EXTERNAL_MESSAGING_ENABLED`); the allow-list (`EXTERNAL_MESSAGING_ALLOWLIST`, fails closed, exact match); one send per same message/recipient inside `MESSAGING_DUPLICATE_WINDOW` seconds (`SendOnce`, SMS and WhatsApp); provider keys are stored per society in Settings (not in code), shown only as "set"; the e-mail log never stores passwords, reset links or codes.
+
+Procedure (a human does this, once the provider settings and templates in Settings -> Email / SMS / WhatsApp are verified):
+1. Fix the cache first (docs/DEPLOYMENT_CLOUDPANEL.md section 12); `php artisan messaging:status` must print `Write/read test: ok`.
+2. **Pilot window:** in the production `.env` set `EXTERNAL_MESSAGING_ENABLED=true` **and** `EXTERNAL_MESSAGING_ALLOWLIST="<your e-mail>,<your 10-digit mobile>"` (only those recipients receive anything; everyone else is `simulated`).
+3. As the site user: `php artisan config:clear && php artisan config:cache`, then `php artisan queue:restart` (if a worker runs). Check `php artisan messaging:status`: "ON", "Test allow-list: valid, N recipient(s)".
+4. Send ONE test per channel from Settings (Test e-mail / Test SMS / Test WhatsApp) to an allow-listed recipient. Confirm receipt on the phone / in the mailbox. Only then is a channel "working"; "accepted by the provider" is not delivery.
+5. **Go live:** remove the `EXTERNAL_MESSAGING_ALLOWLIST` line (absent = unrestricted; present-but-empty = nobody), `config:cache`, `queue:restart`. Watch Delivery Logs for the first real events.
+6. **Back off at any time:** set `EXTERNAL_MESSAGING_ENABLED=false`, `config:cache`, `queue:restart` - effective immediately for new sends.
+Secrets stay in the database/`.env`; never paste a key, SMTP password or phone list into a ticket, chat or commit.

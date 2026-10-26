@@ -146,6 +146,80 @@ SH));
         $this->assertSame($before, $this->treeOf($ws['app']));
     }
 
+    /**
+     * The failed production deploy: `tar: Cannot change mode to rwxr-xr-x: Operation not permitted`. tar -p chmods every EXISTING directory to the
+     * archive's mode, which an account that does not own them cannot do. Here the live folder has a deliberately different mode (750); a copy that
+     * leaves it at 750 never tried to chmod it (and so cannot fail on a folder it does not own).
+     */
+    public function test_copying_the_release_leaves_the_modes_of_existing_folders_alone(): void
+    {
+        $ws = $this->stagingWorkspace();
+        $dir = $this->posix($ws['app'] . '/app');
+        $this->assertSame(0, $this->bashSnippet("mkdir -p '$dir' && chmod 750 '$dir'")['code']);
+        if (trim($this->bashSnippet("stat -c %a '$dir'")['out']) !== '750') {
+            $this->markTestSkipped('this file system does not keep Unix modes (Windows); the pipeline runs this on Linux');
+        }
+
+        $r = $this->apply($ws, $this->stubbedTools($ws));
+
+        $this->assertSame(0, $r['code'], $r['all']);
+        $this->assertSame('new version', $this->appFile($ws), 'the files were still copied');
+        $this->assertSame('750', trim($this->bashSnippet("stat -c %a '$dir'")['out']), 'an existing folder must not be chmod-ed by the copy');
+        $this->assertStringNotContainsString('Cannot change mode', $r['all']);
+    }
+
+    /** The mode test above needs Unix permissions and is skipped on Windows, so the cause itself is also pinned textually. */
+    public function test_no_script_extracts_with_permission_preserving_flags_over_existing_folders(): void
+    {
+        foreach (['apply-release.sh', 'rollback-code.sh'] as $name) {
+            $script = (string) file_get_contents(base_path('scripts/deploy/server/' . $name));
+            $extractions = array_filter(explode("\n", $script), fn ($l) => preg_match('/\btar\b[^|#]*\s-(?:[a-z]*x[a-z]*)\b/', $l) && !str_starts_with(ltrim($l), '#') && !str_contains($l, 'tar -xzOf') && !str_contains($l, 'verify'));
+            $this->assertNotEmpty($extractions, $name . ' extracts something');
+            foreach ($extractions as $line) {
+                if (str_contains($line, '-C "$STAGE"')) {
+                    continue;   // unpacking into the private staging folder (created by this script) is not the live application
+                }
+                $this->assertStringContainsString('--no-overwrite-dir', $line, $name . ': ' . trim($line));
+                $this->assertStringContainsString('--no-same-permissions', $line, $name . ': ' . trim($line));
+                $this->assertDoesNotMatchRegularExpression('/\s-[a-z]*p[a-z]*\s|--same-permissions|--preserve-permissions/', $line, $name . ': ' . trim($line));
+            }
+        }
+    }
+
+    public function test_the_laravel_runtime_folders_are_created_when_the_server_lacks_them(): void
+    {
+        $ws = $this->stagingWorkspace();   // has storage/framework but none of cache/data, sessions, views
+        $this->assertDirectoryDoesNotExist($ws['app'] . '/storage/framework/cache/data');
+
+        $r = $this->apply($ws, $this->stubbedTools($ws));
+
+        $this->assertSame(0, $r['code'], $r['all']);
+        foreach (['storage/framework/cache/data', 'storage/framework/sessions', 'storage/framework/views', 'storage/logs', 'bootstrap/cache'] as $d) {
+            $this->assertDirectoryExists($ws['app'] . '/' . $d, $d);
+        }
+    }
+
+    public function test_a_cache_folder_this_account_cannot_write_stops_the_deploy_before_anything_changes(): void
+    {
+        $ws = $this->stagingWorkspace();
+        $bad = $this->posix($ws['app'] . '/storage/framework/cache/data/1b/f0');
+        $this->assertSame(0, $this->bashSnippet("mkdir -p '$bad' && chmod 555 '$bad'")['code']);
+        if ($this->bashSnippet("[ -w '$bad' ]")['code'] === 0) {
+            $this->bashSnippet("chmod 755 '$bad'");
+            $this->markTestSkipped('this file system cannot make a folder read-only for its owner here; the pipeline runs this on Linux');
+        }
+        $before = $this->treeOf($ws['app']);
+
+        $r = $this->apply($ws, $this->stubbedTools($ws));
+        $this->bashSnippet("chmod 755 '$bad'");   // so the scratch folder can be removed
+
+        $this->assertNotSame(0, $r['code'], $r['all']);
+        $this->assertStringContainsString('not writable by', $r['all']);
+        $this->assertStringContainsString('chown -R', $r['all'], 'it must say how to repair it');
+        $this->assertSame($before, $this->treeOf($ws['app']), 'nothing may have changed');
+        $this->assertFalse($this->siteIsInMaintenance($ws));
+    }
+
     public function test_unattended_a_pending_migration_stops_the_run_with_exit_3_before_anything_changes(): void
     {
         $ws = $this->stagingWorkspace();

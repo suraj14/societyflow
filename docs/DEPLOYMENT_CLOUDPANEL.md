@@ -199,3 +199,16 @@ the **rollback** from that state (0 files differing from the backup afterwards);
 6. Queue driver on production and whether you want a worker.
 7. Whether to create a release commit / tag first (needs your approval; the package is currently `-dirty`).
 8. When a maintenance window is acceptable (the site is in maintenance mode for a few minutes; longer if composer must download packages or a migration is slow).
+
+## 12. File ownership: the `tar: Cannot change mode` and `cache/data/1b/f0` errors (added 2026-10-26)
+
+Both production errors have the same root: **more than one account touches the application folder** (the SSH/deploy user, the site user PHP-FPM runs as, possibly root) and the folders end up owned by different people.
+
+| Symptom | Cause | Fixed in the code by | Still needs on the server |
+|---|---|---|---|
+| `tar: Cannot change mode to rwxr-xr-x: Operation not permitted` while copying a release over the live folder | `tar -p` tries to chmod every EXISTING directory (and `.`) to the archive's mode; only the owner may | `apply-release.sh` and `rollback-code.sh` now extract with `--no-same-permissions --no-overwrite-dir`: existing folders are never chmod-ed, new ones get the umask | nothing, but the deploy account must still be able to WRITE the folders (see below) |
+| `file_put_contents(.../storage/framework/cache/data/1b/f0/...): Failed to open stream: No such file or directory` (e.g. from `php artisan messaging:status`) | Laravel's file cache creates the hashed sub-folder (`1b/f0`) with a **silent** `mkdir`. If `cache/data` (or `1b`) is owned by another account, or is missing under a folder this account cannot write, the mkdir fails and only the write error shows. A web request (PHP-FPM, site user) and an SSH command (another user) create folders with mode 755 owned by whoever came first, and block the other. | The deploy pre-flight now refuses to start when anything under `storage/framework`, `storage/logs`, `bootstrap/cache` is not writable by the deploy account, and prints the repair; the copy step creates the missing runtime folders; `messaging:status` probes the cache first and prints the real error; `.env.example` now uses `CACHE_DRIVER` (Laravel 10 ignores `CACHE_STORE`) | **Run once, as root or the site owner** (this server was never inspected by the assistant; the cause is inferred from the error text and the file-cache source): `cd <app dir> && chown -R <site-user>:<site-user> storage bootstrap/cache && find storage bootstrap/cache -type d -exec chmod 775 {} +` |
+
+Rules that keep it from coming back: run `artisan`, `apply-release.sh` and `rollback-code.sh` **as the site user only** (`sudo -u <site-user> -H bash`, or CloudPanel's SSH user for that site) - never as root; if a second account must exist, give both one shared group and `chmod g+s` on `storage` and `bootstrap/cache`; never delete `storage/framework/cache/data` while PHP is serving (use `php artisan cache:clear` as the site user - and note `--clear-app-cache` also resets login-throttle counters and the settings cache).
+
+`php artisan messaging:status` now starts with an **Application cache** block (driver, folder, a write/read test). A failing cache stops the report with exit code 1 and the exact error; a passing one prints `Write/read test: ok`.

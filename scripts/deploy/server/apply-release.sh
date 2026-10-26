@@ -192,6 +192,16 @@ if [ -n "$VHOST" ]; then
 else
     warn "cannot read the Nginx vhost; confirm in CloudPanel that the root directory is $APP_DIR/public"
 fi
+# Runtime directories PHP writes to. A file-cache write needs storage/framework/cache/data/<xx>/<yy>/ to exist or be creatable by THIS user; Laravel's mkdir is
+# silent, so a hashed folder created earlier by another account (PHP-FPM's, or a previous run under a different user) shows up later only as
+# "file_put_contents(...cache/data/1b/f0/...): Failed to open stream: No such file or directory". Find that BEFORE anything is changed.
+for p in storage storage/framework storage/logs bootstrap/cache; do [ -w "$APP_DIR/$p" ] || die "$p is not writable by $(id -un): fix the owner/group (the site user must own it) before deploying"; done
+NOT_MINE="$(find "$APP_DIR/storage/framework" "$APP_DIR/storage/logs" "$APP_DIR/bootstrap/cache" ! -writable 2>/dev/null | head -n 5 || true)"
+if [ -n "$NOT_MINE" ]; then
+    printf '%s\n' "$NOT_MINE" | sed 's/^/           /'
+    die "the entries above are not writable by $(id -un) (created by another account?), so the cache, sessions or views cannot be written there. As the site owner or root run:  chown -R $SITE_USER:$SITE_USER storage bootstrap/cache && find storage bootstrap/cache -type d -exec chmod 775 {} +   then deploy again. Always run artisan and this script as $SITE_USER."
+fi
+ok "storage/framework, storage/logs and bootstrap/cache are writable by $(id -un) and nothing inside them is owned by someone else"
 if [ -L "$APP_DIR/public/storage" ]; then ok "public/storage is a symlink -> $(readlink "$APP_DIR/public/storage")"
 elif [ -d "$APP_DIR/public/storage" ]; then warn "public/storage is a REAL directory with files in it: it will be left exactly as it is"
 else warn "public/storage does not exist; it will be created with storage:link at the end"; fi
@@ -355,7 +365,11 @@ art down --retry=60
 DOWN=1
 RELEASE_APPLIED=1   # from here on a failure leaves the live code changed or at risk: unattended runs restore the previous code (auto_rollback)
 ok "site is in maintenance mode"
-( cd "$STAGE" && tar --exclude='./.preview' -cf - . ) | ( cd "$APP_DIR" && tar -xpf - --no-same-owner )
+# --no-overwrite-dir: leave the metadata of directories that already exist alone. With -p, tar tries to chmod every existing directory (and ".") to the
+# archive's mode, and a deploy account that does not OWN them fails with "tar: Cannot change mode to rwxr-xr-x: Operation not permitted".
+( cd "$STAGE" && tar --exclude='./.preview' -cf - . ) | ( cd "$APP_DIR" && tar -xf - --no-same-owner --no-same-permissions --no-overwrite-dir )
+# the runtime folders a fresh checkout or a cleaned server may lack (git ignores everything under storage/framework)
+mkdir -p "$APP_DIR/storage/framework/cache/data" "$APP_DIR/storage/framework/sessions" "$APP_DIR/storage/framework/views" "$APP_DIR/storage/logs" "$APP_DIR/storage/app/public" "$APP_DIR/bootstrap/cache"
 ( cd "$APP_DIR" && sha256sum -c --quiet RELEASE.sha256 ) || die "after copying, files on the server do not match RELEASE.sha256"
 ok "the live files now match RELEASE.sha256 exactly"
 

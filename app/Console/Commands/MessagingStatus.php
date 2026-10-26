@@ -26,6 +26,12 @@ class MessagingStatus extends Command
 
     public function handle(): int
     {
+        // The settings below are read through the application cache, so a cache that cannot be written would crash this command half way
+        // (and the site with it). Say so first, with the real error, and stop - nothing is hidden or retried.
+        if (!$this->cacheHealth()) {
+            return self::FAILURE;
+        }
+
         $this->global();
 
         $societies = Society::query()->when($this->option('society'), fn ($q, $id) => $q->whereKey($id))->orderBy('id')->get(['id', 'name']);
@@ -43,6 +49,70 @@ class MessagingStatus extends Command
     }
 
     // ── this installation ───────────────────────────────────────────────────
+
+    /** Writes, reads and removes one probe entry through the real default cache store. A failure is reported verbatim, never swallowed. */
+    private function cacheHealth(): bool
+    {
+        $driver = (string) config('cache.default');
+        $this->info('== Application cache');
+        $this->line('  Driver: ' . $driver);
+
+        if ($driver === 'file') {
+            $path = (string) config('cache.stores.file.path');
+            $this->line('  Folder: ' . $path);
+            $blocked = $this->unwritableEntries($path);
+            if ($blocked) {
+                $this->warn('  Not writable by this user (' . (function_exists('posix_geteuid') ? (posix_getpwuid(posix_geteuid())['name'] ?? 'unknown') : get_current_user()) . '), e.g.: ' . implode(', ', array_slice($blocked, 0, 3)));
+            }
+        }
+
+        $key = 'messaging-status-probe:' . bin2hex(random_bytes(8));
+        try {
+            \Illuminate\Support\Facades\Cache::put($key, 'ok', 60);
+            $read = \Illuminate\Support\Facades\Cache::get($key);
+            \Illuminate\Support\Facades\Cache::forget($key);
+            if ($read !== 'ok') {
+                throw new \RuntimeException('the cache accepted a value but returned something else when it was read back');
+            }
+        } catch (\Throwable $e) {
+            $this->error('  Cache write FAILED: ' . $e->getMessage());
+            $this->line('  Cause (file cache): a folder under storage/framework/cache/data is missing or was created by another account (the web server user vs the user running this command), so it cannot be written.');
+            $this->line('  Fix as the site owner/root: chown -R <site-user>:<site-user> storage bootstrap/cache && find storage bootstrap/cache -type d -exec chmod 775 {} + ; run artisan as the site user. See docs/DEPLOYMENT_CLOUDPANEL.md.');
+
+            return false;
+        }
+        $this->line('  Write/read test: ok');
+        $this->newLine();
+
+        return true;
+    }
+
+    /** @return list<string> directories or files below a file-cache folder that this process cannot write to (capped; empty when it is fine or missing) */
+    private function unwritableEntries(string $path): array
+    {
+        if (!is_dir($path)) {
+            return [$path . ' (missing)'];
+        }
+        $found = [];
+        try {
+            $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
+            foreach ($it as $entry) {
+                if (!$entry->isWritable()) {
+                    $found[] = substr($entry->getPathname(), strlen(dirname($path, 3)) + 1);
+                    if (count($found) >= 5) {
+                        break;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            $found[] = $path . ' (' . $e->getMessage() . ')';
+        }
+        if (!is_writable($path)) {
+            array_unshift($found, $path);
+        }
+
+        return $found;
+    }
 
     private function global(): void
     {
